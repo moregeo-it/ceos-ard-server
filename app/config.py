@@ -11,6 +11,7 @@ class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY")
     DATABASE_URL: str = os.getenv("DATABASE_URL")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
     LOGOUT_REDIRECT: str = os.getenv("LOGOUT_REDIRECT")
     AUTH_SUCCESS_REDIRECT: str = os.getenv("AUTH_SUCCESS_REDIRECT")

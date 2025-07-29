@@ -6,7 +6,7 @@ from app.models import user
 from app.config import settings
 from app.db.database import Base, engine
 
-app = FastAPI()
+app = FastAPI(title="CEOS ARD Server", version="0.1.0")
 
 Base.metadata.create_all(bind=engine)
 
