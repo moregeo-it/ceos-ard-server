@@ -19,8 +19,8 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 LOGOUT_REDIRECT = settings.LOGOUT_REDIRECT
 AUTH_SUCCESS_REDIRECT = settings.AUTH_SUCCESS_REDIRECT
 
-@router.get("/github/login")
-async def github_login(request: Request):
+@router.get("/login")
+async def login(request: Request):
     try:
         redirect_uri = settings.GITHUB_CALLBACK_URI
         return await oauth.github.authorize_redirect(request, redirect_uri)
@@ -31,8 +31,8 @@ async def github_login(request: Request):
             detail="Failed to initiate GitHub login",   
         )
 
-@router.get("/github/callback")
-async def github_callback(request: Request, db: Session = Depends(get_db)):
+@router.get("/callback")
+async def login_callback(request: Request, db: Session = Depends(get_db)):
     try:
         access_token = await oauth.github.authorize_access_token(request)
         if not access_token or "access_token" not in access_token:
@@ -126,7 +126,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
         )
     
 
-@router.get("/github/logout")
+@router.get("/logout")
 async def github_logout(request: Request):
     response = RedirectResponse(url=LOGOUT_REDIRECT, status_code=status.HTTP_302_FOUND)
 
@@ -141,7 +141,7 @@ async def github_logout(request: Request):
 
     return response
 
-@router.get("/github/profile")
+@router.get("/profile")
 async def github_profile(current_user = Depends(get_current_user_from_cookies)):
     user = current_user["user"]
 
@@ -155,7 +155,7 @@ async def github_profile(current_user = Depends(get_current_user_from_cookies)):
         "updated_at": user.updated_at,
     }
 
-@router.get("/github/validate")
+@router.get("/validate")
 async def validate_auth(current_user = Depends(get_current_user_from_cookies)):
     return {
         "authenticated": True,
