@@ -95,16 +95,25 @@ async def login_callback(request: Request, db: Session = Depends(get_db)):
                 db.refresh(new_user)
                 user_to_use = new_user
                 logger.info(f"User {user_to_use.username} created")
+
         except SQLAlchemyError as e:
             logger.error(f"Databse error during user creation/update: {e}")
+            db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create or update user",
             )
+        
+        access_token = access_token['access_token']
+        redirect_url = (
+            f"{AUTH_SUCCESS_REDIRECT}"
+            f"?access_token={access_token}"
+            f"&user_id={user_to_use.id}"
+        )
 
         response = RedirectResponse(
-            status_code=status.HTTP_302_FOUND,
-            url=f"{AUTH_SUCCESS_REDIRECT}?access_token={access_token['access_token']}&user_id={user_to_use.id}"
+            url=redirect_url,
+            status_code=status.HTTP_302_FOUND
         )
 
         logger.info(f"User {user_to_use.username} logged in successfully")
@@ -121,19 +130,25 @@ async def login_callback(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/logout")
 async def github_logout(request: Request):
-    response = RedirectResponse(url=LOGOUT_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    response = RedirectResponse(
+        url=LOGOUT_REDIRECT,
+        status_code=status.HTTP_302_FOUND
+    )
 
     return response
 
 @router.get("/profile")
 async def github_profile(current_user = Depends(get_current_user)):
     user = current_user["user"]
+    access_token = current_user["access_token"]
 
     return {
         "id": user.id,
         "email": user.email,
         "username": user.username,
         "full_name": user.full_name,
+        "access_token": access_token,
         "created_at": user.created_at,
         "updated_at": user.updated_at,
         "external_id": user.external_id,
