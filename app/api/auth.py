@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi.responses import RedirectResponse
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Request, Depends, HTTPException, status, Query
 
 import logging
 
@@ -10,7 +10,7 @@ from app.config import settings
 from app.models.user import User
 from app.db.dependency import get_db
 from app.oauth.github_oauth import oauth
-from app.services.auth import get_current_user_from_cookies
+from app.services.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,16 @@ LOGOUT_REDIRECT = settings.LOGOUT_REDIRECT
 AUTH_SUCCESS_REDIRECT = settings.AUTH_SUCCESS_REDIRECT
 
 @router.get("/login")
-async def login(request: Request):
+async def login(request: Request, identity_provider: str = Query("github", enum=["github", "google"])):
     try:
-        redirect_uri = settings.GITHUB_CALLBACK_URI
-        return await oauth.github.authorize_redirect(request, redirect_uri)
+        if identity_provider == "github":
+            redirect_uri = settings.CALLBACK_URI
+            return await oauth.github.authorize_redirect(request, redirect_uri)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid identity provider",
+            )
     except Exception as e:
         logger.error(f"Failed to initiate GitHub login: {e}")
         raise HTTPException(
@@ -52,17 +58,17 @@ async def login_callback(request: Request, db: Session = Depends(get_db)):
         
         email = profile.get('email')
         username = profile.get('login')
-        github_id = str(profile.get('id'))
+        external_id = str(profile.get('id'))
         full_name = profile.get('name') or username
 
-        if not email or not username or not github_id:
+        if not email or not username or not external_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to retrieve user information",
             )
 
         try: 
-            existing_user = db.query(User).filter_by(github_id=github_id).first()
+            existing_user = db.query(User).filter_by(external_id=external_id).first()
 
             if existing_user:
                 existing_user.email = email
@@ -78,7 +84,8 @@ async def login_callback(request: Request, db: Session = Depends(get_db)):
                     email=email,
                     username=username,
                     full_name=full_name,
-                    github_id=github_id,
+                    external_id=external_id,
+                    identity_provider="github",
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
                 )
@@ -95,27 +102,13 @@ async def login_callback(request: Request, db: Session = Depends(get_db)):
                 detail="Failed to create or update user",
             )
 
-        response = RedirectResponse(url=AUTH_SUCCESS_REDIRECT, status_code=status.HTTP_302_FOUND)
-
-        cookie_settings = {
-            "httponly": True,
-            "samesite": "lax",
-            "max_age": 24 * 60 * 60,
-            "secure": settings.ENVIRONMENT == "production"
-        }
-
-        response.set_cookie(
-            key="user_id", 
-            **cookie_settings,
-            value=str(user_to_use.id),
-        )
-        response.set_cookie(
-            **cookie_settings,
-            key="access_token",
-            value=access_token['access_token'],
+        response = RedirectResponse(
+            status_code=status.HTTP_302_FOUND,
+            url=f"{AUTH_SUCCESS_REDIRECT}?access_token={access_token['access_token']}&user_id={user_to_use.id}"
         )
 
         logger.info(f"User {user_to_use.username} logged in successfully")
+
         return response
 
     except Exception as e:
@@ -130,19 +123,10 @@ async def login_callback(request: Request, db: Session = Depends(get_db)):
 async def github_logout(request: Request):
     response = RedirectResponse(url=LOGOUT_REDIRECT, status_code=status.HTTP_302_FOUND)
 
-    cookie_clear_settings = {
-        "httponly": True,
-        "samesite": "lax",
-        "secure": settings.ENVIRONMENT == "production"
-    }
-
-    response.delete_cookie(key="user_id", **cookie_clear_settings)
-    response.delete_cookie(key="access_token", **cookie_clear_settings)
-
     return response
 
 @router.get("/profile")
-async def github_profile(current_user = Depends(get_current_user_from_cookies)):
+async def github_profile(current_user = Depends(get_current_user)):
     user = current_user["user"]
 
     return {
@@ -150,13 +134,14 @@ async def github_profile(current_user = Depends(get_current_user_from_cookies)):
         "email": user.email,
         "username": user.username,
         "full_name": user.full_name,
-        "github_id": user.github_id,
         "created_at": user.created_at,
         "updated_at": user.updated_at,
+        "external_id": user.external_id,
+        "identity_provider": user.identity_provider,
     }
 
 @router.get("/validate")
-async def validate_auth(current_user = Depends(get_current_user_from_cookies)):
+async def validate_auth(current_user = Depends(get_current_user)):
     return {
         "authenticated": True,
         "user_id": current_user["user"].id,
