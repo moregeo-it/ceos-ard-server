@@ -63,7 +63,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
 
         try: 
             existing_user = db.query(User).filter_by(github_id=githhub_id).first()
-            print(existing_user)
+
             if existing_user:
                 existing_user.email = email
                 existing_user.username = username
@@ -96,8 +96,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
             )
 
         response = RedirectResponse(url=AUTH_SUCCESS_REDIRECT, status_code=status.HTTP_302_FOUND)
-        print(user_to_use.id)
-        print(access_token['access_token'])
+
         cookie_settings = {
             "httponly": True,
             "samesite": "lax",
