@@ -30,6 +30,12 @@ async def get_current_user(authorization: str = Depends(HTTPBearer()), db: Sessi
         res = response.json()
         external_id = str(res.get("id"))
 
+        if not external_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated - invalid access token",
+            )
+
         user = db.query(User).filter(User.external_id == external_id).first()
         if not user:
             raise HTTPException(
