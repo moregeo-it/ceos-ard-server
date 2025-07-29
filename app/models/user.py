@@ -1,5 +1,7 @@
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, Enum
+
 from app.db.database import Base
+
 import uuid
 
 class User(Base):
@@ -10,6 +12,6 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
     external_id = Column(String, unique=True, index=True, nullable=False)
-    identity_provider = Column(String, nullable=False, enumerated=["github, google"])
+    identity_provider = Column(Enum('github google', name = 'identity_provider'), nullable=False)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
