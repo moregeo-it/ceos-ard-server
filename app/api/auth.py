@@ -52,17 +52,17 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
         
         email = profile.get('email')
         username = profile.get('login')
-        githhub_id = str(profile.get('id'))
+        github_id = str(profile.get('id'))
         full_name = profile.get('name') or username
 
-        if not email or not username or not githhub_id:
+        if not email or not username or not github_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to retrieve user information",
             )
 
         try: 
-            existing_user = db.query(User).filter_by(github_id=githhub_id).first()
+            existing_user = db.query(User).filter_by(github_id=github_id).first()
 
             if existing_user:
                 existing_user.email = email
@@ -78,7 +78,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
                     email=email,
                     username=username,
                     full_name=full_name,
-                    github_id=githhub_id,
+                    github_id=github_id,
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
                 )
