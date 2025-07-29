@@ -9,6 +9,7 @@ class User(Base):
     full_name = Column(String, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
-    github_id = Column(String, unique=True, index=True, nullable=False)
+    external_id = Column(String, unique=True, index=True, nullable=False)
+    identity_provider = Column(String, nullable=False, enumerated=["github, google"])
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
