@@ -6,14 +6,14 @@ import httpx
 from app.models.user import User
 from app.db.dependency import get_db
 
-async def get_current_user_from_cookies(request: Request, db: Session = Depends(get_db)):
-    user_id = request.cookies.get("user_id")
-    access_token = request.cookies.get("access_token")
+async def get_current_user(request: Request, db: Session = Depends(get_db)):
+    user_id = request.headers.get("user_id")
+    access_token = request.headers.get("access_token")
 
     if not user_id or not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated - missing cookies",
+            detail="Not authenticated - missing headers",
         )
     
     try:
