@@ -18,12 +18,12 @@ oauth.register(
     name='github',
     client_id=settings.GITHUB_CLIENT_ID,
     client_secret=settings.GITHUB_CLIENT_SECRET,
-    access_token_url='https://github.com/login/oauth/access_token',
-    authorize_url='https://github.com/login/oauth/authorize',
-    api_base_url='https://api.github.com/',
+    access_token_url=settings.GITHUB_TOKEN_URL,
+    api_base_url=settings.GITHUB_API_BASE_URL,
+    authorize_url=settings.GITHUB_AUTHORIZE_URL,
     client_kwargs={
-        'scope': 'user:email read:org repo repo:status',
-        'response_type': 'code',
+        'scope': settings.GITHUB_CLIENT_SCOPE,
+        'response_type': settings.GITHUB_CLIENT_RESPONSE_TYPE,
     }
 )
 
@@ -31,9 +31,9 @@ oauth.register(
     name='google',
     client_id=settings.GOOGLE_CLIENT_ID,
     client_secret=settings.GOOGLE_CLIENT_SECRET,
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    server_metadata_url=settings.GOOGLE_DISCOVERY_URL,
     client_kwargs={
-        'scope': 'email profile openid',
-        'response_type': 'code',
+        'scope': settings.GOOGLE_CLIENT_SCOPE,
+        'response_type': settings.GOOGLE_CLIENT_RESPONSE_TYPE,
     }
 )
