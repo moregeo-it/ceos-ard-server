@@ -55,7 +55,6 @@ async def extract_google_user_info(token: Dict[str, Any]) -> Dict[str, str]:
             raise Exception(f"Google userinfo API returned status {user_response.status_code}")
         
         profile = user_response.json()
-        print(profile)
         email = profile.get('email')
         return {
             'email': email,
