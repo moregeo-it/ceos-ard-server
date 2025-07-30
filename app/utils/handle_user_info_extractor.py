@@ -39,8 +39,6 @@ async def extract_google_user_info(token: Dict[str, Any]) -> Dict[str, str]:
         # Try ID token first (OpenID Connect)
         if 'id_token' in token:
             id_token = jwt.decode(token['id_token'], options={"verify_signature": False})
-            print("id_token")
-            print(id_token)
             email = id_token.get('email')
             return {
                 'email': email,
