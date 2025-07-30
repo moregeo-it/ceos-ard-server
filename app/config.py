@@ -21,6 +21,10 @@ class Settings:
     GOOGLE_API_BASE_URL: str = os.getenv("GOOGLE_API_BASE_URL", "https://www.googleapis.com")
     GOOGLE_DISCOVERY_URL: str = os.getenv("GOOGLE_DISCOVERY_URL", "https://accounts.google.com/.well-known/openid-configuration")
 
+    CEOS_ARD_OWNER: str = os.getenv("CEOS_ARD_OWNER", "ceos-org")
+    CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
+    CEOS_ARD_MAIN_BRANCH: str = os.getenv("CEOS_ARD_MAIN_BRANCH", "main")
+
     SECRET_KEY: str = os.getenv("SECRET_KEY")
     DATABASE_URL: str = os.getenv("DATABASE_URL")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
