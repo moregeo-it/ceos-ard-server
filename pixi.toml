@@ -1,0 +1,19 @@
+[workspace]
+channels = ["conda-forge"]
+name = "ceos-ard-server"
+platforms = ["osx-arm64", "win-64", "linux-64", "osx-64"]
+version = "0.1.0"
+
+[tasks]
+dev = "uvicorn app.main:app --reload"
+
+[dependencies]
+fastapi = ">=0.116.1,<0.117"
+uvicorn = ">=0.35.0,<0.36"
+authlib = ">=1.6.1,<2"
+httpx = ">=0.28.1,<0.29"
+python-dotenv = ">=1.1.1,<2"
+sqlalchemy = ">=2.0.41,<3"
+psycopg2-binary = ">=2.9.10,<3"
+itsdangerous = ">=2.2.0,<3"
+pyjwt = ">=2.10.1,<3"
