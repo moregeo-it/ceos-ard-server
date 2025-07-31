@@ -177,7 +177,7 @@ class GitHubService:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(url, headers=self.default_headers)
+                response = await client.post(url, headers=headers)
 
             if response.status_code == status.HTTP_202_ACCEPTED:
                 forked_repo = response.json()

@@ -1,3 +1,4 @@
+import uuid
 import logging
 import asyncio
 from datetime import datetime
@@ -41,9 +42,10 @@ class WorkspaceService:
                 await asyncio.sleep(2)
 
             # Generate workspace path and branch name
-            workspace_id = len(db.query(GitWorkspace).filter(GitWorkspace.user_id == user_id).all()) + 1
-            workspace_path = self.git_service.generate_workspace_path(int(user_id), workspace_id)
-            branch_name = self.git_service.generate_branch_name(int(user_id), workspace_id)
+            workspace_id = str(uuid.uuid4())
+
+            workspace_path = self.git_service.generate_workspace_path(str(user_id), workspace_id)
+            branch_name = self.git_service.generate_branch_name(str(user_id), workspace_id)
 
             # Create workspace record in database
             workspace = GitWorkspace(
@@ -97,7 +99,7 @@ class WorkspaceService:
 
             if success:
                 workspace.status = WorkspaceStatus.ACTIVE
-                workspace.last_build_at = datetime.now(datetime.timezone.utc)
+                workspace.last_build_at = datetime.utcnow()
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
 
