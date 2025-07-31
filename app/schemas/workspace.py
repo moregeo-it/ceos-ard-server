@@ -1,0 +1,70 @@
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+from enum import Enum
+
+class WorkspaceStatus(str, Enum):
+    ACTIVE = "active"
+    ERROR = "error"
+    BUILDING = "building"
+    CREATING = "creating"
+    UPDATING = "updating"
+    DELETED = "deleted"
+
+class GitStatusFile(BaseModel):
+    path: str
+    status: str
+
+class GitStatus(BaseModel):
+    branch: str
+    is_clean: bool
+    ahead_commits: int
+    behind_commits: int
+    modified_files: List[GitStatusFile]
+    untracked_files: List[str]
+
+class WorkspaceCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=50, description="Workspace title")
+    default_pfs: Optional[str] = Field(None, min_length=1, max_length=50, description="Default PFS")
+    upstream_repo_owner: str = Field(..., min_length=1, max_length=50, description="Upstream repository owner")
+    upstream_repo_name: str = Field(..., min_length=1, max_length=50, description="Upstream repository name")
+    upstream_branch_name: Optional[str] = Field(default="main", max_length=50, description="Upstream branch name")
+
+class WorkspaceUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=50, description="New workspace title")
+
+class WorkspaceResponse(BaseModel):
+    id: str
+    title: str
+    user_id: str
+    default_pfs: str
+    upstream_repo_owner: str
+    upstream_repo_name: str
+    forked_repo_owner: str
+    forked_repo_name: str
+    fork_repo_clone_url: str
+    branch_name: str
+    upstream_branch_name: str
+    workspace_path: str
+    status: WorkspaceStatus
+    error_message: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    last_build_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+class WorkspaceStatusResponse(BaseModel):
+    workspace_status: str
+    error_message: Optional[str]
+    git_status: Optional[GitStatus]
+
+class ProposeChangesRequest(BaseModel):
+    commit_message: str = Field(..., min_length=1, max_length=200, description="Commit message")
+    pr_title: str = Field(..., min_length=1, max_length=100, description="Pull request title")
+    pr_description: str = Field(..., min_length=1, max_length=1000, description="Pull request description")
+
+class ProposeChangesResponse(BaseModel):
+    commit_sha: Optional[str]
+    pull_request: dict

@@ -4,8 +4,8 @@ from typing import Optional, Dict, Any
 import logging
 
 from app.config import settings
-from app.services.auth import get_current_user
-from app.services.github import github_service
+from app.services.auth_service import get_current_user
+from app.services.github_service import github_service
 from app.utils.sanitization import sanitize_query_params
 
 logger = logging.getLogger(__name__)

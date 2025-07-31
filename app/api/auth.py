@@ -6,9 +6,9 @@ import logging
 
 from app.config import settings
 from app.oauth.handler import oauth
-from app.db.dependency import get_db
+from app.db.database import get_db
 from app.models.user import IdentityProvider
-from app.services.auth import get_current_user
+from app.services.auth_service import get_current_user
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
 
