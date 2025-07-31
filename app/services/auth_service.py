@@ -5,7 +5,7 @@ from fastapi import HTTPException, Depends, status
 
 import logging
 
-from app.db.dependency import get_db
+from app.db.database import get_db
 from app.utils.token_validator import validate_google_token, validate_github_token
 
 logger = logging.getLogger(__name__)
