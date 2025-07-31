@@ -1,10 +1,9 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+
 from enum import Enum
 
 import time
-import asyncio
 
 class BuildStatus(Enum):
     STARTING = "starting"
@@ -22,7 +21,7 @@ class LogType(Enum):
 class BuildLog(BaseModel):
     type: LogType
     text: str
-    timestamp: str
+    timestamp: Optional[float] = Field(default_factory=time.time)
 
 
 class BuildInfo(BaseModel):

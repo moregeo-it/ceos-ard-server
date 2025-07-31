@@ -44,8 +44,8 @@ class WorkspaceService:
             # Generate workspace path and branch name
             workspace_id = str(uuid.uuid4())
 
-            workspace_path = self.git_service.generate_workspace_path(str(user_id), workspace_id)
-            branch_name = self.git_service.generate_branch_name(str(user_id), workspace_id)
+            branch_name = self.git_service.generate_branch_name(workspace_id)
+            workspace_path = self.git_service.generate_workspace_path(workspace_id)
 
             # Create workspace record in database
             workspace = GitWorkspace(

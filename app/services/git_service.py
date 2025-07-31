@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class GitService:
     def __init__(self):
-        self.workspaces_root = getattr(settings, 'WORKSPACES_ROOT', 'tmp/workspaces')
+        self.workspaces_root = os.path.abspath(settings.WORKSPACES_ROOT)
         self._ensure_workspaces_directory()
 
     def _ensure_workspaces_directory(self):
@@ -34,10 +34,10 @@ class GitService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to run git command: {e}")
         
-    def generate_workspace_path(self, user_id: str, workspace_id: str) -> str:
-        return os.path.join(self.workspaces_root, f"user_{user_id}", f"workspace_{workspace_id}")
+    def generate_workspace_path(self, workspace_id: str) -> str:
+        return os.path.join(self.workspaces_root, workspace_id)
     
-    def generate_branch_name(self, user_id: str, workspace_id: str) -> str:
+    def generate_branch_name(self, workspace_id: str) -> str:
         return f"workspace/{workspace_id}"
     
     async def clone_repository(
