@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, DateTime, Enum as SQLAlchemyEnum
+from sqlalchemy.orm import relationship
 
 from enum import Enum
 
@@ -21,3 +22,8 @@ class User(Base):
     identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
+
+    workspaces = relationship("GitWorkspace", back_populates="user")
+
+    def __repr__(self):
+        return f"<User id={self.id} username={self.username} email={self.email} provider={self.identity_provider} external_id={self.external_id}>"
