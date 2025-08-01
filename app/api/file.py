@@ -148,7 +148,7 @@ async def store_content(
             detail=f"Failed to store file: {str(e)}"
         )
 
-@router.post("delete")
+@router.delete("/delete")
 async def delete_file(
     file_path: str, 
     workspace_id: str,
