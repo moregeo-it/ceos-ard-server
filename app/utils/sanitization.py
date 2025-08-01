@@ -1,4 +1,5 @@
 import re
+import os
 from typing import Dict, Any, Optional
 from fastapi import HTTPException, status
 
@@ -50,3 +51,22 @@ def sanitize_query_params(query_params: Dict[str, Any]) -> Dict[str, Any]:
     }
     
     return sanitize_github_params(cleaned_params)
+
+def sanitize_filename(filename: str) -> str:
+    sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
+
+    if sanitized.startswith('.'):
+        sanitized = sanitized[1:]
+
+    return sanitized
+
+def sanitize_path(path: str) -> str:
+    normalized_path = os.path.normpath(path)
+
+    normalized_path = normalized_path.lstrip('/')
+    if normalized_path.startswith('..'):
+        normalized_path = normalized_path.replace('..', '')
+
+    normalized_path = normalized_path.replace('\\', '/')
+
+    return normalized_path

@@ -6,6 +6,7 @@ import logging
 
 from app.api import pfs
 from app.api import auth
+from app.api import preview
 from app.api import workspace
 from app.config import settings
 from app.db.database import Base, engine
@@ -30,8 +31,9 @@ app.add_middleware(
 app.include_router(auth.router)
 
 app.include_router(pfs.router)
-
+app.include_router(preview.router)
 app.include_router(workspace.router)
+
 
 @app.get("/health")
 async def health():
