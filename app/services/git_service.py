@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class GitService:
     def __init__(self):
-        self.workspaces_root = os.path.abspath(settings.WORKSPACES_ROOT)
+        self.workspaces_root = os.path.join(os.path.dirname(__file__), settings.WORKSPACES_ROOT)
         self._ensure_workspaces_directory()
 
     def _ensure_workspaces_directory(self):
@@ -53,7 +53,7 @@ class GitService:
             if os.path.exists(workspace_path):
                 shutil.rmtree(workspace_path)
 
-            os.makedirs(os.path.dirname(workspace_path), exist_ok=True)
+            os.makedirs(workspace_path, exist_ok=True)
 
             stdout, stderr, returncode = self._run_git_command(
                 ["git", "clone", clone_url, workspace_path],
