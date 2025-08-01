@@ -9,6 +9,7 @@ from app.services.auth_service import get_current_user
 from app.services.workspace_service import workspace_service
 from app.schemas.build import BuildStatusResponse, StartBuildRequest
 from app.schemas.workspace import (
+    WorkspaceUpdate,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceStatusResponse, 
@@ -86,7 +87,7 @@ async def get_user_workspace(
 @router.patch("/{workspace_id}", response_model=WorkspaceResponse)
 async def update_workspace(
     workspace_id: str,
-    update_data: WorkspaceCreate,
+    update_data: WorkspaceUpdate,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
