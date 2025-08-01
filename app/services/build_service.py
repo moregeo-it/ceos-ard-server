@@ -53,7 +53,7 @@ class BuildService:
 
                 if (existing_build.process and 
                     existing_build.process.returncode is None and
-                    existing_build.status in (BuildStatus.STARTING, BuildStatus.RUNNING)):
+                    existing_build.status in (BuildStatus.STARTING, BuildStatus.IN_PROGRESS)):
 
                     logger.info(f"Build for workspace {workspace_id} is already running")
                     return existing_build
@@ -131,6 +131,7 @@ class BuildService:
             await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
 
             build_info.end_time = time.time()
+
             if returncode == 0:
                 build_info.status = BuildStatus.COMPLETED
                 success_msg = f"Build completed successfully for workspace {workspace_id}"

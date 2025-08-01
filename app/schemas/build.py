@@ -2,8 +2,10 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
 from enum import Enum
+from datetime import datetime
 
 import time
+import asyncio
 
 class BuildStatus(Enum):
     STARTING = "starting"
@@ -21,7 +23,7 @@ class LogType(Enum):
 class BuildLog(BaseModel):
     type: LogType
     text: str
-    timestamp: Optional[float] = Field(default_factory=time.time)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class BuildInfo(BaseModel):
@@ -30,10 +32,13 @@ class BuildInfo(BaseModel):
     start_time: float = Field(default_factory=time.time)
     end_time: Optional[float] = None
     error: Optional[str] = None
-    process: Optional[Any] = None
+    process: Optional[asyncio.subprocess.Process] = Field(default=None, exclude=True)
     build_type: str = "all"  # "all" or "specific"
     pfs: Optional[str] = None
     automatic: bool = True
+
+    class Config:
+        arbitrary_types_allowed = True
 
 class BuildStatusResponse(BaseModel):
     workspace_id: str
