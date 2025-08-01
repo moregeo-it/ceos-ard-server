@@ -14,7 +14,7 @@ class BuildService:
         self.build_processes: Dict[str, BuildInfo] = {}
         self.cleanup_interval = 30 * 60  # 30 minutes
 
-    async def check_prequisites(self) -> bool:
+    async def check_prerequisites(self) -> bool:
         try:
             process = await asyncio.create_subprocess_exec(
                 'ceos-ard', '--version',
@@ -35,60 +35,58 @@ class BuildService:
             return False
 
     async def start_build(
-        self,
-        workspace_path: str,
-        workspace_id: str,
-        pfs: Optional[str] = None,
+        self, 
+        workspace_path: str, 
+        workspace_id: str, 
+        pfs: Optional[str] = None
     ) -> BuildInfo:
         build_info = BuildInfo(
             status=BuildStatus.STARTING,
             build_type="specific" if pfs else "all",
             pfs=pfs,
-            automatic=True,
+            automatic=True
         )
 
         try:
             if workspace_id in self.build_processes:
                 existing_build = self.build_processes[workspace_id]
-
+                
                 if (existing_build.process and 
                     existing_build.process.returncode is None and
-                    existing_build.status in (BuildStatus.STARTING, BuildStatus.IN_PROGRESS)):
-
-                    logger.info(f"Build for workspace {workspace_id} is already running")
+                    existing_build.status in [BuildStatus.STARTING, BuildStatus.IN_PROGRESS]):
+                    
+                    logger.info(f"Build already in progress for workspace {workspace_id}")
                     return existing_build
+                
+                logger.info(f"Previous build for workspace {workspace_id} completed, starting new one")
 
-                logger.info(f"Restarting build for workspace {workspace_id}")
-            
             self.build_processes[workspace_id] = build_info
-
-            prereqs_ok = await self.check_prequisites()
-
+            
+            prereqs_ok = await self.check_prerequisites()
             if not prereqs_ok:
                 build_info.status = BuildStatus.FAILED
-                build_info.error = "Prerequisites not met - ceos-ard CLI is not installed or not available in the PATH"
+                build_info.error = 'ceos-ard CLI tool is not installed or not available'
                 build_info.end_time = time.time()
-                build_info.logs.append(BuildLog(LogType.ERROR, build_info.error))
+                build_info.logs.append(BuildLog(type=LogType.ERROR, text=build_info.error))
                 return build_info
 
             if not os.path.exists(workspace_path):
-                logger.error(f"Workspace path does not exist: {workspace_path}")
                 build_info.status = BuildStatus.FAILED
-                build_info.error = f"Workspace path does not exist: {workspace_path}"
+                build_info.error = f'Workspace path does not exist: {workspace_path}'
                 build_info.end_time = time.time()
-                build_info.logs.append(BuildLog(LogType.ERROR, build_info.error))
+                build_info.logs.append(BuildLog(type=LogType.ERROR, text=build_info.error))
                 return build_info
 
-            await self._execute_build(build_info,workspace_path, workspace_id, pfs)
-
+            await self._execute_build(build_info, workspace_path, workspace_id, pfs)
+            
             return build_info
 
         except Exception as e:
-            logger.error(f"Error starting build: {e}")
             build_info.status = BuildStatus.FAILED
             build_info.error = str(e)
             build_info.end_time = time.time()
-            build_info.logs.append(BuildLog(LogType.ERROR, build_info.error))
+            build_info.logs.append(BuildLog(type=LogType.ERROR, text=f"Fatal error starting build: {e}"))
+            logger.error(f"Fatal error starting build for workspace {workspace_id}: {e}")
             return build_info
         
     async def _execute_build(
@@ -106,7 +104,7 @@ class BuildService:
 
         build_type_desc = f" with PFS {pfs}" if pfs else " (all files)"
         logm_messsge = f"Building workspace {workspace_id}{build_type_desc}"
-        build_info.logs.append(BuildLog(LogType.INFO, logm_messsge))
+        build_info.logs.append(BuildLog(type=LogType.INFO, text=logm_messsge))
         logger.info(logm_messsge)
 
         try:
@@ -135,13 +133,13 @@ class BuildService:
             if returncode == 0:
                 build_info.status = BuildStatus.COMPLETED
                 success_msg = f"Build completed successfully for workspace {workspace_id}"
-                build_info.logs.append(BuildLog(LogType.INFO, success_msg))
+                build_info.logs.append(BuildLog(type=LogType.INFO, text=success_msg))
                 logger.info(success_msg)
             else:
                 build_info.status = BuildStatus.FAILED
                 build_info.error = f"Process exited with code {returncode}"
                 error_msg = f"Build failed for workspace {workspace_id}: Process exited with code {returncode}"
-                build_info.logs.append(BuildLog(LogType.ERROR, error_msg))
+                build_info.logs.append(BuildLog(type=LogType.ERROR, text=error_msg))
                 logger.error(error_msg)
 
         except Exception as e:
@@ -149,7 +147,7 @@ class BuildService:
             build_info.error = str(e)
             build_info.end_time = time.time()
             error_msg = f"Build process error for workspace {workspace_id}: {e}"
-            build_info.logs.append(BuildLog(LogType.ERROR, error_msg))
+            build_info.logs.append(BuildLog(type=LogType.ERROR, text=error_msg))
             logger.error(error_msg)
 
         finally:
@@ -170,7 +168,7 @@ class BuildService:
                 
                 log_text = line.decode('utf-8', errors='replace').rstrip('\n\r')
                 if log_text:  # Only log non-empty lines
-                    build_info.logs.append(BuildLog(log_type, log_text))
+                    build_info.logs.append(BuildLog(type=log_type, text=log_text))
                     
         except Exception as e:
             logger.error(f"Error reading stream: {e}")
@@ -233,7 +231,7 @@ class BuildService:
                 build_info.status = BuildStatus.FAILED
                 build_info.error = "Build cancelled by user"
                 build_info.end_time = time.time()
-                build_info.logs.append(BuildLog(LogType.INFO, "Build cancelled"))
+                build_info.logs.append(BuildLog(type=LogType.INFO, text="Build cancelled"))
                 
                 logger.info(f"Build cancelled for workspace {workspace_id}")
                 return True
