@@ -200,17 +200,5 @@ class GitService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to get git status"
             )
-
-async def delete_workspace(workspace_path: str):
-    try:
-        if os.path.exists(workspace_path):
-            shutil.rmtree(workspace_path)
-            logger.info(f"Deleted workspace at {workspace_path}")   
-    except Exception as e:
-        logger.error(f"Error deleting workspace: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete workspace"
-        )
     
 git_service = GitService()

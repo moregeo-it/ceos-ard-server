@@ -1,6 +1,9 @@
+import os
 import uuid
+import shutil
 import logging
 import asyncio
+
 from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
@@ -138,7 +141,6 @@ class WorkspaceService:
         ).order_by(GitWorkspace.created_at.desc()).all()
 
     def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str) -> GitWorkspace:
-        """Get workspace by ID for a specific user"""
         workspace = db.query(GitWorkspace).filter(
             GitWorkspace.id == workspace_id,
             GitWorkspace.user_id == user_id,
@@ -164,7 +166,7 @@ class WorkspaceService:
 
         if update_data.title:
             workspace.title = update_data.title
-            workspace.updated_at = datetime.now(datetime.timezone.utc)
+            workspace.updated_at = datetime.now()
 
         db.commit()
         db.refresh(workspace)
@@ -177,13 +179,18 @@ class WorkspaceService:
         user_id: str
     ) -> bool:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        workspace_path = str(workspace.workspace_path)
 
         try:
             workspace.status = WorkspaceStatus.DELETED
-            workspace.updated_at = datetime.now(datetime.timezone.utc)
+            workspace.updated_at = datetime.now()
             db.commit()
 
-            await self.git_service.delete_workspace(workspace.workspace_path)
+            if os.path.exists(workspace_path):
+                shutil.rmtree(workspace_path)
+                logger.info(f"Deleted workspace at {workspace_path}")
+            else:
+                logger.warning(f"Workspace at {workspace_path} does not exist")
 
             logger.info(f"Successfully deleted workspace {workspace_id}")
             return True
