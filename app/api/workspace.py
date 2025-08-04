@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status, APIRouter, Depends
 from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
 from typing import Dict, Any, List
 
 import logging
@@ -19,9 +20,14 @@ from app.schemas.workspace import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/workspace", tags=["Workspace"])
+router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
-@router.post("/", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", 
+    response_model=WorkspaceResponse, 
+    status_code=status.HTTP_201_CREATED, 
+    description="Create a new workspace with cloned repository"
+)
 async def create_workspace(
     workspace_data: WorkspaceCreate,
     db: Session = Depends(get_db),
@@ -40,7 +46,11 @@ async def create_workspace(
 
     return workspace
     
-@router.get("/", response_model=List[WorkspaceResponse])
+@router.get(
+    "/", 
+    response_model=List[WorkspaceResponse], 
+    description="Retrieve al workspaces for a authenticated user"
+)
 async def get_user_workspaces(
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -52,7 +62,7 @@ async def get_user_workspaces(
             user_id=current_user["user"].id
         )
 
-        return workspaces
+        return JSONResponse(content=workspaces, status_code=status.HTTP_200_OK)
 
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
@@ -61,7 +71,12 @@ async def get_user_workspaces(
             detail=f"Failed to get workspaces: {str(e)}"
         )
     
-@router.get("/{workspace_id}", response_model=WorkspaceResponse)
+@router.get(
+    "/{workspace_id}", 
+    summary="Get a workspace",
+    response_model=WorkspaceResponse, 
+    description="Retrieve detailed information about a specific workspace"
+)
 async def get_user_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -75,7 +90,7 @@ async def get_user_workspace(
             user_id=current_user["user"].id
         )
 
-        return workspace
+        return JSONResponse(content=workspace, status_code=status.HTTP_200_OK)
 
     except Exception as e:
         logger.error(f"Error getting workspace: {e}")
@@ -84,7 +99,12 @@ async def get_user_workspace(
             detail=f"Failed to get workspace: {str(e)}"
         )
 
-@router.patch("/{workspace_id}", response_model=WorkspaceResponse)
+@router.patch(
+    "/{workspace_id}",
+    summary="Update a workspace",
+    response_model=WorkspaceResponse,
+    description="Update a workspace information"
+)
 async def update_workspace(
     workspace_id: str,
     update_data: WorkspaceUpdate,
@@ -98,22 +118,27 @@ async def update_workspace(
         update_data=update_data
 )
 
-    return workspace
+    return JSONResponse(content=workspace, status_code=status.HTTP_200_OK)
 
-@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{workspace_id}",
+    summary="Delete a workspace",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Delete a workspace and all associated data"
+)
 async def delete_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
 
-        await workspace_service.delete_workspace(
-            db=db, 
-            workspace_id=workspace_id, 
-            user_id=current_user["user"].id
-            )
+    await workspace_service.delete_workspace(
+        db=db, 
+        workspace_id=workspace_id, 
+        user_id=current_user["user"].id
+        )
 
-        return None
+    return None
     
 @router.get("/{workspace_id}/status", response_model=WorkspaceStatusResponse)
 async def get_workspace_status(

@@ -35,6 +35,9 @@ class Settings:
     AUTH_SUCCESS_REDIRECT: str = os.getenv("AUTH_SUCCESS_REDIRECT")
 
     WORKSPACES_ROOT: str = os.getenv("WORKSPACES_ROOT", "workspaces")
+    UPSTREAM_BRANCH_NAME: str = os.getenv("UPSTREAM_BRANCH_NAME", "main")
+    UPSTREAM_REPO_NAME: str = os.getenv("UPSTREAM_REPO_NAME", "ceos-ard")
+    UPSTREAM_REPO_OWNER: str = os.getenv("UPSTREAM_REPO_OWNER", "ceos-org")
 
     CORS_ORIGINS: list = [
         "http://localhost",

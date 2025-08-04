@@ -7,8 +7,10 @@ import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 
+from app.config import settings
 from app.services.git_service import git_service
 from app.services.build_service import build_service
 from app.services.github_service import github_service
@@ -31,13 +33,23 @@ class WorkspaceService:
         username: str,
         access_token: str
     ) -> GitWorkspace:
+        upstream_repo_name = settings.UPSTREAM_REPO_NAME
+        upstream_repo_owner = settings.UPSTREAM_REPO_OWNER
+        upstream_branch_name = settings.UPSTREAM_BRANCH_NAME
+
+        if not workspace_data.pfs:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS is required")
+
+        if not workspace_data.title:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
+
         try:
             logger.info(f"Checking fork for user {username}")
             fork_repo, was_created = await self.github_service.get_or_create_fork(
                 username=username,
                 access_token=access_token,
-                upstream_owner=workspace_data.upstream_repo_owner,
-                upstream_repo=workspace_data.upstream_repo_name
+                upstream_owner=upstream_repo_owner,
+                upstream_repo=upstream_repo_name
             )
 
             if was_created:
@@ -53,15 +65,16 @@ class WorkspaceService:
             # Create workspace record in database
             workspace = GitWorkspace(
                 user_id=user_id,
+                pfs=workspace_data.pfs,
                 title=workspace_data.title,
-                default_pfs=workspace_data.default_pfs or '',
-                upstream_repo_owner=workspace_data.upstream_repo_owner,
-                upstream_repo_name=workspace_data.upstream_repo_name,
+                description=workspace_data.description,
+                upstream_repo_owner=upstream_repo_owner,
+                upstream_repo_name=upstream_repo_name,
                 forked_repo_owner=fork_repo['owner']['login'],
                 forked_repo_name=fork_repo['name'],
                 fork_repo_clone_url=fork_repo['clone_url'],
                 branch_name=branch_name,
-                upstream_branch_name=workspace_data.upstream_branch_name or "main",
+                upstream_branch_name=upstream_branch_name or "main",
                 workspace_path=workspace_path,
                 status=WorkspaceStatus.CREATING
             )
@@ -73,7 +86,7 @@ class WorkspaceService:
             # Start workspace setup in background
             asyncio.create_task(self._setup_workspace(db, workspace))
 
-            return workspace
+            return JSONResponse(content=workspace, status_code=status.HTTP_201_CREATED)
 
         except Exception as e:
             logger.error(f"Error creating workspace: {e}")
@@ -162,6 +175,18 @@ class WorkspaceService:
         user_id: str,
         update_data: WorkspaceUpdate
     ) -> GitWorkspace:
+        if not workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace ID is required"
+            )
+        
+        if not any([update_data.description, update_data.title]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one of description, title, or pfs must be provided"
+            )
+
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
         if update_data.title:
@@ -178,6 +203,12 @@ class WorkspaceService:
         workspace_id: str,
         user_id: str
     ) -> bool:
+        if not workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace ID is required"
+            )
+
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
         workspace_path = str(workspace.workspace_path)
 

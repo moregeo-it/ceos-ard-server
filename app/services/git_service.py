@@ -202,5 +202,15 @@ class GitService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to get git status"
             )
+        
+    async def revert_file_changes(self, workspace_path: str, file_path: str):
+        try:
+            self._run_git_command(['git', 'checkout', '--', file_path], cwd=workspace_path)
+        except Exception as e:
+            logger.error(f"Error reverting file changes: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to revert file changes"
+            )
     
 git_service = GitService()

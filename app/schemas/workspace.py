@@ -24,14 +24,13 @@ class GitStatus(BaseModel):
     untracked_files: List[str]
 
 class WorkspaceCreate(BaseModel):
-    title: str = Field(..., min_length=1, max_length=50, description="Workspace title")
-    default_pfs: Optional[str] = Field(None, min_length=1, max_length=50, description="Default PFS")
-    upstream_repo_owner: str = Field(..., min_length=1, max_length=50, description="Upstream repository owner")
-    upstream_repo_name: str = Field(..., min_length=1, max_length=50, description="Upstream repository name")
-    upstream_branch_name: Optional[str] = Field(default="main", max_length=50, description="Upstream branch name")
+    title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
+    pfs: List[str] = Field(..., min_items=1, max_items=50, description="PFS to preview")
+    description: Optional[str] = Field(..., min_length=1, max_length=1000, description="Workspace description")
 
 class WorkspaceUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=50, description="New workspace title")
+    description: Optional[str] = Field(None, min_length=1, max_length=1000, description="New workspace description")
 
 class WorkspaceResponse(BaseModel):
     id: str
@@ -68,3 +67,16 @@ class ProposeChangesRequest(BaseModel):
 class ProposeChangesResponse(BaseModel):
     commit_sha: Optional[str]
     pull_request: dict
+
+class CreateFileRequest(BaseModel):
+    name: str
+    path: str
+    type: str
+
+class FileOperation(str, Enum):
+    RENAME = "rename"
+    REVERT = "revert"
+
+class FileOperationRequest(BaseModel):
+    new_name: Optional[str]
+    operation: FileOperation

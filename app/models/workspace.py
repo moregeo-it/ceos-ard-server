@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum as SQLAlchemyEnum
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, ARRAY, Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from enum import Enum
@@ -20,7 +20,8 @@ class GitWorkspace(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String(50), nullable=False)
-    default_pfs = Column(String(50), nullable=True)
+    description = Column(String(500), nullable=True)
+    pfs = Column(ARRAY(String(50)), nullable=False)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
     upstream_repo_owner = Column(String(50), nullable=False)
     upstream_repo_name = Column(String(50), nullable=False)
