@@ -49,6 +49,7 @@ async def handle_oauth_callback(
             f"{settings.AUTH_SUCCESS_REDIRECT}"
             f"?access_token={access_token}"
             f"&user_id={user_to_use.id}"
+            f"&username={user_to_use.username}"
             f"&provider={provider}"
         )
 

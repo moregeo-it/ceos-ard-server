@@ -92,7 +92,7 @@ class GitHubService:
         owner: str, 
         repo: str, 
         token: str,
-        branch: str = "main"
+        branch: str
     ) -> List[str]:
         try:
             if not token:

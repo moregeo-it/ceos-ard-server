@@ -70,11 +70,7 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     description="Logout user"
 )
 async def logout(current_user = Depends(get_current_user)):
-    user_access_token = current_user["access_token"]
-    user_identity_provider = current_user["user"].identity_provider
     try:
-        await oauth_clients[user_identity_provider].revoke_token(user_access_token)
-
         response = RedirectResponse(
             url=settings.LOGOUT_REDIRECT,
             status_code=status.HTTP_302_FOUND
