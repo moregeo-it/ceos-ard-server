@@ -14,7 +14,7 @@ from app.utils.handle_user_info_extractor import extract_github_user_info, extra
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(prefix="/auth", tags=["Authentication"], )
 
 oauth_clients = {
     IdentityProvider.github: oauth.github,
@@ -22,7 +22,7 @@ oauth_clients = {
 }
 
 @router.get("/login")
-async def login(request: Request, identity_provider: IdentityProvider = Query(IdentityProvider.github)):
+async def initiate_login(request: Request, identity_provider: IdentityProvider = Query(IdentityProvider.github)):
     try:
         if identity_provider in oauth_clients:
             redirect_uri = f"{settings.CALLBACK_BASE_URI}/{identity_provider.value}"
@@ -40,15 +40,18 @@ async def login(request: Request, identity_provider: IdentityProvider = Query(Id
         )
 
 @router.get("/callback/github")
-async def github_callback(request: Request, db: Session = Depends(get_db)):
+async def github_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "github", oauth.github, extract_github_user_info)
 
 @router.get("/callback/google")
-async def google_callback(request: Request, db: Session = Depends(get_db)):
+async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "google", oauth.google, extract_google_user_info)
 
 @router.get("/logout")
-async def logout(request: Request):
+async def logout(current_user = Depends(get_current_user)):
+    user_access_token = current_user["access_token"]
+    user_identity_provider = current_user["user"].identity_provider
+    await oauth_clients[user_identity_provider].revoke_token(user_access_token)
 
     response = RedirectResponse(
         url=settings.LOGOUT_REDIRECT,
@@ -57,8 +60,8 @@ async def logout(request: Request):
 
     return response
 
-@router.get("/profile")
-async def profile(current_user = Depends(get_current_user)):
+@router.get("/user")
+async def current_user(current_user = Depends(get_current_user)):
     user = current_user["user"]
     access_token = current_user["access_token"]
 
