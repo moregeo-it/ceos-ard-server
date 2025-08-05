@@ -142,7 +142,7 @@ class GitService:
             if stdout:
                 for line in stdout.split('\n'):
                     if line.strip():
-                        status_code = line[2]
+                        status_code = line[0].strip()
                         file_path = line[4:]
                         if status_code == '??':
                             untracked_files.append(file_path)
@@ -153,6 +153,8 @@ class GitService:
                                 'MM': 'modified',
                                 'A ': 'added',
                                 ' A': 'added',
+                                'A': 'added',
+                                'AA': 'added',
                                 'D ': 'deleted',
                                 ' D': 'deleted',
                                 'R ': 'renamed',

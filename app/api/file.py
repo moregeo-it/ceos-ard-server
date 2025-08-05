@@ -244,11 +244,9 @@ async def get_changed_files(
             user_id=current_user["user"].id
         )
 
-        return Response(
+        return JSONResponse(
             content=changed_files,
-            status_code=status.HTTP_200_OK,
-            media_type="application/json",
-            headers={"Content-Type": "application/json; charset=utf-8"}
+            status_code=status.HTTP_200_OK
         )
     except Exception as e:
         logger.error(f"Error getting changed files: {e}")
