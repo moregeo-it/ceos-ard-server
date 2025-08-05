@@ -63,7 +63,7 @@ async def create_file_or_folder(
 
         return JSONResponse(
             content=file_or_folder,
-            status_code=status.HTTP_201_OK
+            status_code=status.HTTP_201_CREATED
         )
     except Exception as e:
         logger.error(f"Error creating file or folder: {e}")

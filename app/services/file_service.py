@@ -74,25 +74,25 @@ class FileService:
                 detail="Workspace ID is required"
             )
         
-        if not request_data.get("name"):
+        if not request_data.name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Name is required"
             )
         
-        if not request_data.get("type"):
+        if not request_data.type:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Type is required"
             )
         
-        if not request_data.get("path"):
+        if not request_data.path:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Path is required"
             )
         
-        if request_data.get("type") not in ["file", "folder"]:
+        if request_data.type not in ["file", "folder"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Type must be file or folder"
@@ -110,9 +110,9 @@ class FileService:
             
             return self._create_file_or_folder(
                 workspace_path=workspace_path,
-                name=request_data.get("name"),
-                type=request_data.get("type"),
-                path=request_data.get("path")
+                name=request_data.name,
+                type=request_data.type,
+                path=request_data.path
             )
 
         except Exception as e:
@@ -147,7 +147,12 @@ class FileService:
                 detail="Invalid type"
             )
 
-        return {"message": message}
+        return {
+            "name": name,
+            "message": message,
+            "path": target_path,
+            "directory": type == "folder"
+        }
 
     async def read_file_content(
         self,
