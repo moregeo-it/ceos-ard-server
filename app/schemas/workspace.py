@@ -36,7 +36,8 @@ class WorkspaceResponse(BaseModel):
     id: str
     title: str
     user_id: str
-    default_pfs: str
+    pfs: List[str]
+    description: Optional[str]
     upstream_repo_owner: str
     upstream_repo_name: str
     forked_repo_owner: str

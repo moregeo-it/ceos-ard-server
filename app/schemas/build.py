@@ -34,7 +34,7 @@ class BuildInfo(BaseModel):
     error: Optional[str] = None
     process: Optional[asyncio.subprocess.Process] = Field(default=None, exclude=True)
     build_type: str = "all"  # "all" or "specific"
-    pfs: Optional[str] = None
+    pfs: Optional[List[str]] = None
     automatic: bool = True
 
     class Config:

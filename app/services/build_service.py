@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 
 import os
 import time
@@ -38,7 +38,7 @@ class BuildService:
         self, 
         workspace_path: str, 
         workspace_id: str, 
-        pfs: Optional[str] = None
+        pfs: Optional[List[str]] = None
     ) -> BuildInfo:
         build_info = BuildInfo(
             status=BuildStatus.STARTING,
@@ -94,13 +94,14 @@ class BuildService:
             build_info: BuildInfo, 
             workspace_path: str, 
             workspace_id: str, 
-            pfs: Optional[str] = None
+            pfs: Optional[List[str]] = None
     ):
         build_info.status = BuildStatus.IN_PROGRESS
-
-        cmd_args = ["ceos-ard", "generate-all", "-o", "build", "--pdf", "--docx"]
+        output_dir = os.path.join(workspace_path, 'build')
+        cmd_args = ["ceos-ard", "generate-all", "-o", output_dir, "-i", workspace_path, "--pdf", "--docx"]
         if pfs:
-            cmd_args.extend(["--pfs", pfs])
+            for p in pfs:
+                cmd_args.extend(["-p", p])
 
         build_type_desc = f" with PFS {pfs}" if pfs else " (all files)"
         logm_messsge = f"Building workspace {workspace_id}{build_type_desc}"
@@ -110,7 +111,6 @@ class BuildService:
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd_args,
-                cwd=workspace_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

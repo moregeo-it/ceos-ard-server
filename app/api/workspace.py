@@ -48,6 +48,8 @@ async def create_workspace(
     
 @router.get(
     "/", 
+    summary="Get all workspaces",
+    status_code=status.HTTP_200_OK,
     response_model=List[WorkspaceResponse], 
     description="Retrieve al workspaces for a authenticated user"
 )
@@ -62,8 +64,7 @@ async def get_user_workspaces(
             user_id=current_user["user"].id
         )
 
-        return JSONResponse(content=workspaces, status_code=status.HTTP_200_OK)
-
+        return workspaces
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
         raise HTTPException(
@@ -90,7 +91,7 @@ async def get_user_workspace(
             user_id=current_user["user"].id
         )
 
-        return JSONResponse(content=workspace, status_code=status.HTTP_200_OK)
+        return workspace
 
     except Exception as e:
         logger.error(f"Error getting workspace: {e}")
@@ -118,7 +119,7 @@ async def update_workspace(
         update_data=update_data
 )
 
-    return JSONResponse(content=workspace, status_code=status.HTTP_200_OK)
+    return workspace
 
 @router.delete(
     "/{workspace_id}",

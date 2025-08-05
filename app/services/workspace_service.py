@@ -33,9 +33,9 @@ class WorkspaceService:
         username: str,
         access_token: str
     ) -> GitWorkspace:
-        upstream_repo_name = settings.UPSTREAM_REPO_NAME
-        upstream_repo_owner = settings.UPSTREAM_REPO_OWNER
-        upstream_branch_name = settings.UPSTREAM_BRANCH_NAME
+        upstream_repo_name = settings.CEOS_ARD_REPO
+        upstream_repo_owner = settings.CEOS_ARD_OWNER
+        upstream_branch_name = settings.CEOS_ARD_MAIN_BRANCH
 
         if not workspace_data.pfs:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS is required")
@@ -86,7 +86,7 @@ class WorkspaceService:
             # Start workspace setup in background
             asyncio.create_task(self._setup_workspace(db, workspace))
 
-            return JSONResponse(content=workspace, status_code=status.HTTP_201_CREATED)
+            return workspace
 
         except Exception as e:
             logger.error(f"Error creating workspace: {e}")
@@ -140,7 +140,7 @@ class WorkspaceService:
             build_info = await self.build_service.start_build(
                 workspace_id=workspace.id,
                 workspace_path=workspace.workspace_path,
-                pfs=workspace.default_pfs
+                pfs=workspace.pfs
             )
 
             logger.info(f"Successfully triggered build for workspace {workspace.id} with status {build_info.status}")
@@ -180,21 +180,22 @@ class WorkspaceService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workspace ID is required"
             )
-        
-        if not any([update_data.description, update_data.title]):
+
+        update_dict = update_data.dict(exclude_unset=True)
+
+        if not update_dict:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="At least one of description, title, or pfs must be provided"
             )
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-        if update_data.title:
-            workspace.title = update_data.title
-            workspace.updated_at = datetime.now()
+        db.query(GitWorkspace).filter(
+            GitWorkspace.id == workspace_id,
+            GitWorkspace.user_id == user_id
+        ).update(update_dict, synchronize_session=False)
 
         db.commit()
-        db.refresh(workspace)
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
         return workspace
 
     async def delete_workspace(
@@ -211,6 +212,30 @@ class WorkspaceService:
 
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
         workspace_path = str(workspace.workspace_path)
+
+        if workspace.status != WorkspaceStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace is not active"
+            )
+        
+        if workspace.status == WorkspaceStatus.DELETED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace is already deleted"
+            )
+        
+        if not os.path.exists(workspace_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workspace not found"
+            )
+        
+        if workspace.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not authorized to delete this workspace"
+            )
 
         try:
             workspace.status = WorkspaceStatus.DELETED
