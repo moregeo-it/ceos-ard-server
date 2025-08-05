@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
 
+import re
 import os
 import shutil
 import logging
@@ -455,6 +456,8 @@ class FileService:
     async def _search_files(self, workspace_path, search_query):
         try:
             search_results = []
+            search_query_lower = search_query.lower()
+            ignored_extensions = re.compile(r'\.(pdf|jpg|jpeg|png|gif|bmp|docx|xlsx)$', re.IGNORECASE)
             for root, _, files in os.walk(workspace_path):
                 for file in files:
                     file_path = os.path.join(root, file)
@@ -469,27 +472,27 @@ class FileService:
                             "path": os.path.relpath(file_path, workspace_path)
                         })
                     
+                    if ignored_extensions.search(file_path):
+                        continue
                     try:
-                        with open(file_path, "r") as f:
-                            content = f.read()
-                            if search_query.lower() in content.lower():
-                                lines = content.splitlines()
-                                for i, line in enumerate(lines):
-                                    if search_query.lower() in line.lower():
-                                        column = line.lower().index(search_query.lower())
-                                        search_results.append({
-                                            "name": file,
-                                            "type": "file",
-                                            "path": os.path.relpath(file_path, workspace_path),
-                                            "line": i + 1,
-                                            "column": column + 1,
-                                            "excerpt": line.strip()
-                                        })
-                                        break
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            for i, line in enumerate(f):
+                                line_lower = line.lower()
+                                if search_query_lower in line_lower:
+                                    column = line_lower.index(search_query_lower)
+                                    search_results.append({
+                                        "name": file,
+                                        "type": "file",
+                                        "path": os.path.relpath(file_path, workspace_path),
+                                        "line": i + 1,
+                                        "column": column + 1,
+                                        "excerpt": line.strip()
+                                    })
+                                    break
                     except Exception as e:
                         logger.error(f"Error reading file: {e}")
 
-            return JSONResponse(content=search_results, status_code=status.HTTP_200_OK)
+            return search_results
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

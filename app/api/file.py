@@ -209,7 +209,7 @@ async def search_files(
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     try:
-        files_and_folder = file_service.search_files(
+        files_and_folder = await file_service.search_files(
             db=db, 
             workspace_id=workspace_id, 
             search_query=search_query, 
@@ -238,7 +238,7 @@ async def get_changed_files(
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     try:
-        changed_files = file_service.get_changed_files(
+        changed_files = await file_service.get_changed_files(
             db=db, 
             workspace_id=workspace_id, 
             user_id=current_user["user"].id
@@ -269,7 +269,7 @@ async def get_file_diff(
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     try:
-        file_diff = file_service.get_file_diff(
+        file_diff = await file_service.get_file_diff(
             db=db, 
             file_path=file_path, 
             workspace_id=workspace_id, 
