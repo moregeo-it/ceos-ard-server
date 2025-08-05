@@ -426,7 +426,7 @@ class FileService:
                 detail="Invalid operation"
             )
 
-        return {"message": "File updated successfully"}
+        return {"message": "File updated successfully", "name": operation_request.new_name, "path": file_path}
     
     async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
         if not workspace_id:
