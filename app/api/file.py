@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status, HTTPException, File, UploadFile
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any
@@ -73,7 +73,7 @@ async def create_file_or_folder(
         )
 
 @router.get(
-    "/{workspace_id}/files/{file_path}", 
+    "/{workspace_id}/files/{file_path:path}", 
     summary="Read content of a file",
     description="Read content of a file",
 )
@@ -91,8 +91,9 @@ async def read_file_content(
             user_id=current_user["user"].id
         )
 
-        return JSONResponse(
+        return Response(
             content=file_content,
+            media_type="application/octet-stream",
             status_code=status.HTTP_200_OK
         )
 
@@ -104,15 +105,15 @@ async def read_file_content(
         )
 
 @router.put(
-    "/{workspace_id}/files/{file_path}", 
+    "/{workspace_id}/files/{file_path:path}", 
     summary="Store content of a file",
     description="Store content of a file",
     )
 async def store_file_content(
-    content: str,
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
+    content: UploadFile = File(...),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     try:
@@ -120,7 +121,7 @@ async def store_file_content(
             db=db, 
             workspace_id=workspace_id, 
             file_path=file_path, 
-            content=content, 
+            content=await content.read(), 
             user_id=current_user["user"].id
         )
 
@@ -137,13 +138,12 @@ async def store_file_content(
         )
 
 @router.delete(
-    "/{workspace_id}/files/{file_path}",
+    "/{workspace_id}/files/{file_path:path}",
     summary="Delete a file or folder in a workspace",
     description="Delete a file or folder in a workspace",
     status_code=status.HTTP_204_NO_CONTENT
 )
 async def delete_fileor_folder(
-    type: str,
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -151,8 +151,7 @@ async def delete_fileor_folder(
 ):
     try:
         await file_service.delete_file_or_folder(
-            db=db, 
-            type=type,
+            db=db,
             file_path=file_path, 
             workspace_id=workspace_id,
             user_id=current_user["user"].id
@@ -166,8 +165,8 @@ async def delete_fileor_folder(
         )
     
 @router.patch(
-    "/{workspace_id}/files/{file_path}",
-    summary="Updatea file metadata or operations",
+    "/{workspace_id}/files/{file_path:path}",
+    summary="Update file metadata or operations",
     description="Perform file operations such rename or revert changes",
 )
 async def patch_file(

@@ -207,7 +207,7 @@ class FileService:
             with open(file_path, "r") as f:
                 content = f.read()
 
-            return {"content": content}
+            return content
 
         except Exception as e:
             raise HTTPException(
@@ -220,7 +220,7 @@ class FileService:
         db: Session,
         workspace_id: str,
         file_path: str,
-        content: str,
+        content: bytes,
         user_id: str
     ):
         if not workspace_id:
@@ -269,7 +269,7 @@ class FileService:
             if not os.path.isfile(file_path):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="File path is not a file"
+                    detail="Path does not point to a file"
                 )
             
             if not os.access(file_path, os.W_OK):
@@ -278,7 +278,7 @@ class FileService:
                     detail="Permission denied"
                 )
 
-            with open(file_path, "w") as f:
+            with open(file_path, "wb") as f:
                 f.write(content)
 
             return {"message": "File content stored successfully"}
@@ -292,7 +292,6 @@ class FileService:
     async def delete_file_or_folder(
         self,
         db: Session,
-        type: str,
         workspace_id: str,
         file_path: str,
         user_id: str
@@ -309,12 +308,6 @@ class FileService:
                 detail="File path is required"
             )
         
-        if type not in ["file", "folder"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid type"
-            )
-        
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             workspace_path = str(workspace.workspace_path)
@@ -325,15 +318,15 @@ class FileService:
                     detail="Workspace not found"
                 )
 
-            return await self._delete_file_or_folder(workspace_path, type, file_path)
+            return await self._delete_file_or_folder(workspace_path, file_path)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to delete file or folder: {str(e)}"
             )
 
-    async def _delete_file_or_folder(self, workspace_path, type, file_path):
-        target_path = os.path.join(workspace_path, file_path)
+    async def _delete_file_or_folder(self, workspace_path, file_path):
+        target_path = os.path.join(workspace_path, sanitize_path(file_path))
 
         if not os.path.exists(target_path):
             raise HTTPException(
@@ -341,19 +334,17 @@ class FileService:
                 detail="File or folder not found"
             )
 
-        if type == "file":
+        if os.path.isfile(target_path):
             os.remove(target_path)
-            message = "File deleted successfully"
-        elif type == "folder":
+            return {"message": "File deleted successfully"}
+        elif os.path.isdir(target_path):
             shutil.rmtree(target_path)
-            message = "Folder deleted successfully"
+            return {"message": "Folder deleted successfully"}
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid type"
             )
-
-        return {"message": message}
 
     async def update_file(
         self,
@@ -407,7 +398,7 @@ class FileService:
     async def _update_file(self, workspace_path, file_path, operation_request):
         target_path = os.path.join(workspace_path, file_path)
 
-        if not os.path.exists(target_path):
+        if not os.path.isfile(target_path) or not target_path.startswith(workspace_path):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found"
@@ -419,39 +410,23 @@ class FileService:
                 detail="Permission denied"
             )
 
-        if not target_path.startswith(workspace_path):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File path is not in the workspace"
-            )
-
-        if not os.path.isfile(target_path):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File path is not a file"
-            )
-
         if operation_request.operation == "rename":
             new_file_path = os.path.join(os.path.dirname(target_path), operation_request.new_name)
-
             if os.path.exists(new_file_path):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="File already exists"
                 )
-            
-            os.rename(target_path, new_file_path)
-            message = "File renamed successfully"
+            os.replace(target_path, new_file_path)
         elif operation_request.operation == "revert":
-            await git_service.revert_file_changes(workspace_path=workspace_path, file_path=target_path)
-            message = "File reverted successfully"
+            await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid operation"
             )
 
-        return {"message": message}
+        return {"message": "File updated successfully"}
     
     async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
         if not workspace_id:

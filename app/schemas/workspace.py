@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -79,5 +79,11 @@ class FileOperation(str, Enum):
     REVERT = "revert"
 
 class FileOperationRequest(BaseModel):
-    new_name: Optional[str]
+    new_name: Optional[str] = Field(None, min_length=1, max_length=100)
     operation: FileOperation
+
+    @model_validator(mode='after')
+    def validate_rename(self):
+        if self.operation == FileOperation.RENAME and not self.new_name:
+            raise ValueError("New name is required for rename operation")
+        return self
