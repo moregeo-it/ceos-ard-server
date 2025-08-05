@@ -12,7 +12,7 @@ from app.schemas.workspace import CreateFileRequest, FileOperationRequest
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/workspaces", tags=["File"])
+router = APIRouter(prefix="/workspaces", tags=["Files"])
 
 @router.get(
     "/{workspace_id}/files",
@@ -25,7 +25,7 @@ async def list_workspace_files(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        files_and_folder = file_service.get_workspace_files(
+        files_and_folder = await file_service.get_workspace_files(
             db=db, 
             workspace_id=workspace_id, 
             user_id=current_user["user"].id
