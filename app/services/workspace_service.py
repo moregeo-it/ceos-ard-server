@@ -288,6 +288,41 @@ class WorkspaceService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get workspace status: {str(e)}"
             )
+    async def get_workspace_pfs_types(
+        self,
+        db: Session,
+        workspace_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        if not workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace ID is required"
+            )
+
+        try:
+            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+            workspace_path = str(workspace.workspace_path)
+
+            if not os.path.exists(workspace_path):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found"
+                )
+            
+            pfs_path = os.path.join(workspace_path, "pfs")
+
+            pfs_types = pfs_types = [pfs for pfs in os.listdir(pfs_path) if os.path.isdir(os.path.join(pfs_path, pfs))]
+
+            return pfs_types
+
+        except Exception as e:
+            logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get PFS types: {str(e)}"
+            )
+
 
     async def propose_changes(
         self,

@@ -178,43 +178,22 @@ async def propose_changes(
 
     return proposed_changes
 
-@router.get("/{workspace_id}/build/status", response_model=BuildStatusResponse)
-async def get_build_status(
+@router.get(
+    "/{workspace_id}/pfs",
+    summary="List PFS types",
+    description="List PFS types of a workspace",
+    tags=["PFS"]
+)
+async def list_workspace_pfs_types(
     workspace_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    build_status = await workspace_service.get_build_status(
-        db=db,
-        workspace_id=workspace_id,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    ):
+
+    pfs_types = await workspace_service.get_workspace_pfs_types(
+        db=db, 
+        workspace_id=workspace_id, 
         user_id=current_user["user"].id
     )
-    return build_status
 
-@router.post("/{workspace_id}/build/start")
-async def start_build(
-    workspace_id: str,
-    build_data: StartBuildRequest = StartBuildRequest(),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    result = await workspace_service.start_manual_build(
-        db=db,
-        workspace_id=workspace_id,
-        user_id=str(current_user.id),
-        pfs=build_data.pfs
-    )
-    return result
-
-@router.post("/{workspace_id}/build/cancel")
-async def cancel_build(
-    workspace_id: str,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    result = await workspace_service.cancel_build(
-        db=db,
-        workspace_id=workspace_id,
-        user_id=str(current_user.id)
-    )
-    return result
+    return JSONResponse(content=pfs_types, status_code=status.HTTP_200_OK)
