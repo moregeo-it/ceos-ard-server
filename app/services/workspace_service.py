@@ -412,7 +412,6 @@ class WorkspaceService:
         db: Session,
         workspace_id: str,
         user_id: str,
-        commit_message: str,
         pr_title: str,
         pr_description: str,
         access_token: str
@@ -446,7 +445,7 @@ class WorkspaceService:
                 )
 
             stdout, stderr, returncode = self.git_service._run_git_command(
-                ["git", "commit", "-m", commit_message],
+                ["git", "commit", "-m", pr_description],
                 cwd=workspace.workspace_path
             )
 

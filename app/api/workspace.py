@@ -172,7 +172,6 @@ async def propose_changes(
         db=db, 
         workspace_id=workspace_id,
         user_id=current_user["user"].id,
-        commit_message=propose_data.commit_message,
         pr_title=propose_data.pr_title,
         pr_description=propose_data.pr_description,
         access_token=github_token

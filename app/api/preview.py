@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Query
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/workspaces", tags=["Preview"])
 async def generate_preview(
     workspace_id: str,
     db: Session = Depends(get_db),
-    pfs: Optional[List[str]] = None,
+    pfs: List[str] = Query(..., min_items=1, max_items=50),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -34,11 +34,11 @@ async def generate_preview(
         )
 
         if success:
-            return Response(content=generated_previews, status_code=status.HTTP_200_OK, media_type="text/html")
+            return JSONResponse(content=generated_previews, status_code=status.HTTP_200_OK)
         else:
             return JSONResponse(
+                content=error_message,
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={PreviewErrorMessage(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message=error_message)},
             )
 
     except Exception as e:

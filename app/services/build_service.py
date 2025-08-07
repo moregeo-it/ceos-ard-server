@@ -99,6 +99,7 @@ class BuildService:
         build_info.status = BuildStatus.IN_PROGRESS
         output_dir = os.path.join(workspace_path, 'build')
         cmd_args = ["ceos-ard", "generate-all", "-o", output_dir, "-i", workspace_path, "--pdf", "--docx"]
+
         if pfs:
             for p in pfs:
                 cmd_args.extend(["-p", p])

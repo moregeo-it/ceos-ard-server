@@ -64,7 +64,6 @@ class WorkspaceStatusResponse(BaseModel):
     git_status: Optional[GitStatus]
 
 class ProposeChangesRequest(BaseModel):
-    commit_message: str = Field(..., min_length=1, max_length=200, description="Commit message")
     pr_title: str = Field(..., min_length=1, max_length=100, description="Pull request title")
     pr_description: str = Field(..., min_length=1, max_length=1000, description="Pull request description")
 
