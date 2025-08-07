@@ -256,7 +256,7 @@ async def get_changed_files(
         )
     
 @router.get(
-    "/{workspace_id}/diffs/{file_path}",
+    "/{workspace_id}/diffs/{file_path:path}",
     summary="Get diff for a specific file",
     description="Retrieve the diff for a specific file in a workspace",
 )
@@ -277,8 +277,7 @@ async def get_file_diff(
         return Response(
             content=file_diff,
             media_type="text/plain",
-            status_code=status.HTTP_200_OK,
-            headers={"Content-Type": "text/plain; charset=utf-8"}
+            status_code=status.HTTP_200_OK
         )
     except Exception as e:
         logger.error(f"Error getting file diff: {e}")

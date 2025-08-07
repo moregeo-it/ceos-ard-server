@@ -143,7 +143,8 @@ class GitService:
                 for line in stdout.split('\n'):
                     if line.strip():
                         status_code = line[0].strip()
-                        file_path = line[4:]
+                        file_path = line[3:]
+
                         if status_code == '??':
                             untracked_files.append(file_path)
                         else:

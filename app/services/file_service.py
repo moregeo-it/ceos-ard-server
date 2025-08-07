@@ -540,6 +540,18 @@ class FileService:
         
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         try:
+            if not workspace_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Workspace ID is required"
+                )
+            
+            if not file_path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="File path is required"
+                )
+            
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             workspace_path = str(workspace.workspace_path)
 
@@ -549,7 +561,21 @@ class FileService:
                     detail="Workspace not found"
                 )
 
-            stdout, stderr, returncode = await git_service._run_git_command(
+            target_path = os.path.join(workspace_path, sanitize_path(file_path))
+
+            if not os.path.exists(target_path):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found"
+                )
+            
+            if not os.path.isfile(target_path):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Path is not a file"
+                )
+            
+            stdout, stderr, returncode = git_service._run_git_command(
                 ["git", "diff", file_path],
                 cwd=workspace_path
             )
