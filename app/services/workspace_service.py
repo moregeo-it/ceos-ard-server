@@ -480,6 +480,12 @@ class WorkspaceService:
                 pr_data=pr_data
             )
 
+            workspace.pull_request_number = pr_response["number"]
+            workspace.pull_request_status = pr_response["state"]
+            workspace.pull_request_url = pr_response["html_url"]
+            db.commit()
+
+
             return {
                 "commit_sha": stdout.strip() if stdout else None,
                 "pull_request": pr_response
