@@ -84,8 +84,7 @@ class WorkspaceService:
             db.commit()
             db.refresh(workspace)
 
-            # Start workspace setup in background
-            asyncio.create_task(self._setup_workspace(db, workspace))
+            await self._setup_workspace(db, workspace)
 
             return workspace
 
@@ -120,7 +119,7 @@ class WorkspaceService:
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
 
-                asyncio.create_task(self._trigger_build(workspace))
+                await self._trigger_build(workspace)
             else:
                 workspace.status = WorkspaceStatus.ERROR
                 workspace.error_message = "Failed to clone repository"
