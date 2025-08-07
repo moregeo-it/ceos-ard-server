@@ -87,3 +87,20 @@ class FileOperationRequest(BaseModel):
         if self.operation == FileOperation.RENAME and not self.new_name:
             raise ValueError("New name is required for rename operation")
         return self
+
+class CreateNewPFSType(str, Enum):
+    OPTICAL = "optical"
+    SAR = "sar"
+
+class CreatePFSRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
+    title: str = Field(..., min_length=1, max_length=100, description="PFS title")
+    version: str = Field(default="1.0", description="PFS version")
+    applies_to: str = Field(..., description="Description of the PFS")
+    base_pfs: Optional[str] = Field(None, description="Base PFS ID")
+    type: CreateNewPFSType = Field(..., description="PFS type")
+    introduction: List[str] = Field(default=[
+        "what-are-ceos-ard-products",
+        "when-is-a-product-ceos-ard",
+        "difference-threshold-goal"
+    ], description="PFS introduction")

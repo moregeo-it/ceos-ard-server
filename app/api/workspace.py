@@ -8,10 +8,10 @@ import logging
 from app.db.database import get_db
 from app.services.auth_service import get_current_user
 from app.services.workspace_service import workspace_service
-from app.schemas.build import BuildStatusResponse, StartBuildRequest
 from app.schemas.workspace import (
     WorkspaceUpdate,
     WorkspaceCreate,
+    CreatePFSRequest,
     WorkspaceResponse,
     WorkspaceStatusResponse, 
     ProposeChangesResponse, 
@@ -197,3 +197,25 @@ async def list_workspace_pfs_types(
     )
 
     return JSONResponse(content=pfs_types, status_code=status.HTTP_200_OK)
+
+@router.post(
+    "/{workspace_id}/pfs",
+    summary="Create a PFS",
+    description="Create a PFS of a workspace",
+    tags=["PFS"]
+)
+async def create_workspace_pfs(
+    workspace_id: str,
+    create_pfs_request: CreatePFSRequest,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    ):
+
+    pfs = await workspace_service.create_workspace_pfs(
+        db=db, 
+        workspace_id=workspace_id, 
+        user_id=current_user["user"].id,
+        create_pfs_request=create_pfs_request
+    )
+
+    return JSONResponse(content=pfs, status_code=status.HTTP_200_OK)

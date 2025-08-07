@@ -4,14 +4,15 @@ import shutil
 import logging
 import asyncio
 
+from ruamel.yaml import YAML
 from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
-from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 
 from app.config import settings
 from app.services.git_service import git_service
+from app.schemas.workspace import CreatePFSRequest
 from app.services.build_service import build_service
 from app.services.github_service import github_service
 from app.models.workspace import GitWorkspace, WorkspaceStatus
@@ -322,7 +323,73 @@ class WorkspaceService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get PFS types: {str(e)}"
             )
+        
+    async def create_workspace_pfs(
+        self,
+        db: Session,
+        workspace_id: str,
+        user_id: str,
+        create_pfs_request: CreatePFSRequest
+    ):
+        if not workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace ID is required"
+            )
 
+        try:
+            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+            workspace_path = str(workspace.workspace_path)
+
+            if not os.path.exists(workspace_path):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found"
+                )
+
+            new_pfs_path = os.path.join(workspace_path, "pfs", create_pfs_request.id)
+
+            if os.path.exists(new_pfs_path):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="PFS already exists"
+                )
+
+            os.makedirs(new_pfs_path, exist_ok=True)
+
+            base_pfs_path = os.path.join(workspace_path, "pfs", create_pfs_request.base_pfs) if create_pfs_request.base_pfs else None
+
+            shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
+
+            yaml = YAML()
+            yaml.preserve_quotes = True
+
+            documents_path = os.path.join(new_pfs_path, "document.yaml")
+            with open(documents_path, "r") as f:
+                base_document = yaml.load(f)
+
+            document = base_document.copy()
+            document["id"] = create_pfs_request.id
+            document["title"] = create_pfs_request.title
+            document["version"] = create_pfs_request.version
+            document["applies_to"] = create_pfs_request.applies_to
+            document["introduction"] = create_pfs_request.introduction
+
+            with open(documents_path, "w") as f:
+                yaml.dump(document, f)
+
+            logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
+
+            return {
+                "id": create_pfs_request.id,
+                "name": create_pfs_request.title 
+            }
+        except Exception as e:
+            logger.error(f"Error creating PFS for workspace {workspace_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create PFS: {str(e)}"
+            )
 
     async def propose_changes(
         self,
