@@ -284,5 +284,41 @@ class GitHubService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to connect to GitHub API"
             )
+    async def get_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        number: int,
+        access_token: str
+    ) -> Dict[str, Any]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}"
+        headers = self.default_headers.copy()
+        headers['Authorization'] = f"Bearer {access_token}"
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(url, headers=headers)
+
+            if response.status_code == status.HTTP_200_OK:
+                return response.json()
+            else:
+                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"GitHub API returned status {response.status_code}"
+                )
+
+        except httpx.TimeoutException:
+            logger.error(f"Timeout requesting GitHub API for {owner}/{repo}")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="GitHub API request timed out"
+            )
+        except httpx.RequestError as e:
+            logger.error(f"Network error requesting GitHub API: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to connect to GitHub API"
+            )
 
 github_service = GitHubService()

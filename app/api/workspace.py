@@ -60,7 +60,7 @@ async def get_user_workspaces(
 
     try:
         workspaces = workspace_service.get_user_workspaces(
-            db=db, 
+            db=db,
             user_id=current_user["user"].id
         )
 
@@ -86,9 +86,11 @@ async def get_user_workspace(
 
     try:
         workspace = workspace_service.get_workspace_by_id(
-            db=db, 
+            db=db,
+            check_pr=True,
             workspace_id=workspace_id, 
-            user_id=current_user["user"].id
+            user_id=current_user["user"].id,
+            access_token=current_user["access_token"]
         )
 
         return workspace

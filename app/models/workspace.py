@@ -15,6 +15,13 @@ class WorkspaceStatus(Enum):
     CREATING = "creating"
     UPDATING = "updating"
     DELETED = "deleted"
+
+class PullRequestStatus(Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+    MERGED = "merged"
+    UNKNOWN = "unknown"
+    APPROVED = "approved"
 class GitWorkspace(Base):
     __tablename__ = "git_workspaces"
 
@@ -32,6 +39,9 @@ class GitWorkspace(Base):
     upstream_branch_name = Column(String(50), nullable=False)
     workspace_path = Column(String(500), nullable=False)
     error_message = Column(Text, nullable=True)
+    pull_request_url = Column(String, nullable=True)
+    pull_request_number = Column(String, nullable=True)
+    pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
     status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.CREATING, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=datetime.utcnow(), nullable=False)

@@ -15,8 +15,8 @@ from app.services.git_service import git_service
 from app.schemas.workspace import CreatePFSRequest
 from app.services.build_service import build_service
 from app.services.github_service import github_service
-from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import WorkspaceCreate, WorkspaceUpdate
+from app.models.workspace import GitWorkspace, WorkspaceStatus, PullRequestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -154,18 +154,34 @@ class WorkspaceService:
             GitWorkspace.status != WorkspaceStatus.DELETED
         ).order_by(GitWorkspace.created_at.desc()).all()
 
-    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str) -> GitWorkspace:
+    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, access_token: Optional[str] = None, check_pr: bool = False) -> GitWorkspace:
         workspace = db.query(GitWorkspace).filter(
             GitWorkspace.id == workspace_id,
             GitWorkspace.user_id == user_id,
             GitWorkspace.status != WorkspaceStatus.DELETED
         ).first()
 
-        if not workspace:
+        if not workspace or workspace.status == WorkspaceStatus.DELETED:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workspace not found"
             )
+        
+        if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number and check_pr:
+            pull_request = self.github_service.get_pull_request(
+                access_token=access_token,
+                owner=workspace.forked_repo_owner,
+                repo=workspace.forked_repo_name,
+                number=workspace.pull_request_number
+            )
+            db.query(GitWorkspace).filter(
+                GitWorkspace.id == workspace_id
+            ).update({
+                GitWorkspace.pull_request_status: pull_request['state'],
+                GitWorkspace.pull_request_url: pull_request['html_url'],
+                GitWorkspace.updated_at: datetime.now()
+            }, synchronize_session=False)
+            db.commit()
 
         return workspace
 

@@ -47,6 +47,9 @@ class WorkspaceResponse(BaseModel):
     upstream_branch_name: str
     workspace_path: str
     status: WorkspaceStatus
+    pull_request_url: Optional[str]
+    pull_request_number: Optional[str]
+    pull_request_status: Optional[str]
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
