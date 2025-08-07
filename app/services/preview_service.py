@@ -65,16 +65,12 @@ class PreviewService:
 
         preview_list = os.listdir(build_dir)
 
-        html_files = []
+        html_content = ""
         for file in preview_list:
             if file.endswith(".html") and any(p in file for p in pfs):
                 with open(os.path.join(build_dir, file), "r") as f:
-                    html_files.append({
-                        "name": file,
-                        "path": os.path.join("build", file),
-                        "content": f.read()
-                    })
+                    html_content = f.read()
 
-        return html_files
+        return html_content
         
 preview_service = PreviewService()

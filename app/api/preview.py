@@ -34,7 +34,7 @@ async def generate_preview(
         )
 
         if success:
-            return JSONResponse(content=generated_previews, status_code=status.HTTP_200_OK)
+            return Response(content=generated_previews, status_code=status.HTTP_200_OK, media_type="text/html")
         else:
             return JSONResponse(
                 content=error_message,

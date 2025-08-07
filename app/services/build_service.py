@@ -97,12 +97,9 @@ class BuildService:
             pfs: Optional[List[str]] = None
     ):
         build_info.status = BuildStatus.IN_PROGRESS
-        output_dir = os.path.join(workspace_path, 'build')
-        cmd_args = ["ceos-ard", "generate-all", "-o", output_dir, "-i", workspace_path, "--pdf", "--docx"]
+        output_dir = os.path.join(workspace_path, 'build', "-".join(pfs) if pfs else None)
 
-        if pfs:
-            for p in pfs:
-                cmd_args.extend(["-p", p])
+        cmd_args = ["ceos-ard", "generate", *pfs, "-o", output_dir, "-i", workspace_path, "--pdf", "--docx"]
 
         build_type_desc = f" with PFS {pfs}" if pfs else " (all files)"
         logm_messsge = f"Building workspace {workspace_id}{build_type_desc}"
