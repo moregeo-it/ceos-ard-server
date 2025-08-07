@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pfs", tags=["PFS"])
 
-@router.get("/list-pfs-folders")
+@router.get(
+    "/list", 
+    summary="List PFS folders", 
+    description="List PFS folders of the CEOS ARD repository"
+)
 async def list_pfs_folders(
     current_user = Depends(get_current_user),
 ) -> Dict[str, Any]:
