@@ -69,9 +69,9 @@ async def read_file_content(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        file_content = await file_service.read_file_content(db=db, workspace_id=workspace_id, file_path=file_path, user_id=current_user["user"].id)
+        file_info = await file_service.read_file_content(db=db, workspace_id=workspace_id, file_path=file_path, user_id=current_user["user"].id)
 
-        return Response(content=file_content, media_type="application/octet-stream", status_code=status.HTTP_200_OK)
+        return Response(content=file_info["content"], media_type=file_info["media_type"], status_code=status.HTTP_200_OK)
 
     except Exception as e:
         logger.error(f"Error reading file: {e}")

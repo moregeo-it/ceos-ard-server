@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.schemas.workspace import FileOperationRequest
 from app.services.git_service import git_service
 from app.services.workspace_service import workspace_service
+from app.utils.extraction import get_file_media_type
 from app.utils.sanitization import sanitize_path
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,9 @@ class FileService:
             with open(file_path) as f:
                 content = f.read()
 
-            return content
+            media_type = get_file_media_type(file_path)
+
+            return {"content": content, "media_type": media_type}
 
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from None
