@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.services.auth_service import get_current_user
@@ -25,13 +26,9 @@ async def list_pfs_folders(
 
         logger.info(f"Fetching PFS folders for {final_owner}/{final_repo} on {final_branch} branch")
 
-        pfs_folders = await github_service.get_pfs_folders(owner=final_owner, repo=final_repo, token=github_token, branch=final_branch)
+        pfs_types = await github_service.get_pfs_types(owner=final_owner, repo=final_repo, token=github_token, branch=final_branch)
 
-        return {
-            "success": True,
-            "pfsFolders": pfs_folders,
-            "message": f"Successfully fetched PFS folders for {final_owner}/{final_repo} on {final_branch} branch",
-        }
+        return JSONResponse(content={"pfs_types": pfs_types}, status_code=status.HTTP_200_OK)
 
     except HTTPException:
         raise
