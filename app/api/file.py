@@ -112,14 +112,14 @@ async def store_file_content(
     description="Delete a file or folder in a workspace",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_fileor_folder(
+async def delete(
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        await file_service.delete_file_or_folder(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+        await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
     except Exception as e:
         logger.error(f"Error deleting file: {e}")

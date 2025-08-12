@@ -171,7 +171,7 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file content: {str(e)}") from None
 
-    async def delete_file_or_folder(self, db: Session, workspace_id: str, file_path: str, user_id: str):
+    async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -185,11 +185,11 @@ class FileService:
             if not os.path.exists(workspace_path):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            return await self._delete_file_or_folder(workspace_path, file_path)
+            return await self._delete(workspace_path, file_path)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file or folder: {str(e)}") from None
 
-    async def _delete_file_or_folder(self, workspace_path, file_path):
+    async def _delete(self, workspace_path, file_path):
         target_path = os.path.join(workspace_path, sanitize_path(file_path))
 
         if not os.path.exists(target_path):
