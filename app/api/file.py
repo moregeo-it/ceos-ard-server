@@ -276,7 +276,7 @@ async def get_file_diff(
 
         return Response(
             content=file_diff,
-            media_type="text/plain",
+            media_type="text/plain; charset=utf-8",
             status_code=status.HTTP_200_OK
         )
     except Exception as e:
