@@ -208,8 +208,6 @@ class GitService:
         
     async def revert_file_changes(self, workspace_path: str, file_path: str):
         try:
-            print(f"Reverting file changes: {file_path}")
-            print(workspace_path)
             output, error, returncode = self._run_git_command(['git', 'checkout', '--', file_path], cwd=workspace_path)
             
             if returncode != 0:
