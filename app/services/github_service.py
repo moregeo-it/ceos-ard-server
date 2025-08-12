@@ -1,10 +1,8 @@
-import base64
 import logging
 from typing import Any
 
 import httpx
 from fastapi import HTTPException, status
-from ruamel.yaml import YAML
 
 from app.config import settings
 
@@ -63,36 +61,11 @@ class GitHubService:
 
             pfs_folders = [item["name"] for item in contents if item["type"] == "dir" and not item["name"].startswith(".")]
 
-            pfs_data = []
+            logger.info(f"Found {len(pfs_folders)} PFS folders in {owner}/{repo}")
 
-            for pfs_folder in pfs_folders:
-                try:
-                    document_path = f"pfs/{pfs_folder}/document.yaml"
-                    document_response = await self.get_repository_contents(owner, repo, token, document_path, branch)
-                    if isinstance(document_response, dict) and "content" in document_response:
-                        # GitHub API returns base64 encoded content
-                        encoded_content = document_response["content"]
-                        # Remove any whitespace/newlines from base64 string
-                        encoded_content = encoded_content.replace("\n", "").replace(" ", "")
-                        decoded_content = base64.b64decode(encoded_content).decode("utf-8")
-                    else:
-                        # If it's already a string, use it directly
-                        decoded_content = document_response
-                    yaml_parser = YAML(typ="safe")
-                    yaml_content = yaml_parser.load(decoded_content)
-                    pfs_info = {
-                        "id": yaml_content["id"],
-                        "title": yaml_content["title"],
-                    }
-                    pfs_data.append(pfs_info)
-
-                except Exception as e:
-                    logger.error(f"Failed to retrieve PFS information for {pfs_folder}: {e}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve PFS information for {pfs_folder}"
-                    ) from e
-
-            return pfs_data
+            return sorted(pfs_folders)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to retrieve PFS information: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve PFS information") from e

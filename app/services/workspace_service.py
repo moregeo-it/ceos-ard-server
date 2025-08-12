@@ -246,7 +246,22 @@ class WorkspaceService:
 
             pfs_path = os.path.join(workspace_path, "pfs")
 
-            pfs_types = pfs_types = [pfs for pfs in os.listdir(pfs_path) if os.path.isdir(os.path.join(pfs_path, pfs))]
+            pfs_types = []
+            yaml = YAML(typ="safe")
+
+            for pfs in os.listdir(pfs_path):
+                pfs_dir = os.path.join(pfs_path, pfs)
+                if os.path.isdir(pfs_dir):
+                    document_path = os.path.join(pfs_dir, "document.yaml")
+                    if os.path.exists(document_path):
+                        with open(document_path) as f:
+                            document = yaml.load(f)
+                            pfs_types.append(
+                                {
+                                    "id": document["id"],
+                                    "title": document["title"],
+                                }
+                            )
 
             return pfs_types
 
