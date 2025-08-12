@@ -53,7 +53,7 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from None
 
-    async def create_file_or_folder(self, db: Session, workspace_id: str, request_data: dict, user_id: str):
+    async def create(self, db: Session, workspace_id: str, request_data: dict, user_id: str):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -76,25 +76,35 @@ class FileService:
             if not os.path.exists(workspace_path):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            return self._create_file_or_folder(workspace_path=workspace_path, name=request_data.name, type=request_data.type, path=request_data.path)
+            if request_data.type == "file":
+                return self._create_file(workspace_path=workspace_path, name=request_data.name, type=request_data.type, path=request_data.path)
+            elif request_data.type == "folder":
+                return self._create_folder(workspace_path=workspace_path, name=request_data.name, type=request_data.type, path=request_data.path)
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
 
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file or folder: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file or folder: {str(e)}") from e
 
-    def _create_file_or_folder(self, workspace_path: str, name: str, type: str, path: str):
+    def _create_file(self, workspace_path: str, name: str, type: str, path: str):
         target_path = os.path.join(workspace_path, path, name)
 
         if os.path.exists(target_path):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{type.capitalize()} already exists")
 
-        if type == "file":
-            open(target_path, "w").close()
-            message = "File created successfully"
-        elif type == "folder":
-            os.makedirs(target_path, exist_ok=True)
-            message = "Folder created successfully"
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
+        open(target_path, "w").close()
+        message = f"{type.capitalize()} created successfully"
+
+        return {"name": name, "message": message, "path": target_path, "directory": type == "folder"}
+
+    def _create_folder(self, workspace_path: str, name: str, type: str, path: str):
+        target_path = os.path.join(workspace_path, path, name)
+
+        if os.path.exists(target_path):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{type.capitalize()} already exists")
+
+        os.makedirs(target_path)
+        message = f"{type.capitalize()} created successfully"
 
         return {"name": name, "message": message, "path": target_path, "directory": type == "folder"}
 
@@ -227,11 +237,39 @@ class FileService:
             if operation_request.operation == "rename" and not operation_request.new_name:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New name is required")
 
-            return await self._update_file(workspace_path, file_path, operation_request)
+            if operation_request.operation == "rename":
+                return await self._update_file_name(workspace_path, file_path, new_name=operation_request.new_name)
+            elif operation_request.operation == "revert":
+                return await self._revert_file_changes(workspace_path, file_path)
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operation")
+
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update file: {str(e)}") from None
 
-    async def _update_file(self, workspace_path, file_path, operation_request):
+    async def _update_file_name(self, workspace_path, file_path, new_name):
+        target_path = os.path.join(workspace_path, file_path)
+
+        if not os.path.exists(target_path):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        if not os.path.isfile(target_path) or not target_path.startswith(workspace_path):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        if not os.access(target_path, os.W_OK):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+
+        if not new_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New name is required")
+
+        new_file_path = os.path.join(os.path.dirname(target_path), new_name)
+        if os.path.exists(new_file_path):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
+        os.replace(target_path, new_file_path)
+
+        return {"name": new_name, "path": file_path}
+
+    async def _revert_file_changes(self, workspace_path, file_path):
         target_path = os.path.join(workspace_path, file_path)
 
         if not os.path.isfile(target_path) or not target_path.startswith(workspace_path):
@@ -240,17 +278,9 @@ class FileService:
         if not os.access(target_path, os.W_OK):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
 
-        if operation_request.operation == "rename":
-            new_file_path = os.path.join(os.path.dirname(target_path), operation_request.new_name)
-            if os.path.exists(new_file_path):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
-            os.replace(target_path, new_file_path)
-        elif operation_request.operation == "revert":
-            await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operation")
+        await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
 
-        return {"message": "File updated successfully", "name": operation_request.new_name, "path": file_path}
+        return {"path": file_path, "name": os.path.basename(file_path)}
 
     async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
         if not workspace_id:

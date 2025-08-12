@@ -40,14 +40,14 @@ async def list_workspace_files(
     summary="Create a file or folder in a workspace",
     description="Create a file or folder in a workspace",
 )
-async def create_file_or_folder(
+async def create(
     workspace_id: str,
     create_file_request: CreateFileRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        file_or_folder = await file_service.create_file_or_folder(
+        file_or_folder = await file_service.create(
             db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id
         )
 
