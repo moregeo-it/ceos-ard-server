@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pfs", tags=["PFS"])
 
 
-@router.get("", summary="List PFS folders", description="List PFS folders of the CEOS ARD repository")
+@router.get("", summary="List available PFS types", description="Retrieves all available PFS types for CEOS-ARD repository")
 async def list_pfs_folders(
     current_user=Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -28,7 +28,7 @@ async def list_pfs_folders(
 
         pfs_types = await github_service.get_pfs_types(owner=final_owner, repo=final_repo, token=access_token, branch=final_branch)
 
-        return JSONResponse(content={"pfs_types": pfs_types}, status_code=status.HTTP_200_OK)
+        return JSONResponse(content={"pfsTypes": pfs_types}, status_code=status.HTTP_200_OK)
 
     except HTTPException:
         raise

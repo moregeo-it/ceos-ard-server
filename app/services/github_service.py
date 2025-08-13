@@ -57,6 +57,7 @@ class GitHubService:
         try:
             if not token:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing GitHub access token")
+
             contents = await self.get_repository_contents(owner, repo, token, "pfs", branch)
 
             pfs_folders = [item["name"] for item in contents if item["type"] == "dir" and not item["name"].startswith(".")]
