@@ -1,14 +1,10 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-import logging
-
-from app.api import pfs
-from app.api import auth
-from app.api import file
-from app.api import preview
-from app.api import workspace
+from app.api import auth, file, pfs, preview, workspace
 from app.config import settings
 from app.db.database import Base, engine
 
@@ -25,8 +21,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.CORS_ORIGINS],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "DELETE", "PATCH", "PUT"],
+    allow_headers=["Authorization"],
 )
 
 app.include_router(auth.router)
