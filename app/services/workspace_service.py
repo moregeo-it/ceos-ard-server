@@ -4,6 +4,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -137,41 +138,58 @@ class WorkspaceService:
         )
 
     def get_workspace_by_id(
-        self, db: Session, workspace_id: str, user_id: str, access_token: str | None = None, check_pr: bool = False
+        self, db: Session, workspace_id: str, user_id: str, *, access_token: str | None = None, check_pr: bool = False
     ) -> GitWorkspace:
-        workspace = (
-            db.query(GitWorkspace)
-            .filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.DELETED)
-            .first()
-        )
+        try:
+            if not workspace_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
-        if not workspace or workspace.status == WorkspaceStatus.DELETED:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+            if not user_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-        if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number and check_pr:
-            pull_request = self.github_service.get_pull_request(
-                access_token=access_token, owner=workspace.forked_repo_owner, repo=workspace.forked_repo_name, number=workspace.pull_request_number
+            if check_pr and access_token is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
+
+            workspace = (
+                db.query(GitWorkspace)
+                .filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.DELETED)
+                .first()
             )
-            db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).update(
-                {
-                    GitWorkspace.pull_request_status: pull_request["state"],
-                    GitWorkspace.pull_request_url: pull_request["html_url"],
-                    GitWorkspace.updated_at: datetime.now(),
-                },
-                synchronize_session=False,
-            )
-            db.commit()
 
-        return workspace
+            if not workspace or workspace.status == WorkspaceStatus.DELETED:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+            if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number and check_pr:
+                pull_request = self.github_service.get_pull_request(
+                    access_token=access_token,
+                    owner=workspace.forked_repo_owner,
+                    repo=workspace.forked_repo_name,
+                    number=workspace.pull_request_number,
+                )
+                db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).update(
+                    {
+                        GitWorkspace.pull_request_status: pull_request["state"],
+                        GitWorkspace.pull_request_url: pull_request["html_url"],
+                        GitWorkspace.updated_at: datetime.now(),
+                    },
+                    synchronize_session=False,
+                )
+                db.commit()
+
+            return workspace
+
+        except Exception as e:
+            logger.error(f"Error getting workspace {workspace_id}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
 
     async def update_workspace(self, db: Session, workspace_id: str, user_id: str, update_data: WorkspaceUpdate) -> GitWorkspace:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
-        update_dict = update_data.dict(exclude_unset=True)
+        update_dict = update_data.model_dump(exclude_unset=True)
 
         if not update_dict:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description, title, or pfs must be provided")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description or title must be provided")
 
         db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id).update(update_dict, synchronize_session=False)
 
@@ -192,7 +210,7 @@ class WorkspaceService:
         if workspace.status == WorkspaceStatus.DELETED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is already deleted")
 
-        if not os.path.exists(workspace_path):
+        if not Path(workspace_path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
         if workspace.user_id != user_id:
@@ -203,7 +221,7 @@ class WorkspaceService:
             workspace.updated_at = datetime.now()
             db.commit()
 
-            if os.path.exists(workspace_path):
+            if Path(workspace_path).exists():
                 shutil.rmtree(workspace_path)
                 logger.info(f"Deleted workspace at {workspace_path}")
             else:

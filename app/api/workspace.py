@@ -94,9 +94,14 @@ async def update_workspace(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    workspace = await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
-
-    return workspace
+    try:
+        workspace = await workspace_service.update_workspace(
+            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data
+        )
+        return workspace
+    except Exception as e:
+        logger.error(f"Error updating workspace: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from None
 
 
 @router.delete(
@@ -107,9 +112,12 @@ async def delete_workspace(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+    try:
+        await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
-    return None
+    except Exception as e:
+        logger.error(f"Error deleting workspace: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from None
 
 
 @router.get("/{workspace_id}/status", response_model=WorkspaceStatusResponse)
@@ -118,9 +126,14 @@ async def get_workspace_status(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    workspace_status = await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+    try:
+        workspace_status = await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
-    return workspace_status
+        return workspace_status
+
+    except Exception as e:
+        logger.error(f"Error getting workspace status: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace status: {str(e)}") from None
 
 
 @router.post("/{workspace_id/propose}", response_model=ProposeChangesResponse)
