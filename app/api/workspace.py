@@ -2,7 +2,6 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -34,11 +33,10 @@ async def create_workspace(
     access_token = current_user["access_token"]
 
     try:
-        workspace = await workspace_service.create_workspace(
+        return await workspace_service.create_workspace(
             db=db, user_id=user_id, username=username, workspace_data=workspace_data, access_token=access_token
         )
 
-        return workspace
     except Exception as e:
         logger.error(f"Error creating workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from None
@@ -56,9 +54,7 @@ async def get_user_workspaces(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        workspaces = workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id)
-
-        return workspaces
+        return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id)
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspaces: {str(e)}") from None
@@ -76,11 +72,9 @@ async def get_user_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        workspace = workspace_service.get_workspace_by_id(
+        return workspace_service.get_workspace_by_id(
             db=db, check_pr=True, workspace_id=workspace_id, user_id=current_user["user"].id, access_token=current_user["access_token"]
         )
-
-        return workspace
 
     except Exception as e:
         logger.error(f"Error getting workspace: {e}")
@@ -95,10 +89,8 @@ async def update_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        workspace = await workspace_service.update_workspace(
-            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data
-        )
-        return workspace
+        return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
+
     except Exception as e:
         logger.error(f"Error updating workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from None
@@ -113,7 +105,7 @@ async def delete_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
     except Exception as e:
         logger.error(f"Error deleting workspace: {e}")
@@ -127,9 +119,7 @@ async def get_workspace_status(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        workspace_status = await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-
-        return workspace_status
+        return await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
     except Exception as e:
         logger.error(f"Error getting workspace status: {e}")
@@ -143,18 +133,21 @@ async def propose_changes(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    access_token = current_user.get("access_token")
+    try:
+        access_token = current_user.get("access_token")
 
-    proposed_changes = await workspace_service.propose_changes(
-        db=db,
-        workspace_id=workspace_id,
-        user_id=current_user["user"].id,
-        pr_title=propose_data.pr_title,
-        pr_description=propose_data.pr_description,
-        access_token=access_token,
-    )
+        return await workspace_service.propose_changes(
+            db=db,
+            workspace_id=workspace_id,
+            user_id=current_user["user"].id,
+            pr_title=propose_data.pr_title,
+            pr_description=propose_data.pr_description,
+            access_token=access_token,
+        )
 
-    return proposed_changes
+    except Exception as e:
+        logger.error(f"Error proposing changes: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from None
 
 
 @router.get("/{workspace_id}/pfs", summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"])
@@ -163,9 +156,12 @@ async def list_workspace_pfs_types(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+    try:
+        return await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
-    return JSONResponse(content=pfs_types, status_code=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error listing Workspace PFS types: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list PFS types: {str(e)}") from None
 
 
 @router.post("/{workspace_id}/pfs", summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
@@ -175,8 +171,11 @@ async def create_workspace_pfs(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    pfs = await workspace_service.create_workspace_pfs(
-        db=db, workspace_id=workspace_id, user_id=current_user["user"].id, create_pfs_request=create_pfs_request
-    )
+    try:
+        return await workspace_service.create_workspace_pfs(
+            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, create_pfs_request=create_pfs_request
+        )
 
-    return JSONResponse(content=pfs, status_code=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error creating PFS: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from None
