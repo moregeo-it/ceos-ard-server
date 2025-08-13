@@ -40,10 +40,10 @@ async def create_workspace(
 
 @router.get(
     "/",
-    summary="Get all workspaces",
+    summary="List all workspaces",
     status_code=status.HTTP_200_OK,
     response_model=list[WorkspaceResponse],
-    description="Retrieve al workspaces for a authenticated user",
+    description="Retrieve all workspaces for a authenticated user",
 )
 async def get_user_workspaces(
     db: Session = Depends(get_db),
