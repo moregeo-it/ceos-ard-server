@@ -1,7 +1,7 @@
 import logging
-import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from fastapi import HTTPException, status
 
@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 class GitService:
     def __init__(self):
-        self.workspaces_root = settings.WORKSPACES_ROOT
+        self.workspaces_root = Path(settings.WORKSPACES_ROOT)
         self._ensure_workspaces_directory()
 
     def _ensure_workspaces_directory(self):
-        os.makedirs(self.workspaces_root, exist_ok=True)
+        self.workspaces_root.mkdir(parents=True, exist_ok=True)
 
     def _run_git_command(self, command: list[str], cwd: str) -> tuple[str, str, int]:
         try:
@@ -30,7 +30,7 @@ class GitService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to run git command: {e}") from e
 
     def generate_workspace_path(self, workspace_id: str) -> str:
-        return os.path.join(self.workspaces_root, workspace_id)
+        return str(self.workspaces_root / workspace_id)
 
     def generate_branch_name(self, workspace_id: str) -> str:
         return f"workspace/{workspace_id}"
@@ -39,14 +39,14 @@ class GitService:
         self, clone_url: str, workspace_path: str, branch_name: str, upstream_owner: str, upstream_repo: str, upstream_branch: str = "main"
     ) -> bool:
         try:
-            workspace_path = os.path.abspath(workspace_path)
+            workspace_path = Path(workspace_path).resolve()
 
-            if os.path.exists(workspace_path):
+            if workspace_path.exists():
                 shutil.rmtree(workspace_path)
 
-            os.makedirs(os.path.dirname(workspace_path), exist_ok=True)
+            workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
-            stdout, stderr, returncode = self._run_git_command(["git", "clone", clone_url, workspace_path], cwd=os.path.dirname(workspace_path))
+            stdout, stderr, returncode = self._run_git_command(["git", "clone", clone_url, workspace_path], cwd=workspace_path.parent)
 
             if returncode != 0:
                 logger.error(f"Failed to clone repository: {stderr}")
@@ -87,13 +87,13 @@ class GitService:
         except Exception as e:
             logger.error(f"Unexpected error cloning repository: {e}")
 
-            if os.path.exists(workspace_path):
+            if workspace_path.exists():
                 shutil.rmtree(workspace_path)
 
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {e}") from e
 
     async def get_git_status(self, workspace_path: str) -> str:
-        if not os.path.exists(workspace_path):
+        if not workspace_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
         try:
             stdout, stderr, returncode = self._run_git_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path)

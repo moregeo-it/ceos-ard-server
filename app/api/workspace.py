@@ -29,13 +29,19 @@ async def create_workspace(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    user_id = current_user["user"].id
+    username = current_user["user"].username
     access_token = current_user["access_token"]
 
-    workspace = await workspace_service.create_workspace(
-        db=db, workspace_data=workspace_data, user_id=current_user["user"].id, username=current_user["user"].username, access_token=access_token
-    )
+    try:
+        workspace = await workspace_service.create_workspace(
+            db=db, user_id=user_id, username=username, workspace_data=workspace_data, access_token=access_token
+        )
 
-    return workspace
+        return workspace
+    except Exception as e:
+        logger.error(f"Error creating workspace: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from None
 
 
 @router.get(

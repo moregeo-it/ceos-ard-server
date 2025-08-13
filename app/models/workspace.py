@@ -1,12 +1,13 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, ARRAY, Enum as SQLAlchemyEnum
+import uuid
+from datetime import datetime
+from enum import Enum
+
+from sqlalchemy import ARRAY, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
-from enum import Enum
-from datetime import datetime
-
-import uuid
-
 from app.db.database import Base
+
 
 class WorkspaceStatus(Enum):
     ACTIVE = "active"
@@ -16,19 +17,22 @@ class WorkspaceStatus(Enum):
     UPDATING = "updating"
     DELETED = "deleted"
 
+
 class PullRequestStatus(Enum):
     OPEN = "open"
     CLOSED = "closed"
     MERGED = "merged"
     UNKNOWN = "unknown"
     APPROVED = "approved"
+
+
 class GitWorkspace(Base):
     __tablename__ = "git_workspaces"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String(50), nullable=False)
     description = Column(String(500), nullable=True)
-    pfs = Column(ARRAY(String(50)), nullable=False)
+    pfs = Column(ARRAY(String(50)), nullable=True)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
     upstream_repo_owner = Column(String(50), nullable=False)
     upstream_repo_name = Column(String(50), nullable=False)

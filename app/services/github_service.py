@@ -165,9 +165,9 @@ class GitHubService:
                 logger.error(f"GitHub API error: {response.status_code} - {response.text}")
                 raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
 
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
             logger.error(f"Timeout requesting GitHub API for {upstream_owner}/{upstream_repo}")
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from None
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
         except httpx.RequestError as e:
             logger.error(f"Network error requesting GitHub API: {e}")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e

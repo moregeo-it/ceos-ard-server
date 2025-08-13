@@ -31,9 +31,6 @@ class WorkspaceService:
         upstream_repo_owner = settings.CEOS_ARD_OWNER
         upstream_branch_name = settings.CEOS_ARD_MAIN_BRANCH
 
-        if not workspace_data.pfs:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS is required")
-
         if not workspace_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
 
@@ -106,7 +103,8 @@ class WorkspaceService:
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
 
-                await self._trigger_build(workspace)
+                if workspace.pfs is not None and len(workspace.pfs) > 0:
+                    await self._trigger_build(workspace)
             else:
                 workspace.status = WorkspaceStatus.ERROR
                 workspace.error_message = "Failed to clone repository"
