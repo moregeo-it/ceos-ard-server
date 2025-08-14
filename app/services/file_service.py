@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+from pathlib import Path
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -26,29 +27,26 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if path:
-                workspace_path = os.path.join(workspace_path, sanitize_path(path))
+            if path and path != "/":
+                workspace_path = workspace_path / Path(path.strip("/"))
 
-            if not os.path.exists(workspace_path):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+            if not workspace_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target path not found")
 
             file_and_folder = []
 
-            for root, dirs, files in os.walk(workspace_path):
-                if root == workspace_path:
-                    dirs[:] = [dir for dir in dirs if dir not in ["template", "build", "LICENSE", "README.md"]]
-                else:
-                    dirs[:] = [dir for dir in dirs if not dir.startswith(".")]
-                files[:] = [file for file in files if not file.startswith(".") and not file.endswith(".pdf")]
-
-                for dir in dirs:
-                    file_and_folder.append(os.path.join(root, dir))
-
-                for file in files:
-                    file_and_folder.append(os.path.join(root, file))
-
+            for path in workspace_path.rglob("*"):
+                if "build" in str(path) or ".git" in str(path):
+                    continue
+                if path.name in ["templates", "LICENSE"] or path.name.startswith("."):
+                    continue
+                if path.parent.name in ["templates"] or path.parent.name.startswith("."):
+                    continue
+                if path.is_file() and (path.name.startswith(".") or path.name.endswith(".pdf")):
+                    continue
+                file_and_folder.append({"name": path.name, "path": str(path), "is_directory": path.is_dir()})
             return file_and_folder
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from None
