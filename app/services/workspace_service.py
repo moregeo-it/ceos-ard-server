@@ -312,14 +312,11 @@ class WorkspaceService:
 
             documents_path = os.path.join(new_pfs_path, "document.yaml")
             with open(documents_path) as f:
-                base_document = yaml.load(f)
+                document = yaml.load(f)
 
-            document = base_document.copy()
-            document["id"] = create_pfs_request.id
-            document["title"] = create_pfs_request.title
-            document["version"] = create_pfs_request.version
-            document["applies_to"] = create_pfs_request.applies_to
-            document["introduction"] = create_pfs_request.introduction
+            document.update(
+                create_pfs_request.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
+            )
 
             with open(documents_path, "w") as f:
                 yaml.dump(document, f)
