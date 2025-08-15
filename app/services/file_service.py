@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 import shutil
 from pathlib import Path
@@ -7,11 +6,10 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.schemas.workspace import FileOperationRequest
+from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import git_service
 from app.services.workspace_service import workspace_service
 from app.utils.extraction import get_file_media_type
-from app.utils.sanitization import sanitize_path
 
 logger = logging.getLogger(__name__)
 
@@ -69,42 +67,60 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if request_data.type == "file":
-                return self._create_file(workspace_path=workspace_path, name=request_data.name, type=request_data.type, path=request_data.path)
+                return self._create_file(workspace_path=workspace_path, name=request_data.name, path=request_data.path)
             elif request_data.type == "folder":
-                return self._create_folder(workspace_path=workspace_path, name=request_data.name, type=request_data.type, path=request_data.path)
+                return self._create_folder(workspace_path=workspace_path, name=request_data.name, path=request_data.path)
             else:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
 
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file or folder: {str(e)}") from e
 
-    def _create_file(self, workspace_path: str, name: str, type: str, path: str):
-        target_path = os.path.join(workspace_path, path, name)
+    def _create_file(self, workspace_path: str, name: str, path: str, content: str = None):
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name is required")
 
-        if os.path.exists(target_path):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{type.capitalize()} already exists")
+        if not path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is required")
 
-        open(target_path, "w").close()
-        message = f"{type.capitalize()} created successfully"
+        if not workspace_path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is required")
 
-        return {"name": name, "message": message, "path": target_path, "directory": type == "folder"}
+        target_path = workspace_path / Path(path.strip("/")) / name
 
-    def _create_folder(self, workspace_path: str, name: str, type: str, path: str):
-        target_path = os.path.join(workspace_path, path, name)
+        if target_path.exists():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
 
-        if os.path.exists(target_path):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{type.capitalize()} already exists")
+        target_path.touch(exist_ok=True)
+        if content is not None:
+            target_path.write_text(content, encoding="utf-8")
 
-        os.makedirs(target_path)
-        message = f"{type.capitalize()} created successfully"
+        return {"name": name, "path": str(target_path), "directory": False}
 
-        return {"name": name, "message": message, "path": target_path, "directory": type == "folder"}
+    def _create_folder(self, workspace_path: str, name: str, path: str):
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name is required")
+
+        if not path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is required")
+
+        if not workspace_path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is required")
+
+        target_path = workspace_path / Path(path.strip("/")) / name
+
+        if target_path.exists():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Directory already exists")
+
+        target_path.mkdir(parents=True, exist_ok=True)
+
+        return {"name": name, "path": str(target_path), "directory": True}
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not workspace_id:
@@ -115,25 +131,23 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            file_path = sanitize_path(file_path)
-            file_path = os.path.join(workspace_path, file_path)
+            file_path = workspace_path / Path(file_path.strip("/"))
 
-            if not file_path.startswith(workspace_path):
+            if not Path(file_path).is_relative_to(workspace_path):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is not in the workspace")
 
-            if not os.path.exists(file_path):
+            if not Path(file_path).exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-            if not os.path.isfile(file_path):
+            if not Path(file_path).is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is not a file")
 
-            with open(file_path) as f:
-                content = f.read()
+            content = Path(file_path).read_text()
 
             media_type = get_file_media_type(file_path)
 
@@ -154,28 +168,23 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            file_path = sanitize_path(file_path)
-            file_path = os.path.join(workspace_path, file_path)
+            file_path = workspace_path / Path(file_path.strip("/"))
 
-            if not file_path.startswith(workspace_path):
+            if not Path(file_path).is_relative_to(workspace_path):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is not in the workspace")
 
-            if not os.path.exists(file_path):
+            if not Path(file_path).exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-            if not os.path.isfile(file_path):
+            if not Path(file_path).is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path does not point to a file")
 
-            if not os.access(file_path, os.W_OK):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
-
-            with open(file_path, "wb") as f:
-                f.write(content)
+            Path(file_path).write_bytes(content)
 
             return {"message": "File content stored successfully"}
 
@@ -191,31 +200,38 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             return await self._delete(workspace_path, file_path)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file or folder: {str(e)}") from None
 
-    async def _delete(self, workspace_path, file_path):
-        target_path = os.path.join(workspace_path, sanitize_path(file_path))
+    async def _delete(self, workspace_path: Path, file_path: str):
+        if not file_path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
-        if not os.path.exists(target_path):
+        if not workspace_path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is required")
+
+        target_path = workspace_path / Path(file_path.strip("/"))
+
+        if not Path(target_path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
 
-        if os.path.isfile(target_path):
-            os.remove(target_path)
-            return {"message": "File deleted successfully"}
-        elif os.path.isdir(target_path):
+        if Path(target_path).is_file():
+            target_path.unlink()
+            if not target_path.exists():
+                return {"message": "File deleted successfully"}
+        elif Path(target_path).is_dir():
             shutil.rmtree(target_path)
             return {"message": "Folder deleted successfully"}
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
 
-    async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FileOperationRequest, user_id: str):
+    async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -224,19 +240,16 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if operation_request.operation not in ["rename", "revert"]:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operation")
 
-            if operation_request.operation == "rename" and not operation_request.new_name:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New name is required")
-
             if operation_request.operation == "rename":
-                return await self._update_file_name(workspace_path, file_path, new_name=operation_request.new_name)
+                return await self._update_file_name(workspace_path, file_path, new_name=operation_request.target)
             elif operation_request.operation == "revert":
                 return await self._revert_file_changes(workspace_path, file_path)
             else:
@@ -246,39 +259,40 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update file: {str(e)}") from None
 
     async def _update_file_name(self, workspace_path, file_path, new_name):
-        target_path = os.path.join(workspace_path, file_path)
+        target_path = Path(workspace_path / Path(file_path.strip("/")))
 
-        if not os.path.exists(target_path):
+        if not target_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-        if not os.path.isfile(target_path) or not target_path.startswith(workspace_path):
+        if not target_path.is_file() or not target_path.is_relative_to(workspace_path):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-
-        if not os.access(target_path, os.W_OK):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
 
         if not new_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New name is required")
 
-        new_file_path = os.path.join(os.path.dirname(target_path), new_name)
-        if os.path.exists(new_file_path):
+        new_file_path = Path(Path(target_path).parent / new_name)
+        if new_file_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
-        os.replace(target_path, new_file_path)
+        target_path.replace(new_file_path)
 
         return {"name": new_name, "path": file_path}
 
     async def _revert_file_changes(self, workspace_path, file_path):
-        target_path = os.path.join(workspace_path, file_path)
+        try:
+            file_path = Path(file_path.strip("/"))
+            target_path = Path(workspace_path / file_path)
 
-        if not os.path.isfile(target_path) or not target_path.startswith(workspace_path):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+            if not target_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-        if not os.access(target_path, os.W_OK):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+            if not target_path.is_file() or not target_path.is_relative_to(workspace_path):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-        await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
+            await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
 
-        return {"path": file_path, "name": os.path.basename(file_path)}
+            return {"path": str(target_path), "name": str(target_path.name)}
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
 
     async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
         if not workspace_id:
@@ -288,53 +302,59 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query is required")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        workspace_path = str(workspace.workspace_path)
+        workspace_path = Path(workspace.workspace_path)
 
-        if not os.path.exists(workspace_path):
+        if not workspace_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
         return await self._search_files(workspace_path, search_query)
 
-    async def _search_files(self, workspace_path, search_query):
+    async def _search_files(self, workspace_path: Path, search_query: str) -> list[dict]:
         try:
             search_results = []
             search_query_lower = search_query.lower()
             ignored_extensions = re.compile(r"\.(pdf|jpg|jpeg|png|gif|bmp|docx|xlsx)$", re.IGNORECASE)
-            for root, _, files in os.walk(workspace_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
 
-                    if not file_path.startswith(workspace_path):
-                        continue
+            if not workspace_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-                    if search_query in file:
-                        search_results.append({"name": file, "type": "filename", "path": os.path.relpath(file_path, workspace_path)})
+            if not workspace_path.is_dir():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
 
-                    if ignored_extensions.search(file_path):
-                        continue
-                    try:
-                        with open(file_path, encoding="utf-8", errors="ignore") as f:
-                            for i, line in enumerate(f):
-                                line_lower = line.lower()
-                                if search_query_lower in line_lower:
-                                    column = line_lower.index(search_query_lower)
-                                    search_results.append(
-                                        {
-                                            "name": file,
-                                            "type": "file",
-                                            "path": os.path.relpath(file_path, workspace_path),
-                                            "line": i + 1,
-                                            "column": column + 1,
-                                            "excerpt": line.strip(),
-                                        }
-                                    )
-                                    break
-                    except Exception as e:
-                        logger.error(f"Error reading file: {e}")
+            for file_path in workspace_path.rglob("*"):
+                if not file_path.is_file():
+                    continue
+
+                if search_query in file_path.name:
+                    search_results.append({"name": file_path.name, "type": "filename", "path": str(file_path.relative_to(workspace_path))})
+                    continue
+
+                if ignored_extensions.search(file_path.name):
+                    continue
+
+                try:
+                    with file_path.open(encoding="utf-8", errors="ignore") as f:
+                        for i, line in enumerate(f):
+                            line_lower = line.lower()
+                            if search_query_lower in line_lower:
+                                column = line_lower.index(search_query_lower)
+                                search_results.append(
+                                    {
+                                        "name": file_path.name,
+                                        "type": "content",
+                                        "path": str(file_path.relative_to(workspace_path)),
+                                        "line": i + 1,
+                                        "column": column + 1,
+                                        "excerpt": line.strip(),
+                                    }
+                                )
+                                break
+                except (UnicodeDecodeError, FileNotFoundError) as e:
+                    logger.warning(f"Could not read file {file_path}: {str(e)}")
 
             return search_results
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from e
 
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
         try:
@@ -342,9 +362,9 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             git_status = await git_service.get_git_status(workspace_path)
@@ -370,17 +390,21 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            target_path = os.path.join(workspace_path, sanitize_path(file_path))
+            if not workspace_path.is_dir():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
 
-            if not os.path.exists(target_path):
+            file_path = file_path.strip("/")
+            target_path = workspace_path / Path(file_path)
+
+            if not target_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-            if not os.path.isfile(target_path):
+            if not target_path.is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
 
             stdout, stderr, returncode = git_service._run_git_command(["git", "diff", file_path], cwd=workspace_path)

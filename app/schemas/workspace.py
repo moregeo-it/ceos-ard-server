@@ -87,18 +87,18 @@ class CreateFileRequest(BaseModel):
     type: str
 
 
-class FileOperation(str, Enum):
+class FilePatchOperation(str, Enum):
     RENAME = "rename"
     REVERT = "revert"
 
 
-class FileOperationRequest(BaseModel):
-    new_name: str | None = Field(None, min_length=1, max_length=100)
-    operation: FileOperation
+class FilePatchRequest(BaseModel):
+    target: str | None = Field(None, min_length=1, max_length=100)
+    operation: FilePatchOperation
 
     @model_validator(mode="after")
     def validate_rename(self):
-        if self.operation == FileOperation.RENAME and not self.new_name:
+        if self.operation == FilePatchOperation.RENAME and not self.target:
             raise ValueError("New name is required for rename operation")
         return self
 

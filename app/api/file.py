@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.workspace import CreateFileRequest, FileOperationRequest
+from app.schemas.workspace import CreateFileRequest, FilePatchRequest
 from app.services.auth_service import get_current_user
 from app.services.file_service import file_service
 
@@ -119,7 +119,7 @@ async def delete(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
@@ -134,7 +134,7 @@ async def delete(
 async def patch_file(
     file_path: str,
     workspace_id: str,
-    operation_request: FileOperationRequest,
+    operation_request: FilePatchRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):

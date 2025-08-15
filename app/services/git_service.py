@@ -130,6 +130,7 @@ class GitService:
                                 " D": "deleted",
                                 "R ": "renamed",
                                 "C ": "copied",
+                                "R": "renamed",
                             }
 
                             file_status = status_map.get(status_code, "unknown")
@@ -167,15 +168,30 @@ class GitService:
             logger.error(f"Error getting git status: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get git status") from e
 
-    async def revert_file_changes(self, workspace_path: str, file_path: str):
+    async def revert_file_changes(self, workspace_path: Path, file_path: Path) -> str:
         try:
+            if not workspace_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+            if not workspace_path.is_dir():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
+
+            target_file_path = workspace_path / file_path
+            if not target_file_path.is_relative_to(workspace_path):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in workspace")
+            if not target_file_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File does not exist")
+            if not target_file_path.is_file():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
+
             output, error, returncode = self._run_git_command(["git", "checkout", "--", file_path], cwd=workspace_path)
 
             if returncode != 0:
                 logger.error(f"Error reverting file changes: {error}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revert file changes")
 
-            return output
+            logger.info(f"Successfully reverted changes for file: {file_path}")
+
+            return f"Reverted changes for file: {file_path.name}"
         except Exception as e:
             logger.error(f"Error reverting file changes: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revert file changes") from e
