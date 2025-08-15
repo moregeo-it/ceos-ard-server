@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.schemas.workspace import (
     CreatePFSRequest,
+    PFSResponse,
     ProposeChangesRequest,
     ProposeChangesResponse,
     WorkspaceCreate,
@@ -97,7 +98,11 @@ async def update_workspace(
 
 
 @router.delete(
-    "/{workspace_id}", summary="Delete a workspace", status_code=status.HTTP_204_NO_CONTENT, description="Delete a workspace and all associated data"
+    "/{workspace_id}",
+    response_model=None,
+    summary="Delete a workspace",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Delete a workspace and all associated data",
 )
 async def delete_workspace(
     workspace_id: str,
@@ -112,7 +117,12 @@ async def delete_workspace(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from None
 
 
-@router.get("/{workspace_id}/status", response_model=WorkspaceStatusResponse)
+@router.get(
+    "/{workspace_id}/status",
+    response_model=WorkspaceStatusResponse,
+    summary="Get the status of a workspace",
+    description="Get the status of a workspace",
+)
 async def get_workspace_status(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -126,7 +136,12 @@ async def get_workspace_status(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace status: {str(e)}") from None
 
 
-@router.post("/{workspace_id/propose}", response_model=ProposeChangesResponse)
+@router.post(
+    "/{workspace_id/propose}",
+    response_model=ProposeChangesResponse,
+    summary="Propose changes to a workspace",
+    description="Propose changes to a workspace by creating a pull request",
+)
 async def propose_changes(
     workspace_id: str,
     propose_data: ProposeChangesRequest,
@@ -150,7 +165,9 @@ async def propose_changes(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from None
 
 
-@router.get("/{workspace_id}/pfs", summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"])
+@router.get(
+    "/{workspace_id}/pfs", response_model=list[PFSResponse], summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"]
+)
 async def list_workspace_pfs_types(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -164,13 +181,13 @@ async def list_workspace_pfs_types(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list PFS types: {str(e)}") from None
 
 
-@router.post("/{workspace_id}/pfs", summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
+@router.post("/{workspace_id}/pfs", response_model=PFSResponse, summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
 async def create_workspace_pfs(
     workspace_id: str,
     create_pfs_request: CreatePFSRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
-):
+) -> PFSResponse:
     try:
         return await workspace_service.create_workspace_pfs(
             db=db, workspace_id=workspace_id, user_id=current_user["user"].id, create_pfs_request=create_pfs_request
