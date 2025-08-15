@@ -80,12 +80,12 @@ class GitHubService:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
 
-            if response.status_code == 200:
+            if response.status_code == status.HTTP_200_OK:
                 forked_repo = response.json()
                 if forked_repo["fork"] and forked_repo["owner"]["login"] == upstream_owner:
                     logger.info(f"User {username} has forked {upstream_owner}/{upstream_repo}")
                     return forked_repo
-            elif response.status_code == 404:
+            elif response.status_code == status.HTTP_404_NOT_FOUND:
                 logger.info(f"User {username} has not forked {upstream_owner}/{upstream_repo}")
                 return None
             else:
