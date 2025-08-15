@@ -31,8 +31,3 @@ app.include_router(pfs.router)
 app.include_router(file.router)
 app.include_router(preview.router)
 app.include_router(workspace.router)
-
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
