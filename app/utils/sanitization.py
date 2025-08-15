@@ -9,6 +9,8 @@ def sanitize_string(value: str, max_length: int = 100) -> str:
     if not isinstance(value, str):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Value must be a string")
 
+    value = value.strip()
+
     if len(value) > max_length:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Value too long (max {max_length} characters)")
 
@@ -20,7 +22,7 @@ def sanitize_string(value: str, max_length: int = 100) -> str:
             detail="Value contains invalid characters. Only alphanumeric, dots, hyphens, and underscores are allowed",
         )
 
-    return value.strip()
+    return value
 
 
 def sanitize_github_params(params: dict[str, Any]) -> dict[str, str]:
@@ -33,19 +35,12 @@ def sanitize_github_params(params: dict[str, Any]) -> dict[str, str]:
     }
 
     for key, value in params.items():
-        if key in param_rules and value is not None:
-            rules = param_rules[key]
-            sanitized[key] = sanitize_string(str(value), rules["max_length"])
-        elif value is not None:
-            sanitized[key] = sanitize_string(str(value))
+        if value is None:
+            continue
+        rules = param_rules.get(key, {})
+        sanitized[key] = sanitize_string(str(value), **rules)
 
     return sanitized
-
-
-def sanitize_query_params(query_params: dict[str, Any]) -> dict[str, Any]:
-    cleaned_params = {key: value for key, value in query_params.items() if value is not None and value != ""}
-
-    return sanitize_github_params(cleaned_params)
 
 
 def sanitize_filename(filename: str) -> str:
