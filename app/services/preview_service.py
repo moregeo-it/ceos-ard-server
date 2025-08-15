@@ -1,6 +1,6 @@
 import logging
-import os
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -16,9 +16,12 @@ class PreviewService:
     def __init__(self):
         self.build_service = build_service
 
-    async def generate_preview(self, db: Session, pfs: list[str] = None, workspace_id: str = None, user_id: str = None):
+    async def generate_preview(self, db: Session, pfs: list[str] | None, workspace_id: str, user_id: str):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
+
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
         try:
             workspace = workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -28,33 +31,35 @@ class PreviewService:
             )
 
             if build_info.status == BuildStatus.COMPLETED:
-                workspace.last_build_at = datetime.utcnow()
-                workspace.updated_at = datetime.utcnow()
+                workspace.last_build_at = datetime.now()
                 db.commit()
 
-                workspace_path = str(workspace.workspace_path)
-                return True, await self._get_preview_files(workspace_path, pfs), ""
+                workspace_path = Path(workspace.workspace_path)
+                return await self._get_preview_files(workspace_path, pfs)
 
             else:
-                return False, [], "Build failed. Please check the logs for more details."
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Build failed with status: {build_info.status}")
 
         except Exception as e:
             logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
-            return False, [], f"Failed to get preview list: {str(e)}"
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An error occurred while generating the preview files. Please try again later." + str(e),
+            ) from e
 
-    async def _get_preview_files(self, workspace_path: str, pfs: list[str] | None = None):
-        build_dir = os.path.join(str(workspace_path), "build")
+    async def _get_preview_files(self, workspace_path: Path, pfs: list[str] | None = None):
+        build_dir = workspace_path / "build"
 
-        if not os.path.exists(build_dir):
-            return False, [], "Build directory does not exist. Please build the workspace first."
+        if not build_dir.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build directory not found")
 
-        preview_list = os.listdir(build_dir)
+        preview_list = build_dir.iterdir()
 
         html_content = ""
         for file in preview_list:
-            if file.endswith(".html") and any(p in file for p in pfs):
-                with open(os.path.join(build_dir, file)) as f:
-                    html_content = f.read() | ""
+            if file.is_file() and file.suffix == ".html" and any(p in file.name for p in (pfs or [])):
+                with open(file, encoding="utf-8") as f:
+                    html_content += f.read() + "\n"
 
         return html_content
 
