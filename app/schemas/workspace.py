@@ -112,9 +112,22 @@ class CreatePFSRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
     version: str = Field(default="1.0", description="PFS version")
-    applies_to: str = Field(..., description="Description of the PFS")
+    applies_to: str | None = Field(None, description="Description of the PFS")
     base_pfs: str | None = Field(None, description="Base PFS ID")
-    type: CreateNewPFSType = Field(..., description="PFS type")
-    introduction: list[str] = Field(
+    type: CreateNewPFSType | None = Field(None, description="PFS type")
+    introduction: list[str] | None = Field(
         default=["what-are-ceos-ard-products", "when-is-a-product-ceos-ard", "difference-threshold-goal"], description="PFS introduction"
     )
+
+
+class PFSResponse(BaseModel):
+    id: str
+    title: str
+    version: str
+    applies_to: str | None
+    base_pfs: str | None
+    type: CreateNewPFSType | None
+    introduction: list[str] | None
+
+    class Config:
+        from_attributes = True
