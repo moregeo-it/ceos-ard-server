@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import shutil
 import uuid
 from datetime import datetime
@@ -115,10 +114,6 @@ class WorkspaceService:
             workspace.status = WorkspaceStatus.ERROR
             workspace.error_message = str(e)
 
-        finally:
-            workspace.updated_at = datetime.now()
-            db.commit()
-
     async def _trigger_build(self, workspace: GitWorkspace):
         try:
             logger.info(f"Triggering build for workspace {workspace.id}")
@@ -218,7 +213,6 @@ class WorkspaceService:
 
         try:
             workspace.status = WorkspaceStatus.DELETED
-            workspace.updated_at = datetime.now()
             db.commit()
 
             if Path(workspace_path).exists():
@@ -228,7 +222,7 @@ class WorkspaceService:
                 logger.warning(f"Workspace at {workspace_path} does not exist")
 
             logger.info(f"Successfully deleted workspace {workspace_id}")
-            return True
+            return "Workspace deleted successfully"
 
         except Exception as e:
             logger.error(f"Error deleting workspace {workspace_id}: {e}")
@@ -255,27 +249,26 @@ class WorkspaceService:
 
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            pfs_path = os.path.join(workspace_path, "pfs")
+            pfs_path = workspace_path / "pfs"
 
             pfs_types = []
             yaml = YAML(typ="safe")
 
-            for pfs in os.listdir(pfs_path):
-                pfs_dir = os.path.join(pfs_path, pfs)
-                if os.path.isdir(pfs_dir):
-                    document_path = os.path.join(pfs_dir, "document.yaml")
-                    if os.path.exists(document_path):
-                        with open(document_path) as f:
+            for pfs in pfs_path.iterdir():
+                if pfs.is_dir():
+                    document_path = pfs / "document.yaml"
+                    if document_path.exists():
+                        with open(document_path, encoding="utf-8") as f:
                             document = yaml.load(f)
                             pfs_types.append(
                                 {
                                     "id": document["id"],
-                                    "title": document["title"],
+                                    "name": document["title"],
                                 }
                             )
 
@@ -291,26 +284,33 @@ class WorkspaceService:
 
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = str(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path)
 
-            if not os.path.exists(workspace_path):
+            if not workspace_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            new_pfs_path = os.path.join(workspace_path, "pfs", create_pfs_request.id)
+            if not create_pfs_request.id or not create_pfs_request.title:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-            if os.path.exists(new_pfs_path):
+            new_pfs_path = workspace_path / "pfs" / create_pfs_request.id
+
+            if new_pfs_path.exists():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
 
-            os.makedirs(new_pfs_path, exist_ok=True)
+            new_pfs_path.mkdir(parents=True, exist_ok=True)
 
-            base_pfs_path = os.path.join(workspace_path, "pfs", create_pfs_request.base_pfs) if create_pfs_request.base_pfs else None
+            base_pfs_path = workspace_path / "pfs" / create_pfs_request.base_pfs if create_pfs_request.base_pfs else None
 
-            shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
+            if base_pfs_path and not base_pfs_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
+            if base_pfs_path:
+                logger.info(f"Copying base PFS from {base_pfs_path} to {new_pfs_path}")
+                shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
 
             yaml = YAML()
             yaml.preserve_quotes = True
 
-            documents_path = os.path.join(new_pfs_path, "document.yaml")
+            documents_path = new_pfs_path / "document.yaml"
             with open(documents_path) as f:
                 document = yaml.load(f)
 
@@ -400,8 +400,7 @@ class WorkspaceService:
             build_info = await self.build_service.start_build(workspace_path=workspace.workspace_path, workspace_id=workspace_id, pfs=pfs)
 
             # Update last build time
-            workspace.last_build_at = datetime.utcnow()
-            workspace.updated_at = datetime.utcnow()
+            workspace.last_build_at = datetime.now()
             db.commit()
 
             return {
