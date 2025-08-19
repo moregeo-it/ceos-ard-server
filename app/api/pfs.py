@@ -34,4 +34,4 @@ async def list_pfs_folders(
         raise
     except Exception as e:
         logger.error(f"Unexpected error listing PFS folders: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while listing PFS folders") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while listing PFS folders") from e

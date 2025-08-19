@@ -47,7 +47,7 @@ class FileService:
                 file_and_folder.append({"name": path.name, "path": str(path), "is_directory": path.is_dir()})
             return file_and_folder
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
     async def create(self, db: Session, workspace_id: str, request_data: dict, user_id: str):
         if not workspace_id:
@@ -154,7 +154,7 @@ class FileService:
             return {"content": content, "media_type": media_type}
 
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
         if not workspace_id:
@@ -189,7 +189,7 @@ class FileService:
             return {"message": "File content stored successfully"}
 
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file content: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file content: {str(e)}") from e
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not workspace_id:
@@ -207,7 +207,7 @@ class FileService:
 
             return await self._delete(workspace_path, file_path)
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file or folder: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file or folder: {str(e)}") from e
 
     async def _delete(self, workspace_path: Path, file_path: str):
         if not file_path:
@@ -256,7 +256,7 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operation")
 
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update file: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update file: {str(e)}") from e
 
     async def _update_file_name(self, workspace_path, file_path, new_name):
         target_path = Path(workspace_path / Path(file_path.strip("/")))
@@ -379,7 +379,7 @@ class FileService:
 
             return changed_files
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get changed files: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get changed files: {str(e)}") from e
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         try:
@@ -414,7 +414,7 @@ class FileService:
 
             return stdout
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
 
 file_service = FileService()

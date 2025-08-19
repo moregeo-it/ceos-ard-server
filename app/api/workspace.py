@@ -40,7 +40,7 @@ async def create_workspace(
 
     except Exception as e:
         logger.error(f"Error creating workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
 
 
 @router.get(
@@ -58,7 +58,7 @@ async def get_user_workspaces(
         return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id)
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspaces: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspaces") from e
 
 
 @router.get(
@@ -79,7 +79,8 @@ async def get_user_workspace(
 
     except Exception as e:
         logger.error(f"Error getting workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from None
+
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspace") from e
 
 
 @router.patch("/{workspace_id}", summary="Update a workspace", response_model=WorkspaceResponse, description="Update a workspace information")
@@ -94,7 +95,7 @@ async def update_workspace(
 
     except Exception as e:
         logger.error(f"Error updating workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update workspace") from e
 
 
 @router.delete(
@@ -114,7 +115,7 @@ async def delete_workspace(
 
     except Exception as e:
         logger.error(f"Error deleting workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete workspace") from e
 
 
 @router.get(
@@ -133,7 +134,7 @@ async def get_workspace_status(
 
     except Exception as e:
         logger.error(f"Error getting workspace status: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace status: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspace status") from e
 
 
 @router.post(
@@ -162,7 +163,7 @@ async def propose_changes(
 
     except Exception as e:
         logger.error(f"Error proposing changes: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to propose changes") from e
 
 
 @router.get(
@@ -178,7 +179,7 @@ async def list_workspace_pfs_types(
 
     except Exception as e:
         logger.error(f"Error listing Workspace PFS types: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list PFS types: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list PFS types") from e
 
 
 @router.post("/{workspace_id}/pfs", response_model=PFSResponse, summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
@@ -195,4 +196,4 @@ async def create_workspace_pfs(
 
     except Exception as e:
         logger.error(f"Error creating PFS: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create PFS") from e

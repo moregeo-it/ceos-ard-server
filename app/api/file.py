@@ -32,7 +32,7 @@ async def list_workspace_files(
         return JSONResponse(content=files_and_folder, status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.error(f"Error listing workspace files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list workspace files: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list workspace files") from e
 
 
 @router.post(
@@ -54,7 +54,7 @@ async def create(
         return JSONResponse(content=file_or_folder, status_code=status.HTTP_201_CREATED)
     except Exception as e:
         logger.error(f"Error creating file or folder: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file or folder: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create file or folder") from e
 
 
 @router.get(
@@ -75,7 +75,7 @@ async def read_file_content(
 
     except Exception as e:
         logger.error(f"Error reading file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to read file") from e
 
 
 @router.put(
@@ -103,7 +103,7 @@ async def store_file_content(
 
     except Exception as e:
         logger.error(f"Error storing file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to store file") from e
 
 
 @router.delete(
@@ -123,7 +123,7 @@ async def delete(
 
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete file") from e
 
 
 @router.patch(
@@ -151,7 +151,7 @@ async def patch_file(
 
     except Exception as e:
         logger.error(f"Error renaming file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to rename file: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename file") from e
 
 
 @router.get(
@@ -173,7 +173,7 @@ async def search_files(
         return JSONResponse(content=files_and_folder, status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.error(f"Error searching files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to search files") from e
 
 
 @router.get(
@@ -188,7 +188,7 @@ async def get_changed_files(workspace_id: str, db: Session = Depends(get_db), cu
         return JSONResponse(content=changed_files, status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.error(f"Error getting changed files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get changed files: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get changed files") from e
 
 
 @router.get(
@@ -208,4 +208,4 @@ async def get_file_diff(
         return Response(content=file_diff, media_type="text/plain; charset=utf-8", status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.error(f"Error getting file diff: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get file diff") from e
