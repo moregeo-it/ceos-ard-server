@@ -2,7 +2,7 @@ import asyncio
 import logging
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -141,7 +141,12 @@ class WorkspaceService:
             if not workspace or workspace.status == WorkspaceStatus.ARCHIVED:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number and check_pr:
+            if (
+                workspace.pull_request_status != PullRequestStatus.MERGED
+                and workspace.pull_request_number
+                and check_pr
+                and workspace.pull_request_status_last_updated_at <= datetime.now() - timedelta(hours=2)
+            ):
                 pull_request = self.github_service.get_pull_request(
                     access_token=access_token,
                     owner=workspace.fork_repo_owner,
