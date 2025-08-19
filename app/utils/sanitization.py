@@ -44,10 +44,36 @@ def sanitize_github_params(params: dict[str, Any]) -> dict[str, str]:
 
 
 def sanitize_filename(filename: str) -> str:
-    sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename)
+    if not filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename is required",
+        )
+
+    if filename.endswith(
+        (
+            ".",
+            " ",
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename cannot end with a dot or whitespace",
+        )
+
+    if ".." in filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename cannot contain consecutive dots",
+        )
+
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
 
     if sanitized.startswith("."):
-        sanitized = sanitized[1:]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename cannot start with a dot",
+        )
 
     return sanitized
 
