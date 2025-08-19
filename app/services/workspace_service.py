@@ -111,13 +111,17 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error triggering build for workspace {workspace.id}: {e}")
 
-    def get_user_workspaces(self, db: Session, user_id: str) -> list[GitWorkspace]:
-        return (
-            db.query(GitWorkspace)
-            .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
-            .order_by(GitWorkspace.created_at.desc())
-            .all()
-        )
+    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
+        try:
+            return (
+                db.query(GitWorkspace)
+                .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
+                .order_by(GitWorkspace.created_at.desc())
+                .all()
+            )
+        except Exception as e:
+            logger.error(f"Error getting user workspaces: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
     def get_workspace_by_id(
         self, db: Session, workspace_id: str, user_id: str, *, access_token: str | None = None, check_pr: bool = False
