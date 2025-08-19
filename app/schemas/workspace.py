@@ -6,9 +6,6 @@ from pydantic import BaseModel, Field, model_validator
 
 class WorkspaceStatus(str, Enum):
     ACTIVE = "active"
-    BUILDING = "building"
-    CREATING = "creating"
-    UPDATING = "updating"
     ARCHIVED = "archived"
 
 
@@ -35,6 +32,8 @@ class WorkspaceCreate(BaseModel):
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
     description: str | None = Field(None, min_length=1, max_length=1000, description="New workspace description")
+    pfs: list[str] | None = Field(None, min_items=1, max_items=10, description="PFS to to update in the workspace")
+    status: WorkspaceStatus | None = Field(None, description="New workspace status")
 
 
 class WorkspaceResponse(BaseModel):

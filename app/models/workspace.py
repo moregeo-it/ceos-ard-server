@@ -11,9 +11,6 @@ from app.db.database import Base
 
 class WorkspaceStatus(Enum):
     ACTIVE = "active"
-    BUILDING = "building"
-    CREATING = "creating"
-    UPDATING = "updating"
     ARCHIVED = "archived"
 
 
@@ -40,7 +37,7 @@ class GitWorkspace(Base):
     pull_request_number = Column(String, nullable=True)
     pull_request_status_last_updated_at = Column(DateTime, nullable=True)
     pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
-    status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.CREATING, nullable=False)
+    status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=datetime.now(), nullable=False)
     last_build_at = Column(DateTime, nullable=True)

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import shutil
 import uuid
@@ -38,7 +37,6 @@ class WorkspaceService:
 
             if was_created:
                 logger.info(f"Created new fork for user {username}")
-                await asyncio.sleep(2)
 
             # Generate workspace path and branch name
             workspace_id = str(uuid.uuid4())
@@ -56,7 +54,7 @@ class WorkspaceService:
                 fork_repo_name=fork_repo["name"],
                 branch_name=branch_name,
                 workspace_path=workspace_path,
-                status=WorkspaceStatus.CREATING,
+                status=WorkspaceStatus.ACTIVE,
             )
 
             db.add(workspace)
@@ -74,9 +72,6 @@ class WorkspaceService:
 
     async def _setup_workspace(self, db: Session, workspace: GitWorkspace, clone_url: str):
         try:
-            workspace.status = WorkspaceStatus.BUILDING
-            db.commit()
-
             success = await self.git_service.clone_repository(
                 clone_url=clone_url,
                 workspace_path=workspace.workspace_path,
@@ -89,6 +84,8 @@ class WorkspaceService:
             if success:
                 workspace.status = WorkspaceStatus.ACTIVE
                 workspace.last_build_at = datetime.utcnow()
+                db.commit()
+                db.refresh(workspace)
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
 
@@ -111,8 +108,11 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error triggering build for workspace {workspace.id}: {e}")
 
-    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
+    def get_user_workspaces(self, db: Session, user_id: str) -> list[GitWorkspace]:
         try:
+            if not user_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
+
             return (
                 db.query(GitWorkspace)
                 .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
@@ -136,13 +136,9 @@ class WorkspaceService:
             if check_pr and access_token is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
 
-            workspace = (
-                db.query(GitWorkspace)
-                .filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
-                .first()
-            )
+            workspace = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id).first()
 
-            if not workspace or workspace.status == WorkspaceStatus.ARCHIVED:
+            if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if (
@@ -177,15 +173,31 @@ class WorkspaceService:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
+        if update_data.status and update_data.status not in WorkspaceStatus:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace status")
+
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+
+        if workspace.status == WorkspaceStatus.ARCHIVED and update_data.status == WorkspaceStatus.ACTIVE:
+            if workspace.pull_request_status == PullRequestStatus.MERGED or workspace.pull_request_status == PullRequestStatus.CLOSED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot reactivate an archived workspace with a merged or closed pull request"
+                )
+
         update_dict = update_data.model_dump(exclude_unset=True)
 
         if not update_dict:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description or title must be provided")
 
-        db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id).update(update_dict, synchronize_session=False)
+        if "status" in update_dict and isinstance(update_dict["status"], str):
+            update_dict["status"] = update_dict["status"].upper()
+
+        for key, value in update_dict.items():
+            if hasattr(workspace, key):
+                setattr(workspace, key, value)
 
         db.commit()
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        db.refresh(workspace)
         return workspace
 
     async def delete_workspace(self, db: Session, workspace_id: str, user_id: str) -> bool:
@@ -239,7 +251,7 @@ class WorkspaceService:
             logger.error(f"Error getting git status for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace status: {str(e)}") from e
 
-    async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
+    async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -263,7 +275,8 @@ class WorkspaceService:
                             document = yaml.load(f)
                             pfs_types.append(
                                 {
-                                    "id": document["id"],
+                                    "path": str(pfs),
+                                    "id": document.get("id"),
                                     "name": document["title"],
                                 }
                             )
