@@ -27,17 +27,13 @@ class WorkspaceService:
         self.build_service = build_service
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user_id: str, username: str, access_token: str) -> GitWorkspace:
-        upstream_repo_name = settings.CEOS_ARD_REPO
-        upstream_repo_owner = settings.CEOS_ARD_OWNER
-        upstream_branch_name = settings.CEOS_ARD_MAIN_BRANCH
-
         if not workspace_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
 
         try:
             logger.info(f"Checking fork for user {username}")
             fork_repo, was_created = await self.github_service.get_or_create_fork(
-                username=username, access_token=access_token, upstream_owner=upstream_repo_owner, upstream_repo=upstream_repo_name
+                username=username, access_token=access_token, upstream_owner=settings.CEOS_ARD_OWNER, upstream_repo=settings.CEOS_ARD_REPO
             )
 
             if was_created:
@@ -56,13 +52,9 @@ class WorkspaceService:
                 pfs=workspace_data.pfs,
                 title=workspace_data.title,
                 description=workspace_data.description,
-                upstream_repo_owner=upstream_repo_owner,
-                upstream_repo_name=upstream_repo_name,
-                forked_repo_owner=fork_repo["owner"]["login"],
-                forked_repo_name=fork_repo["name"],
-                fork_repo_clone_url=fork_repo["clone_url"],
+                fork_repo_owner=fork_repo["owner"]["login"],
+                fork_repo_name=fork_repo["name"],
                 branch_name=branch_name,
-                upstream_branch_name=upstream_branch_name or "main",
                 workspace_path=workspace_path,
                 status=WorkspaceStatus.CREATING,
             )
@@ -71,30 +63,27 @@ class WorkspaceService:
             db.commit()
             db.refresh(workspace)
 
-            await self._setup_workspace(db, workspace)
+            await self._setup_workspace(db, workspace, clone_url=fork_repo["clone_url"])
 
             return workspace
 
         except Exception as e:
             logger.error(f"Error creating workspace: {e}")
-            if "workspace" in locals():
-                workspace.status = WorkspaceStatus.ERROR
-                workspace.error_message = str(e)
-                db.commit()
+            db.rollback()
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
 
-    async def _setup_workspace(self, db: Session, workspace: GitWorkspace):
+    async def _setup_workspace(self, db: Session, workspace: GitWorkspace, clone_url: str):
         try:
             workspace.status = WorkspaceStatus.BUILDING
             db.commit()
 
             success = await self.git_service.clone_repository(
-                clone_url=workspace.fork_repo_clone_url,
+                clone_url=clone_url,
                 workspace_path=workspace.workspace_path,
                 branch_name=workspace.branch_name,
-                upstream_owner=workspace.upstream_repo_owner,
-                upstream_repo=workspace.upstream_repo_name,
-                upstream_branch=workspace.upstream_branch_name,
+                upstream_repo=settings.CEOS_ARD_REPO,
+                upstream_owner=settings.CEOS_ARD_OWNER,
+                upstream_branch=settings.CEOS_ARD_MAIN_BRANCH,
             )
 
             if success:
@@ -106,13 +95,11 @@ class WorkspaceService:
                 if workspace.pfs is not None and len(workspace.pfs) > 0:
                     await self._trigger_build(workspace)
             else:
-                workspace.status = WorkspaceStatus.ERROR
-                workspace.error_message = "Failed to clone repository"
+                raise Exception("Failed to setup workspace")
 
         except Exception as e:
             logger.error(f"Error setting up workspace {workspace.id}: {e}")
-            workspace.status = WorkspaceStatus.ERROR
-            workspace.error_message = str(e)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to setup workspace: {str(e)}") from e
 
     async def _trigger_build(self, workspace: GitWorkspace):
         try:
@@ -127,7 +114,7 @@ class WorkspaceService:
     def get_user_workspaces(self, db: Session, user_id: str) -> list[GitWorkspace]:
         return (
             db.query(GitWorkspace)
-            .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.DELETED)
+            .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
             .order_by(GitWorkspace.created_at.desc())
             .all()
         )
@@ -147,24 +134,24 @@ class WorkspaceService:
 
             workspace = (
                 db.query(GitWorkspace)
-                .filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.DELETED)
+                .filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
                 .first()
             )
 
-            if not workspace or workspace.status == WorkspaceStatus.DELETED:
+            if not workspace or workspace.status == WorkspaceStatus.ARCHIVED:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number and check_pr:
                 pull_request = self.github_service.get_pull_request(
                     access_token=access_token,
-                    owner=workspace.forked_repo_owner,
-                    repo=workspace.forked_repo_name,
+                    owner=workspace.fork_repo_owner,
+                    repo=workspace.fork_repo_name,
                     number=workspace.pull_request_number,
                 )
                 db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).update(
                     {
                         GitWorkspace.pull_request_status: pull_request["state"],
-                        GitWorkspace.pull_request_url: pull_request["html_url"],
+                        GitWorkspace.pull_request_status_last_updated_at: datetime.now(),
                         GitWorkspace.updated_at: datetime.now(),
                     },
                     synchronize_session=False,
@@ -202,7 +189,7 @@ class WorkspaceService:
         if workspace.status != WorkspaceStatus.ACTIVE:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
 
-        if workspace.status == WorkspaceStatus.DELETED:
+        if workspace.status == WorkspaceStatus.ARCHIVED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is already deleted")
 
         if not Path(workspace_path).exists():
@@ -212,7 +199,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
 
         try:
-            workspace.status = WorkspaceStatus.DELETED
+            workspace.status = WorkspaceStatus.ARCHIVED
             db.commit()
 
             if Path(workspace_path).exists():
@@ -232,12 +219,12 @@ class WorkspaceService:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
         if workspace.status != WorkspaceStatus.ACTIVE:
-            return {"workspace_status": workspace.status.value, "error_message": workspace.error_message, "git_status": None}
+            return {"workspace_status": workspace.status.value, "git_status": None}
 
         try:
             git_status = await self.git_service.get_git_status(workspace.workspace_path)
 
-            return {"workspace_status": workspace.status.value, "error_message": workspace.error_message, "git_status": git_status}
+            return {"workspace_status": workspace.status.value, "git_status": git_status}
 
         except Exception as e:
             logger.error(f"Error getting git status for workspace {workspace_id}: {e}")
@@ -362,17 +349,17 @@ class WorkspaceService:
             pr_data = {
                 "title": pr_title,
                 "body": pr_description,
-                "head": f"{workspace.forked_repo_owner}:{workspace.branch_name}",
+                "head": f"{workspace.fork_repo_owner}:{workspace.branch_name}",
                 "base": workspace.upstream_branch_name,
             }
 
             pr_response = await self.github_service.create_pull_request(
-                access_token=access_token, upstream_owner=workspace.upstream_repo_owner, upstream_repo=workspace.upstream_repo_name, pr_data=pr_data
+                access_token=access_token, upstream_owner=settings.CEOS_ARD_OWNER, upstream_repo=settings.CEOS_ARD_REPO, pr_data=pr_data
             )
 
             workspace.pull_request_number = pr_response["number"]
             workspace.pull_request_status = pr_response["state"]
-            workspace.pull_request_url = pr_response["html_url"]
+            workspace.pull_request_status_last_updated_at = datetime.now()
             db.commit()
 
             return {"commit_sha": stdout.strip() if stdout else None, "pull_request": pr_response}

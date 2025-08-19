@@ -6,11 +6,10 @@ from pydantic import BaseModel, Field, model_validator
 
 class WorkspaceStatus(str, Enum):
     ACTIVE = "active"
-    ERROR = "error"
     BUILDING = "building"
     CREATING = "creating"
     UPDATING = "updating"
-    DELETED = "deleted"
+    ARCHIVED = "archived"
 
 
 class GitStatusFile(BaseModel):
@@ -44,19 +43,14 @@ class WorkspaceResponse(BaseModel):
     user_id: str
     pfs: list[str] | None
     description: str | None
-    upstream_repo_owner: str
-    upstream_repo_name: str
-    forked_repo_owner: str
-    forked_repo_name: str
-    fork_repo_clone_url: str
+    fork_repo_owner: str
+    fork_repo_name: str
     branch_name: str
-    upstream_branch_name: str
     workspace_path: str
     status: WorkspaceStatus
-    pull_request_url: str | None
     pull_request_number: str | None
     pull_request_status: str | None
-    error_message: str | None
+    pull_request_status_last_updated_at: datetime | None
     created_at: datetime
     updated_at: datetime
     last_build_at: datetime | None
@@ -67,7 +61,6 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspaceStatusResponse(BaseModel):
     workspace_status: str
-    error_message: str | None
     git_status: GitStatus | None
 
 

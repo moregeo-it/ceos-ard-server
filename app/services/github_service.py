@@ -81,10 +81,10 @@ class GitHubService:
                 response = await client.get(url, headers=headers)
 
             if response.status_code == status.HTTP_200_OK:
-                forked_repo = response.json()
-                if forked_repo["fork"] and forked_repo["owner"]["login"] == upstream_owner:
+                fork_repo = response.json()
+                if fork_repo["fork"] and fork_repo["owner"]["login"] == upstream_owner:
                     logger.info(f"User {username} has forked {upstream_owner}/{upstream_repo}")
-                    return forked_repo
+                    return fork_repo
             elif response.status_code == status.HTTP_404_NOT_FOUND:
                 logger.info(f"User {username} has not forked {upstream_owner}/{upstream_repo}")
                 return None
@@ -109,9 +109,9 @@ class GitHubService:
                 response = await client.post(url, headers=headers)
 
             if response.status_code == status.HTTP_202_ACCEPTED:
-                forked_repo = response.json()
-                logger.info(f"Successfully forked {upstream_owner}/{upstream_repo} to {forked_repo['owner']['login']}/{forked_repo['name']}")
-                return forked_repo
+                fork_repo = response.json()
+                logger.info(f"Successfully forked {upstream_owner}/{upstream_repo} to {fork_repo['owner']['login']}/{fork_repo['name']}")
+                return fork_repo
             elif response.status_code == status.HTTP_403_FORBIDDEN:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to GitHub repository")
             elif response.status_code == status.HTTP_404_NOT_FOUND:
@@ -128,10 +128,10 @@ class GitHubService:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
 
     async def get_or_create_fork(self, username: str, access_token: str, upstream_owner: str, upstream_repo: str) -> tuple[dict[str, Any], bool]:
-        forked_repo = await self.check_user_fork(access_token, username, upstream_owner, upstream_repo)
+        fork_repo = await self.check_user_fork(access_token, username, upstream_owner, upstream_repo)
 
-        if forked_repo:
-            return forked_repo, False
+        if fork_repo:
+            return fork_repo, False
 
         new_fork = await self.create_fork(access_token, upstream_owner, upstream_repo)
 
