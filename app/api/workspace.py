@@ -55,7 +55,7 @@ async def get_user_workspaces(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id)
+        return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["access_token"])
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspaces") from e

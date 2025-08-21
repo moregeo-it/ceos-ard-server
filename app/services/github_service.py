@@ -194,5 +194,38 @@ class GitHubService:
             logger.error(f"Network error requesting GitHub API: {e}")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
 
+    async def get_repo_pull_requests(
+        self, owner: str, repo: str, access_token: str, state: str = "all", per_page: int = 100, page: int = 1, since: str = None
+    ) -> list[dict[str, Any]]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
+        headers = self.default_headers.copy()
+        headers["Authorization"] = f"Bearer {access_token}"
+
+        params = {
+            "page": page,
+            "state": state,
+            "per_page": per_page,
+        }
+
+        if since:
+            params["since"] = since
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(url, headers=headers, params=params)
+
+            if response.status_code == status.HTTP_200_OK:
+                return response.json()
+            else:
+                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
+
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout requesting GitHub API for {owner}/{repo}")
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
+        except httpx.RequestError as e:
+            logger.error(f"Network error requesting GitHub API: {e}")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+
 
 github_service = GitHubService()

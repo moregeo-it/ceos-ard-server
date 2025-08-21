@@ -95,53 +95,50 @@ class GitService:
     async def get_git_status(self, workspace_path: str) -> str:
         if not workspace_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
         try:
-            stdout, stderr, returncode = self._run_git_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path)
+            stdout, stderr, returncode = self._run_git_command(["git", "status", "--porcelain", "--branch"], cwd=workspace_path)
 
             if returncode != 0:
                 logger.error(f"Failed to get git status: {stderr}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get current branch: {stderr}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get git status: {stderr}")
 
-            current_branch = stdout
-
-            stdout, stderr, returncode = self._run_git_command(["git", "status", "--porcelain"], cwd=workspace_path)
-
+            lines = stdout.split("\n")
+            current_branch = lines[0].strip()[2:]
             modified_files = []
             untracked_files = []
 
-            if stdout:
-                for line in stdout.split("\n"):
-                    if line.strip():
-                        status_code = line[0].strip()
-                        file_path = line[3:]
+            for line in lines[1:]:
+                if line.strip():
+                    status_code = line[:2].strip()
+                    file_path = line[3:]
 
-                        if status_code == "??":
-                            untracked_files.append(file_path)
-                        else:
-                            status_map = {
-                                "M ": "modified",
-                                " M": "modified",
-                                "MM": "modified",
-                                "A ": "added",
-                                " A": "added",
-                                "A": "added",
-                                "AA": "added",
-                                "D ": "deleted",
-                                " D": "deleted",
-                                "R ": "renamed",
-                                "C ": "copied",
-                                "R": "renamed",
-                            }
+                    if status_code == "??":
+                        untracked_files.append(file_path)
+                    else:
+                        status_map = {
+                            "M ": "modified",
+                            " M": "modified",
+                            "M": "modified",
+                            "MM": "modified",
+                            "A ": "added",
+                            " A": "added",
+                            "A": "added",
+                            "AA": "added",
+                            "D ": "deleted",
+                            " D": "deleted",
+                            "R ": "renamed",
+                            "C ": "copied",
+                            "R": "renamed",
+                        }
 
-                            file_status = status_map.get(status_code, "unknown")
-                            modified_files.append(GitStatusFile(path=file_path, status=file_status))
+                        file_status = status_map.get(status_code, "unknown")
+                        modified_files.append(GitStatusFile(path=file_path, status=file_status))
 
             ahead_commits = 0
             behind_commits = 0
 
             try:
-                self._run_git_command(["git", "fetch", "upstream"], cwd=workspace_path)
-
                 stdout, stderr, returncode = self._run_git_command(
                     ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"], cwd=workspace_path
                 )

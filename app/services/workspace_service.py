@@ -107,17 +107,44 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error triggering build for workspace {workspace.id}: {e}")
 
-    def get_user_workspaces(self, db: Session, user_id: str) -> list[GitWorkspace]:
+    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
         try:
             if not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-            return (
+            workspaces = (
                 db.query(GitWorkspace)
                 .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
                 .order_by(GitWorkspace.created_at.desc())
+                .with_for_update(of=GitWorkspace)
                 .all()
             )
+
+            if not workspaces:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No workspaces found for this user")
+
+            # Update pull request status if needed
+            for workspace in workspaces:
+                if (
+                    workspace.pull_request_status != PullRequestStatus.MERGED
+                    and workspace.pull_request_number
+                    and workspace.pull_request_status_last_updated_at <= datetime.now() - timedelta(hours=2)
+                ):
+                    pull_request = self.github_service.get_pull_request(
+                        access_token=access_token,
+                        repo=workspace.fork_repo_name,
+                        owner=workspace.fork_repo_owner,
+                        number=workspace.pull_request_number,
+                    )
+                    workspace.pull_request_status = pull_request["state"]
+                    workspace.pull_request_status_last_updated_at = datetime.now()
+                    workspace.updated_at = datetime.now()
+                    db.add(workspace)
+
+            db.commit()
+
+            return workspaces
+
         except Exception as e:
             logger.error(f"Error getting user workspaces: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
@@ -132,35 +159,37 @@ class WorkspaceService:
             if not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
+            query = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id)
+
             if check_pr and access_token is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
 
-            workspace = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id).first()
+            workspace = query.first()
 
             if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
+            # Update pull request status if needed
             if (
-                workspace.pull_request_status != PullRequestStatus.MERGED
+                check_pr
                 and workspace.pull_request_number
-                and check_pr
+                and workspace.pull_request_status != PullRequestStatus.MERGED
                 and workspace.pull_request_status_last_updated_at <= datetime.now() - timedelta(hours=2)
             ):
-                pull_request = self.github_service.get_pull_request(
-                    access_token=access_token,
-                    owner=workspace.fork_repo_owner,
-                    repo=workspace.fork_repo_name,
-                    number=workspace.pull_request_number,
-                )
-                db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).update(
-                    {
-                        GitWorkspace.pull_request_status: pull_request["state"],
-                        GitWorkspace.pull_request_status_last_updated_at: datetime.now(),
-                        GitWorkspace.updated_at: datetime.now(),
-                    },
-                    synchronize_session=False,
-                )
-                db.commit()
+                query = query.with_for_update(of=GitWorkspace)
+                workspace = query.first()
+                if workspace.pull_request_status_last_updated_at <= datetime.now() - timedelta(hours=2):
+                    pull_request = self.github_service.get_pull_request(
+                        access_token=access_token,
+                        owner=workspace.fork_repo_owner,
+                        repo=workspace.fork_repo_name,
+                        number=workspace.pull_request_number,
+                    )
+                    workspace.pull_request_status = pull_request["state"]
+                    workspace.pull_request_status_last_updated_at = datetime.now()
+                    workspace.updated_at = datetime.now()
+                    db.add(workspace)
+                    db.commit()
 
             return workspace
 
