@@ -5,9 +5,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
-from ruamel.yaml import YAML
 from sqlalchemy.orm import Session
+from strictyaml import YAMLValidationError, as_document, load
 
 from app.config import settings
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
@@ -102,9 +103,7 @@ class WorkspaceService:
         try:
             logger.info(f"Triggering build for workspace {workspace.id}")
 
-            build_info = await self.build_service.start_build(workspace_id=workspace.id, workspace_path=workspace.workspace_path, pfs=workspace.pfs)
-
-            logger.info(f"Successfully triggered build for workspace {workspace.id} with status {build_info.status}")
+            await self.build_service.start_build(workspace_id=workspace.id, workspace_path=workspace.workspace_path, pfs=workspace.pfs)
         except Exception as e:
             logger.error(f"Error triggering build for workspace {workspace.id}: {e}")
 
@@ -255,6 +254,9 @@ class WorkspaceService:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
+
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
             workspace_path = Path(workspace.workspace_path)
@@ -264,25 +266,43 @@ class WorkspaceService:
 
             pfs_path = workspace_path / "pfs"
 
-            pfs_types = []
-            yaml = YAML(typ="safe")
+            if not pfs_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PFS directory not found in workspace")
 
-            for pfs in pfs_path.iterdir():
-                if pfs.is_dir():
-                    document_path = pfs / "document.yaml"
-                    if document_path.exists():
-                        with open(document_path, encoding="utf-8") as f:
-                            document = yaml.load(f)
-                            pfs_types.append(
-                                {
-                                    "path": str(pfs),
-                                    "id": document.get("id"),
-                                    "name": document["title"],
-                                }
-                            )
+            pfs_types = []
+
+            for pfs_dir in pfs_path.iterdir():
+                if not pfs_dir.is_dir():
+                    continue
+
+                pfs_document_path = pfs_dir / "document.yaml"
+                if not pfs_document_path.exists():
+                    continue
+
+                try:
+                    yaml_content = pfs_document_path.read_text()
+                    validated_document = load(yaml_content, PFS_DOCUMENT(file=pfs_document_path.name, base_path=workspace_path))
+                    document_data = validated_document.data
+
+                    if not document_data.get("id") or not document_data.get("title"):
+                        logger.warning(f"Skipping PFS {pfs_dir.name} due to missing id or title in document.yaml")
+                        continue
+                    pfs_types.append(
+                        {
+                            "id": document_data["id"],
+                            "name": document_data["title"],
+                        }
+                    )
+                except YAMLValidationError as e:
+                    logger.error(f"Invalid YAML content in {pfs_document_path}: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error reading PFS document {pfs_document_path}: {e}")
+                    continue
 
             return pfs_types
-
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get PFS types: {str(e)}") from e
@@ -308,31 +328,50 @@ class WorkspaceService:
 
             new_pfs_path.mkdir(parents=True, exist_ok=True)
 
-            base_pfs_path = workspace_path / "pfs" / create_pfs_request.base_pfs if create_pfs_request.base_pfs else None
+            try:
+                if create_pfs_request.base_pfs:
+                    base_pfs_path = workspace_path / "pfs" / create_pfs_request.base_pfs
+                    if not base_pfs_path.exists():
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
+                    shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
 
-            if base_pfs_path and not base_pfs_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
-            if base_pfs_path:
-                logger.info(f"Copying base PFS from {base_pfs_path} to {new_pfs_path}")
-                shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
+                    documents_path = new_pfs_path / "document.yaml"
+                    if documents_path.exists():
+                        yaml_content = documents_path.read_text()
+                        validated_document = load(yaml_content)
+                        documents_data = validated_document.data
+                    else:
+                        documents_data = {
+                            "id": create_pfs_request.id,
+                            "title": create_pfs_request.title,
+                            "version": create_pfs_request.version or "1.0-draft",
+                        }
+                else:
+                    # Handle case when no base_pfs is provided
+                    documents_path = new_pfs_path / "document.yaml"
+                    documents_data = {
+                        "id": create_pfs_request.id,
+                        "title": create_pfs_request.title,
+                        "version": create_pfs_request.version or "1.0-draft",
+                    }
 
-            yaml = YAML()
-            yaml.preserve_quotes = True
+                update_data = create_pfs_request.model_dump(
+                    include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True
+                )
 
-            documents_path = new_pfs_path / "document.yaml"
-            with open(documents_path) as f:
-                document = yaml.load(f)
+                documents_data.update(update_data)
+                yaml_document = as_document(documents_data)
+                documents_path.write_text(yaml_document.as_yaml(), encoding="utf-8")
 
-            document.update(
-                create_pfs_request.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
-            )
+                logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
 
-            with open(documents_path, "w") as f:
-                yaml.dump(document, f)
-
-            logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
-
-            return {"id": create_pfs_request.id, "name": create_pfs_request.title}
+                return {"id": create_pfs_request.id, "name": create_pfs_request.title}
+            except YAMLValidationError as e:
+                shutil.rmtree(new_pfs_path, ignore_errors=True)
+                logger.error(f"Invalid YAML content for PFS {create_pfs_request.id}: {e}")
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid YAML content: {str(e)}") from e
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error creating PFS for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
@@ -392,13 +431,6 @@ class WorkspaceService:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
 
-    async def get_build_status(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-        build_status = self.build_service.get_build_status(workspace_id)
-
-        return {"workspace_id": workspace_id, "workspace_status": workspace.status.value, "build_status": build_status}
-
     async def start_manual_build(self, db: Session, workspace_id: str, user_id: str, pfs: str | None = None) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
@@ -423,16 +455,6 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error starting manual build for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to start build: {str(e)}") from e
-
-    async def cancel_build(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-        if workspace.status != WorkspaceStatus.ACTIVE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
-
-        cancelled = await self.build_service.cancel_build(workspace_id)
-
-        return {"workspace_id": workspace_id, "build_cancelled": cancelled}
 
 
 workspace_service = WorkspaceService()

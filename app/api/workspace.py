@@ -166,12 +166,14 @@ async def propose_changes(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to propose changes") from e
 
 
-@router.get("/{workspace_id}/pfs", summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"])
+@router.get(
+    "/{workspace_id}/pfs", response_model=list[PFSResponse], summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"]
+)
 async def list_workspace_pfs_types(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
-):
+) -> list[PFSResponse]:
     try:
         return await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 

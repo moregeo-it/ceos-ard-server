@@ -103,7 +103,7 @@ class CreateNewPFSType(str, Enum):
 class CreatePFSRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
-    version: str = Field(default="1.0", description="PFS version")
+    version: str = Field(default="1.0-draft", description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
     base_pfs: str | None = Field(None, description="Base PFS ID")
     type: CreateNewPFSType | None = Field(None, description="PFS type")
@@ -111,15 +111,13 @@ class CreatePFSRequest(BaseModel):
         default=["what-are-ceos-ard-products", "when-is-a-product-ceos-ard", "difference-threshold-goal"], description="PFS introduction"
     )
 
+    class Config:
+        use_enum_values = True
+
 
 class PFSResponse(BaseModel):
     id: str
-    title: str
-    version: str
-    applies_to: str | None
-    base_pfs: str | None
-    type: CreateNewPFSType | None
-    introduction: list[str] | None
+    name: str
 
     class Config:
         from_attributes = True
