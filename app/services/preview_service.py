@@ -5,7 +5,6 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.schemas.build import BuildStatus
 from app.services.build_service import build_service
 from app.services.workspace_service import workspace_service
 
@@ -30,7 +29,7 @@ class PreviewService:
                 workspace_path=str(workspace.workspace_path), workspace_id=workspace_id, pfs=pfs or workspace.pfs
             )
 
-            if build_info.status == BuildStatus.COMPLETED:
+            if build_info.get("status") == "success":
                 workspace.last_build_at = datetime.now()
                 db.commit()
 
@@ -38,7 +37,7 @@ class PreviewService:
                 return await self._get_preview_files(workspace_path, pfs)
 
             else:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Build failed with status: {build_info.status}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")
 
         except Exception as e:
             logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
