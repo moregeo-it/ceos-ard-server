@@ -390,6 +390,7 @@ class FileService:
             if not target_path.is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
 
+            file_path = file_path.strip("/")
             stdout, stderr, returncode = git_service._run_git_command(["git", "diff", file_path], cwd=workspace_path)
 
             if returncode != 0:
