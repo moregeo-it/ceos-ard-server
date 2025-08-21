@@ -409,6 +409,10 @@ class WorkspaceService:
         self, db: Session, workspace_id: str, user_id: str, pr_title: str, pr_description: str, access_token: str
     ) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        workspace_path = Path(workspace.workspace_path)
+
+        if not workspace_path.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
         if workspace.status != WorkspaceStatus.ACTIVE:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
@@ -459,31 +463,6 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
-
-    async def start_manual_build(self, db: Session, workspace_id: str, user_id: str, pfs: str | None = None) -> dict[str, Any]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-        if workspace.status != WorkspaceStatus.ACTIVE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
-
-        try:
-            build_info = await self.build_service.start_build(workspace_path=workspace.workspace_path, workspace_id=workspace_id, pfs=pfs)
-
-            # Update last build time
-            workspace.last_build_at = datetime.now()
-            db.commit()
-
-            return {
-                "workspace_id": workspace_id,
-                "build_started": True,
-                "build_type": build_info.build_type,
-                "pfs": build_info.pfs,
-                "status": build_info.status.value,
-            }
-
-        except Exception as e:
-            logger.error(f"Error starting manual build for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to start build: {str(e)}") from e
 
 
 workspace_service = WorkspaceService()
