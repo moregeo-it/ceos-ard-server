@@ -418,6 +418,15 @@ class WorkspaceService:
         if workspace.status != WorkspaceStatus.ACTIVE:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
 
+        if workspace.pull_request_status == PullRequestStatus.OPEN:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already open")
+
+        if workspace.pull_request_status == PullRequestStatus.MERGED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already merged")
+
+        if workspace.pull_request_status == PullRequestStatus.CLOSED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already closed")
+
         try:
             git_status = await self.git_service.get_git_status(workspace.workspace_path)
 
