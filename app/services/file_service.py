@@ -3,6 +3,7 @@ import re
 import shutil
 from pathlib import Path
 
+import git
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -262,25 +263,17 @@ class FileService:
 
         new_name = sanitize_filename(new_name)
         new_file_path = Path(target_path.parent / new_name)
+
         if new_file_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
+
         target_path.replace(new_file_path)
 
         return {"name": new_name, "path": str(new_file_path.relative_to(workspace_path.resolve())), "directory": False}
 
     async def _revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
-            target_path = sanitize_path(file_path, workspace_path)
-
-            if not target_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-
-            if not target_path.is_file() or not target_path.is_relative_to(workspace_path.resolve()):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-
-            await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
-
-            return {"path": str(target_path), "name": str(target_path.name), "directory": False}
+            return await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
 
@@ -390,14 +383,62 @@ class FileService:
             if not target_path.is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
 
-            file_path = file_path.strip("/")
-            stdout, stderr, returncode = git_service._run_git_command(["git", "diff", file_path], cwd=workspace_path)
+            repo = git.Repo(workspace_path)
 
-            if returncode != 0:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {stderr}")
+            relative_file_path = target_path.relative_to(workspace_path.resolve())
+            relative_file_str = str(relative_file_path).replace("\\", "/")  # Ensure forward slashes for git
 
-            return stdout
+            # Check if file is tracked by Git
+            is_tracked = False
+            try:
+                repo.git.cat_file("-e", f"HEAD:{relative_file_str}")
+                is_tracked = True
+            except git.GitCommandError:
+                is_tracked = False
+
+            if not is_tracked:
+                try:
+                    with open(target_path, encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+
+                    lines = content.splitlines()
+                    diff_out = f"--- /dev/null\n+++ {relative_file_str}\n@@ -0,0 +1,{len(lines)} @@\n"
+
+                    for line in lines:
+                        diff_out += f"+{line}\n"
+
+                    return diff_out
+
+                except UnicodeDecodeError:
+                    return f"Binary file b/{relative_file_str} differs"
+
+                except Exception as e:
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
+
+            try:
+                diff_out = repo.git.diff(relative_file_str)
+
+                if not diff_out:
+                    diff_out = repo.git.diff("--cached", relative_file_str)
+
+                    if not diff_out:
+                        return f"No changes found for {relative_file_str}"
+
+                return diff_out
+
+            except git.GitCommandError as e:
+                logger.error(f"Git command failed for {relative_file_str}: {str(e)}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
+
+        except git.InvalidGitRepositoryError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
+
+        except ValueError as e:
+            logger.error(f"Invalid file path: {file_path}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid file path: {file_path}") from e
+
         except Exception as e:
+            logger.error(f"Failed to get file diff: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
 

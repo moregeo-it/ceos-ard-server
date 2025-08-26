@@ -150,8 +150,8 @@ async def patch_file(
         return JSONResponse(content=file_updated, status_code=status.HTTP_200_OK)
 
     except Exception as e:
-        logger.error(f"Error renaming file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename file") from e
+        logger.error(f"Error updating file: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update file") from e
 
 
 @router.get(

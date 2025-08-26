@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import git
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -423,22 +424,47 @@ class WorkspaceService:
             if git_status["is_clean"]:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")
 
-            stdout, stderr, returncode = self.git_service._run_git_command(["git", "add", "."], cwd=workspace.workspace_path)
+            repo = git.Repo(workspace.workspace_path)
 
-            if returncode != 0:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {stderr}")
+            try:
+                repo.git.add(".")
+                logger.info(f"Staged changes for workspace {workspace_id}")
+            except git.GitCommandError as e:
+                logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
 
-            stdout, stderr, returncode = self.git_service._run_git_command(["git", "commit", "-m", pr_description], cwd=workspace.workspace_path)
+            # Commit changes to the repository
+            try:
+                repo.index.commit(pr_description)
+                logger.info(f"Committed changes for workspace {workspace_id}")
+            except git.GitCommandError as e:
+                logger.error(f"Failed to commit changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to commit changes: {str(e)}") from e
 
-            if returncode != 0:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to commit changes: {stderr}")
+            # Push changes to the remote repository
+            try:
+                origin = repo.remote("origin")
+                push_info = origin.push(workspace.branch_name)
 
-            stdout, stderr, returncode = self.git_service._run_git_command(
-                ["git", "push", "origin", workspace.branch_name], cwd=workspace.workspace_path
-            )
+                if push_info and push_info[0].flags & git.push_info.ERROR:
+                    error_msg = f"Push failed with flags: {push_info[0].flags}"
+                    if push_info[0].summary:
+                        error_msg += f", summary: {push_info[0].summary}"
+                    logger.error(f"Failed to push changes for workspace {workspace_id}: {error_msg}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {error_msg}")
 
-            if returncode != 0:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {stderr}")
+                logger.info(f"Pushed changes for workspace {workspace_id} to branch {workspace.branch_name}")
+
+            except git.GitCommandError as e:
+                logger.error(f"Failed to push changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {str(e)}") from e
+
+            except git.InvalidGitRepositoryError as e:
+                logger.error(f"Failed to push changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to push changes: {str(e)}") from e
+
+            # Create a pull request
+            logger.info(f"Creating pull request for workspace {workspace_id}")
 
             pr_data = {
                 "title": pr_title,
@@ -456,10 +482,24 @@ class WorkspaceService:
             workspace.pull_request_status_last_updated_at = datetime.now()
             db.commit()
 
-            return {"commit_sha": stdout.strip() if stdout else None, "pull_request": pr_response}
+            return {
+                "title": pr_title,
+                "description": pr_description,
+                "url": pr_response["html_url"],
+                "number": pr_response["number"],
+                "state": pr_response["state"],
+                "created_at": pr_response["created_at"],
+                "updated_at": pr_response["updated_at"],
+                "author": pr_response["user"]["login"],
+            }
 
         except HTTPException:
             raise
+        except git.InvalidGitRepositoryError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Git repository") from e
+        except git.GitCommandError as e:
+            logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
         except Exception as e:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e

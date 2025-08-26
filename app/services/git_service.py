@@ -1,12 +1,13 @@
 import logging
 import shutil
-import subprocess
 from pathlib import Path
 
+import git
 from fastapi import HTTPException, status
 
 from app.config import settings
 from app.schemas.workspace import GitStatusFile
+from app.utils.sanitization import sanitize_path
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +19,6 @@ class GitService:
 
     def _ensure_workspaces_directory(self):
         self.workspaces_root.mkdir(parents=True, exist_ok=True)
-
-    def _run_git_command(self, command: list[str], cwd: str) -> tuple[str, str, int]:
-        try:
-            result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=300)
-
-            return result.stdout, result.stderr, result.returncode
-        except subprocess.TimeoutExpired as e:
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Git command timed out") from e
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to run git command: {e}") from e
 
     def generate_workspace_path(self, workspace_id: str) -> str:
         return str(self.workspaces_root / workspace_id)
@@ -46,44 +37,31 @@ class GitService:
 
             workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
-            stdout, stderr, returncode = self._run_git_command(["git", "clone", clone_url, workspace_path], cwd=workspace_path.parent)
+            repo = git.Repo.clone_from(clone_url, workspace_path, depth=1)
 
-            if returncode != 0:
-                logger.error(f"Failed to clone repository: {stderr}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {stderr}")
+            repo.create_remote("upstream", f"https://github.com/{upstream_owner}/{upstream_repo}")
 
-            upstream_url = f"https://github.com/{upstream_owner}/{upstream_repo}"
-            stdout, stderr, returncode = self._run_git_command(["git", "remote", "add", "upstream", upstream_url], cwd=workspace_path)
+            repo.remotes.upstream.fetch(upstream_branch)
 
-            if returncode != 0:
-                logger.error(f"Failed to add upstream remote: {stderr}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to add upstream remote: {stderr}")
-
-            stdout, stderr, returncode = self._run_git_command(["git", "fetch", "upstream", upstream_branch], cwd=workspace_path)
-
-            if returncode != 0:
-                logger.error(f"Failed to fetch upstream branch: {stderr}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch upstream branch: {stderr}")
-
-            stdout, stderr, returncode = self._run_git_command(
-                ["git", "checkout", "-b", branch_name, f"upstream/{upstream_branch}"], cwd=workspace_path
-            )
-
-            if returncode != 0:
-                logger.error(f"Failed to checkout branch: {stderr}")
-
-                stdout, stderr, returncode = self._run_git_command(["git", "checkout", branch_name], cwd=workspace_path)
-
-                if returncode != 0:
-                    logger.error(f"Failed to checkout branch: {stderr}")
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to checkout branch: {stderr}")
+            repo.git.checkout("-b", branch_name, f"upstream/{upstream_branch}")
 
             logger.info(f"Successfully cloned repository to {workspace_path}")
 
             return True
 
-        except HTTPException:
-            raise
+        except git.InvalidGitRepositoryError as e:
+            logger.error(f"Invalid git repository: {clone_url}")
+
+            if workspace_path.exists():
+                shutil.rmtree(workspace_path)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
+
+        except git.GitCommandError as e:
+            logger.error(f"Error cloning repository: {e}")
+
+            if workspace_path.exists():
+                shutil.rmtree(workspace_path)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error cloning repository: {e}")
 
@@ -92,64 +70,84 @@ class GitService:
 
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {e}") from e
 
-    async def get_git_status(self, workspace_path: str) -> str:
+    async def get_git_status(self, workspace_path: str) -> dict[str, list[GitStatusFile]]:
         if not workspace_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
         try:
-            stdout, stderr, returncode = self._run_git_command(["git", "status", "--porcelain", "--branch"], cwd=workspace_path)
+            repo = git.Repo(workspace_path)
 
-            if returncode != 0:
-                logger.error(f"Failed to get git status: {stderr}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get git status: {stderr}")
-
-            lines = stdout.split("\n")
-            current_branch = lines[0].strip()[2:]
             modified_files = []
             untracked_files = []
+            current_branch = repo.active_branch.name
+            untracked_files = list(repo.untracked_files)
 
-            for line in lines[1:]:
-                if line.strip():
-                    status_code = line[:2].strip()
-                    file_path = line[3:]
+            # Get modified/staged files
+            # Check index (staged changes)
+            # repo.index.diff("HEAD", R=True) will show staged changes from HEAD to index.
+            for item in repo.index.diff("HEAD", R=True):
+                file_status = "modified"
+                if item.change_type == "A":
+                    file_status = "added"
+                elif item.change_type == "D":
+                    file_status = "deleted"
+                elif item.change_type == "R":
+                    file_status = "renamed"
+                elif item.change_type == "C":
+                    file_status = "copied"
+                elif item.change_type == "M":
+                    file_status = "modified"
 
-                    if status_code == "??":
-                        untracked_files.append(file_path)
-                    else:
-                        status_map = {
-                            "M ": "modified",
-                            " M": "modified",
-                            "M": "modified",
-                            "MM": "modified",
-                            "A ": "added",
-                            " A": "added",
-                            "A": "added",
-                            "AA": "added",
-                            "D ": "deleted",
-                            " D": "deleted",
-                            "R ": "renamed",
-                            "C ": "copied",
-                            "R": "renamed",
-                        }
+                modified_files.append(GitStatusFile(path=item.a_path, status=file_status))
 
-                        file_status = status_map.get(status_code, "unknown")
-                        modified_files.append(GitStatusFile(path=file_path, status=file_status))
+            # Check working directory (unstaged changes)
+            for item in repo.index.diff(None):
+                file_status = "modified"
+                if item.change_type == "D":
+                    file_status = "deleted"
+                elif item.change_type == "M":
+                    file_status = "modified"
+
+                # Check if file is already in modified_files (staged)
+                existing_file = next((f for f in modified_files if f.path == item.a_path), None)
+                if existing_file:
+                    # File has both staged and unstaged changes
+                    existing_file.status = "modified"
+                else:
+                    modified_files.append(GitStatusFile(path=item.a_path, status=file_status))
 
             ahead_commits = 0
             behind_commits = 0
 
             try:
-                stdout, stderr, returncode = self._run_git_command(
-                    ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"], cwd=workspace_path
-                )
-
-                if returncode == 0 and stdout:
-                    parts = stdout.split()
-                    if len(parts) == 2:
-                        ahead_commits = int(parts[0])
-                        behind_commits = int(parts[1])
+                # Try to get upstream tracking branch
+                tracking_branch = repo.active_branch.tracking_branch()
+                if tracking_branch:
+                    # Get commits ahead/behind
+                    ahead_commits = len(list(repo.iter_commits(f"{tracking_branch.name}..HEAD")))
+                    behind_commits = len(list(repo.iter_commits(f"HEAD..{tracking_branch.name}")))
             except Exception as fetch_exception:
-                logger.error(f"Failed to fetch upstream branch: {fetch_exception}")
+                logger.error(f"Failed to get upstream branch info: {fetch_exception}")
+                # Fallback: try to find upstream/main or origin/main
+                try:
+                    upstream_ref = None
+                    for remote_ref in repo.remote("upstream").refs:
+                        if remote_ref.name.endswith("/main"):
+                            upstream_ref = remote_ref
+                            break
+
+                    if not upstream_ref:
+                        for remote_ref in repo.remote("origin").refs:
+                            if remote_ref.name.endswith("/main"):
+                                upstream_ref = remote_ref
+                                break
+
+                    if upstream_ref:
+                        ahead_commits = len(list(repo.iter_commits(f"{upstream_ref.name}..HEAD")))
+                        behind_commits = len(list(repo.iter_commits(f"HEAD..{upstream_ref.name}")))
+
+                except Exception as e:
+                    logger.error(f"Failed to find upstream/main branch: {e}")
 
             is_clean = len(modified_files) == 0 and len(untracked_files) == 0
 
@@ -161,34 +159,91 @@ class GitService:
                 "modified_files": modified_files,
                 "untracked_files": untracked_files,
             }
+
+        except git.InvalidGitRepositoryError as e:
+            logger.error(f"Invalid git repository: {workspace_path}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
+        except git.GitCommandError as e:
+            logger.error(f"Git command error: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Git operation failed: {str(e)}") from e
         except Exception as e:
             logger.error(f"Error getting git status: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get git status") from e
 
-    async def revert_file_changes(self, workspace_path: Path, file_path: Path) -> str:
+    async def revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
-            if not workspace_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-            if not workspace_path.is_dir():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
+            target_file_path = sanitize_path(file_path, workspace_path)
 
-            target_file_path = workspace_path / file_path
-            if not target_file_path.is_relative_to(workspace_path):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in workspace")
+            repo = git.Repo(workspace_path)
+
+            relative_file_path = target_file_path.relative_to(workspace_path.resolve())
+            relative_file_str = str(relative_file_path).replace("\\", "/")  # Ensure forward slashes for git
+
+            # Check if file is tracked by Git (exists in HEAD commit)
+            is_tracked = False
+            try:
+                repo.git.cat_file("-e", f"HEAD:{relative_file_str}")
+                is_tracked = True
+            except git.GitCommandError:
+                is_tracked = False
+
+            # Handle file existence based on tracking status
             if not target_file_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File does not exist")
-            if not target_file_path.is_file():
+                if not is_tracked:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File does not exist and is not tracked by Git")
+                # File is tracked but deleted - this is okay, we can restore it
+            elif not target_file_path.is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
 
-            output, error, returncode = self._run_git_command(["git", "checkout", "--", file_path], cwd=workspace_path)
+            if not target_file_path.exists() and is_tracked:
+                pass
+            elif target_file_path.exists():
+                has_changes = False
 
-            if returncode != 0:
-                logger.error(f"Error reverting file changes: {error}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revert file changes")
+                # Check for staged changes
+                staged_diff = repo.index.diff("HEAD", R=True)
+                for item in staged_diff:
+                    if item.a_path == relative_file_str or item.b_path == relative_file_str:
+                        has_changes = True
+                        break
 
-            logger.info(f"Successfully reverted changes for file: {file_path}")
+                # Check for unstaged changes
+                if not has_changes:
+                    unstaged_diff = repo.index.diff(None)
+                    for item in unstaged_diff:
+                        if item.a_path == relative_file_str:
+                            has_changes = True
+                            break
 
-            return f"Reverted changes for file: {file_path.name}"
+                if not has_changes:
+                    return f"No changes to revert for file: {file_path}"
+
+            else:
+                # File does not exist and is not tracked by Git
+                if relative_file_str in repo.untracked_files:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert untracked file. Use delete instead.")
+
+            # Revert the file using GitPython
+            # This is equivalent to `git checkout -- file_path`
+            repo.git.checkout("--", relative_file_str)
+
+            if not target_file_path.exists():
+                # File was deleted, now it's restored
+                logger.info(f"Successfully reverted deleted file: {file_path}")
+                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
+            else:
+                logger.info(f"Successfully reverted changes for file: {file_path}")
+                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
+
+        except git.InvalidGitRepositoryError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
+        except git.GitCommandError as e:
+            logger.error(f"Git command error reverting file: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
+        except ValueError as e:
+            # This can happen if the file path is outside the workspace
+            logger.error(f"Path error: {e}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file path") from e
         except Exception as e:
             logger.error(f"Error reverting file changes: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revert file changes") from e

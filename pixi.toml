@@ -21,6 +21,7 @@ pandoc = "==3.6.2"
 pandoc-crossref = "=0.3.18.1"
 playwright = ">=1.54.2,<2"
 strictyaml = ">=1.7.3,<2"
+gitpython = ">=3.1.45,<4"
 
 [feature.dev.dependencies]
 ruff = "*"
