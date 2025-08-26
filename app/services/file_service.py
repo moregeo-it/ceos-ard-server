@@ -39,6 +39,8 @@ class FileService:
 
             file_and_folder = []
 
+            repo = git.Repo(workspace.workspace_path, search_parent_directories=True)
+
             for file_path in target_path.rglob("*"):
                 if "build" in str(file_path) or ".git" in str(file_path):
                     continue
@@ -48,8 +50,28 @@ class FileService:
                     continue
                 if file_path.is_file() and (file_path.name.startswith(".") or file_path.name.endswith(".pdf")):
                     continue
+
+                try:
+                    git_status = repo.git.status(file_path, porcelain=True)
+
+                    if "A" in git_status:
+                        file_status = "added"
+                    elif "M" in git_status:
+                        file_status = "modified"
+                    elif "R" in git_status:
+                        file_status = "renamed"
+                    else:
+                        file_status = None
+                except git.exc.GitCommandError:
+                    file_status = "deleted"
+
                 file_and_folder.append(
-                    {"name": file_path.name, "path": str(file_path.relative_to(workspace_path.resolve())), "is_directory": file_path.is_dir()}
+                    {
+                        "status": file_status,
+                        "name": file_path.name,
+                        "is_directory": file_path.is_dir(),
+                        "path": str(file_path.relative_to(workspace_path.resolve())),
+                    }
                 )
             return file_and_folder
         except Exception as e:
