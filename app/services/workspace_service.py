@@ -395,6 +395,15 @@ class WorkspaceService:
 
                 logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
 
+                repo = git.Repo(workspace_path)
+
+                # Add changes to the repository
+                try:
+                    repo.git.add(str(new_pfs_path))
+                except git.GitCommandError as e:
+                    logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
+
                 return {"id": create_pfs_request.id, "name": create_pfs_request.title}
             except YAMLValidationError as e:
                 shutil.rmtree(new_pfs_path, ignore_errors=True)
@@ -435,6 +444,7 @@ class WorkspaceService:
 
             repo = git.Repo(workspace.workspace_path)
 
+            # Add changes to the repository
             try:
                 repo.git.add(".")
                 logger.info(f"Staged changes for workspace {workspace_id}")

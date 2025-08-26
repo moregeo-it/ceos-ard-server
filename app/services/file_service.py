@@ -129,6 +129,13 @@ class FileService:
         if content is not None:
             target_path.write_text(content, encoding="utf-8")
 
+        # Add changes to the repository
+        try:
+            repo = git.Repo(workspace_path, search_parent_directories=True)
+            repo.git.add(str(target_path))
+        except git.exc.GitCommandError as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
+
         return {"name": name, "path": str(target_path), "directory": False}
 
     def _create_folder(self, workspace_path: Path, name: str, path: str):
@@ -205,6 +212,13 @@ class FileService:
 
             Path(file_path).write_bytes(content)
 
+            # Add changes to the repository
+            try:
+                repo = git.Repo(workspace_path, search_parent_directories=True)
+                repo.git.add(str(file_path))
+            except git.exc.GitCommandError as e:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
+
             return {"message": "File content stored successfully"}
 
         except Exception as e:
@@ -221,7 +235,18 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             workspace_path = Path(workspace.workspace_path)
 
-            return await self._delete(workspace_path, file_path)
+            response = await self._delete(workspace_path, file_path)
+
+            if response["message"] == "File deleted successfully":
+                # Add changes to the repository
+                try:
+                    repo = git.Repo(workspace_path, search_parent_directories=True)
+                    repo.git.add(file_path)
+                except git.exc.GitCommandError as e:
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
+
+                return response
+
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file or folder: {str(e)}") from e
 
@@ -240,10 +265,10 @@ class FileService:
         if Path(target_path).is_file():
             target_path.unlink()
             if not target_path.exists():
-                return {"message": "File deleted successfully"}
+                return {"message": "File deleted successfully", "file_path": str(target_path)}
         elif Path(target_path).is_dir():
             shutil.rmtree(target_path)
-            return {"message": "Folder deleted successfully"}
+            return {"message": "Folder deleted successfully", "file_path": str(target_path)}
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
 
@@ -290,6 +315,13 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
 
         target_path.replace(new_file_path)
+
+        # Add changes to the repository
+        try:
+            repo = git.Repo(workspace_path, search_parent_directories=True)
+            repo.git.add(str(new_file_path))
+        except git.exc.GitCommandError as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
 
         return {"name": new_name, "path": str(new_file_path.relative_to(workspace_path.resolve())), "directory": False}
 
