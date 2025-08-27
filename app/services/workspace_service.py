@@ -193,7 +193,8 @@ class WorkspaceService:
                     db.commit()
 
             return workspace
-
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error getting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
@@ -205,29 +206,35 @@ class WorkspaceService:
         if update_data.status and update_data.status not in WorkspaceStatus:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace status")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        try:
+            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
-        if workspace.status == WorkspaceStatus.ARCHIVED and update_data.status == WorkspaceStatus.ACTIVE:
-            if workspace.pull_request_status == PullRequestStatus.MERGED or workspace.pull_request_status == PullRequestStatus.CLOSED:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot reactivate an archived workspace with a merged or closed pull request"
-                )
+            if workspace.status == WorkspaceStatus.ARCHIVED and update_data.status == WorkspaceStatus.ACTIVE:
+                if workspace.pull_request_status == PullRequestStatus.MERGED or workspace.pull_request_status == PullRequestStatus.CLOSED:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot reactivate an archived workspace with a merged or closed pull request"
+                    )
 
-        update_dict = update_data.model_dump(exclude_unset=True)
+            update_dict = update_data.model_dump(exclude_unset=True)
 
-        if not update_dict:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description or title must be provided")
+            if not update_dict:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description or title must be provided")
 
-        if "status" in update_dict and isinstance(update_dict["status"], str):
-            update_dict["status"] = update_dict["status"].upper()
+            if "status" in update_dict and isinstance(update_dict["status"], str):
+                update_dict["status"] = update_dict["status"].upper()
 
-        for key, value in update_dict.items():
-            if hasattr(workspace, key):
-                setattr(workspace, key, value)
+            for key, value in update_dict.items():
+                if hasattr(workspace, key):
+                    setattr(workspace, key, value)
 
-        db.commit()
-        db.refresh(workspace)
-        return workspace
+            db.commit()
+            db.refresh(workspace)
+
+            return workspace
+
+        except Exception as e:
+            logger.error(f"Error updating workspace {workspace_id}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from e
 
     async def delete_workspace(self, db: Session, workspace_id: str, user_id: str) -> bool:
         if not workspace_id:
@@ -267,12 +274,13 @@ class WorkspaceService:
 
     async def get_workspace_status(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        workspace_path = Path(workspace.workspace_path)
 
         if workspace.status != WorkspaceStatus.ACTIVE:
             return {"workspace_status": workspace.status.value, "git_status": None}
 
         try:
-            git_status = await self.git_service.get_git_status(workspace.workspace_path)
+            git_status = await self.git_service.get_git_status(workspace_path)
 
             return {"workspace_status": workspace.status.value, "git_status": git_status}
 
@@ -437,7 +445,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already closed")
 
         try:
-            git_status = await self.git_service.get_git_status(workspace.workspace_path)
+            git_status = await self.git_service.get_git_status(workspace_path)
 
             if git_status["is_clean"]:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")

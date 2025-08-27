@@ -70,10 +70,7 @@ class GitService:
 
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {e}") from e
 
-    async def get_git_status(self, workspace_path: str) -> dict[str, list[GitStatusFile]]:
-        if not workspace_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-
+    async def get_git_status(self, workspace_path: Path) -> dict[str, list[GitStatusFile]]:
         try:
             repo = git.Repo(workspace_path)
 

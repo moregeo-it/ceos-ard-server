@@ -30,6 +30,8 @@ async def list_workspace_files(
         files_and_folder = await file_service.get_workspace_files(db=db, path=path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         return JSONResponse(content=files_and_folder, status_code=status.HTTP_200_OK)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing workspace files: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list workspace files") from e

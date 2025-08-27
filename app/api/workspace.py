@@ -37,7 +37,8 @@ async def create_workspace(
         return await workspace_service.create_workspace(
             db=db, user_id=user_id, username=username, workspace_data=workspace_data, access_token=access_token
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
@@ -56,6 +57,8 @@ async def get_user_workspaces(
 ):
     try:
         return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["access_token"])
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspaces") from e
@@ -76,7 +79,8 @@ async def get_user_workspace(
         return workspace_service.get_workspace_by_id(
             db=db, check_pr=True, workspace_id=workspace_id, user_id=current_user["user"].id, access_token=current_user["access_token"]
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting workspace: {e}")
 
@@ -92,7 +96,8 @@ async def update_workspace(
 ):
     try:
         return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update workspace") from e
@@ -112,7 +117,8 @@ async def delete_workspace(
 ):
     try:
         return await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete workspace") from e
@@ -131,7 +137,8 @@ async def get_workspace_status(
 ):
     try:
         return await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting workspace status: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspace status") from e
