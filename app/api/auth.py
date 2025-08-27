@@ -73,22 +73,51 @@ async def logout(current_user=Depends(get_current_user)):
 
 @router.get("/user")
 async def current_user(current_user=Depends(get_current_user)):
-    user = current_user["user"]
-    access_token = current_user["access_token"]
+    try:
+        user = current_user["user"]
+        access_token = current_user["access_token"]
 
-    return {
-        "id": user.id,
-        "email": user.email,
-        "username": user.username,
-        "full_name": user.full_name,
-        "access_token": access_token,
-        "created_at": user.created_at,
-        "updated_at": user.updated_at,
-        "external_id": user.external_id,
-        "identity_provider": user.identity_provider,
-    }
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "access_token": access_token,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "external_id": user.external_id,
+            "identity_provider": user.identity_provider,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get current user: {e}")
+        raise HTTPException(
+            respomse_model=AuthError,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to get current user"),
+        ) from e
 
 
 @router.get("/validate")
 async def validate_auth(current_user=Depends(get_current_user)):
-    return {"authenticated": True, "user_id": current_user["user"].id, "username": current_user["user"].username}
+    try:
+        user = current_user["user"]
+        access_token = current_user["access_token"]
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "access_token": access_token,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "external_id": user.external_id,
+            "identity_provider": user.identity_provider,
+        }
+    except Exception as e:
+        logger.error(f"Failed to validate user: {e}")
+        raise HTTPException(
+            respomse_model=AuthError,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to validate user"),
+        ) from e
