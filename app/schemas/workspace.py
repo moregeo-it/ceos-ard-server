@@ -4,6 +4,11 @@ from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 
 
+class WorkspaceError(BaseModel):
+    message: str
+    code: int
+
+
 class WorkspaceStatus(str, Enum):
     ACTIVE = "active"
     ARCHIVED = "archived"

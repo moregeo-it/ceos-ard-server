@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.schemas.workspace import WorkspaceError
 from app.services.auth_service import get_current_user
 from app.services.github_service import github_service
 
@@ -34,4 +35,8 @@ async def list_pfs_folders(
         raise
     except Exception as e:
         logger.error(f"Unexpected error listing PFS folders: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while listing PFS folders") from e
+        raise HTTPException(
+            response_model=WorkspaceError,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=WorkspaceError(message="An error occurred while listing PFS folders", code=status.HTTP_500_INTERNAL_SERVER_ERROR),
+        ) from e
