@@ -167,7 +167,8 @@ async def propose_changes(
             pr_description=propose_data.pr_description,
             access_token=access_token,
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error proposing changes: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to propose changes") from e
@@ -183,7 +184,8 @@ async def list_workspace_pfs_types(
 ) -> list[PFSResponse]:
     try:
         return await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing Workspace PFS types: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list PFS types") from e
@@ -200,7 +202,8 @@ async def create_workspace_pfs(
         return await workspace_service.create_workspace_pfs(
             db=db, workspace_id=workspace_id, user_id=current_user["user"].id, create_pfs_request=create_pfs_request
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating PFS: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create PFS") from e

@@ -497,7 +497,7 @@ class WorkspaceService:
                 "title": pr_title,
                 "body": pr_description,
                 "head": f"{workspace.fork_repo_owner}:{workspace.branch_name}",
-                "base": workspace.upstream_branch_name,
+                "base": settings.CEOS_ARD_MAIN_BRANCH,
             }
 
             pr_response = await self.github_service.create_pull_request(
