@@ -25,10 +25,7 @@ class User(Base):
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
 
-    def define_relationships():
-        User.workspaces = relationship("GitWorkspace", back_populates="user")
+    workspaces = relationship("GitWorkspace", back_populates="user")
 
     def __repr__(self):
         return f"<User id={self.id} username={self.username} email={self.email} provider={self.identity_provider} external_id={self.external_id}>"
-
-    define_relationships()
