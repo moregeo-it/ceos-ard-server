@@ -30,14 +30,14 @@ class GitStatus(BaseModel):
 
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
-    pfs: list[str] | None = Field(None, min_items=1, max_items=10, description="PFS to preview")
+    pfs: list[str] | None = Field(None, min_length=1, max_length=10, description="PFS to preview")
     description: str | None = Field(..., min_length=1, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
     description: str | None = Field(None, min_length=1, max_length=1000, description="New workspace description")
-    pfs: list[str] | None = Field(None, min_items=1, max_items=10, description="PFS to to update in the workspace")
+    pfs: list[str] | None = Field(None, min_length=1, max_length=10, description="PFS to to update in the workspace")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
 
 
@@ -57,9 +57,8 @@ class WorkspaceResponse(BaseModel):
     pull_request_status_last_updated_at: datetime | None
     created_at: datetime
     updated_at: datetime
-    last_build_at: datetime | None
 
-    class Config:
+    class ConfigDict:
         from_attributes = True
 
 
@@ -111,7 +110,7 @@ class CreatePFSRequest(BaseModel):
         default=["what-are-ceos-ard-products", "when-is-a-product-ceos-ard", "difference-threshold-goal"], description="PFS introduction"
     )
 
-    class Config:
+    class ConfigDict:
         use_enum_values = True
 
 
@@ -119,5 +118,5 @@ class PFSResponse(BaseModel):
     id: str
     name: str
 
-    class Config:
+    class ConfigDict:
         from_attributes = True

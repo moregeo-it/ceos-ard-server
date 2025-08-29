@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -30,9 +29,6 @@ class PreviewService:
             )
 
             if build_info.get("status") == "success":
-                workspace.last_build_at = datetime.now()
-                db.commit()
-
                 workspace_path = Path(workspace.workspace_path)
                 return await self._get_preview_files(workspace_path, pfs)
 

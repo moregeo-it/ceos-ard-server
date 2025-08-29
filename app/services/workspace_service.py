@@ -85,7 +85,6 @@ class WorkspaceService:
 
             if success:
                 workspace.status = WorkspaceStatus.ACTIVE
-                workspace.last_build_at = datetime.utcnow()
                 db.commit()
                 db.refresh(workspace)
 
