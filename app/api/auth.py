@@ -40,7 +40,6 @@ async def initiate_login(request: Request, identity_provider: IdentityProvider =
     except Exception as e:
         logger.error(f"Failed to initiate GitHub login: {e}")
         raise HTTPException(
-            respomse_model=AuthError,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to initiate GitHub login"),
         ) from e
@@ -65,7 +64,6 @@ async def logout(current_user=Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Failed to logout user: {e}")
         raise HTTPException(
-            respomse_model=AuthError,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to logout user"),
         ) from e
@@ -91,7 +89,6 @@ async def current_user(current_user=Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Failed to get current user: {e}")
         raise HTTPException(
-            respomse_model=AuthError,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to get current user"),
         ) from e
@@ -117,7 +114,6 @@ async def validate_auth(current_user=Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Failed to validate user: {e}")
         raise HTTPException(
-            respomse_model=AuthError,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to validate user"),
         ) from e
