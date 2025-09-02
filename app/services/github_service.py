@@ -155,7 +155,7 @@ class GitHubService:
                 error_data = response.json()
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Failed to create pull request: {error_data['message', 'Unknown error']}",
+                    detail=f"Failed to create pull request: {error_data.get('message', 'Unknown error')}",
                 )
             elif response.status_code == status.HTTP_403_FORBIDDEN:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to GitHub repository")
