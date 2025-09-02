@@ -14,18 +14,18 @@ from strictyaml import YAMLValidationError, as_document, load
 from app.config import settings
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.schemas.workspace import CreatePFSRequest, WorkspaceCreate, WorkspaceUpdate
-from app.services.build_service import build_service
-from app.services.git_service import git_service
-from app.services.github_service import github_service
+from app.services.build_service import BuildService
+from app.services.git_service import GitService
+from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
 
 
 class WorkspaceService:
     def __init__(self):
-        self.git_service = git_service
-        self.github_service = github_service
-        self.build_service = build_service
+        self.git_service = GitService()
+        self.build_service = BuildService()
+        self.github_service = GitHubService()
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user_id: str, username: str, access_token: str) -> GitWorkspace:
         if not workspace_data.title:
@@ -532,6 +532,3 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
-
-
-workspace_service = WorkspaceService()

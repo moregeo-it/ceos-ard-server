@@ -205,6 +205,3 @@ class GitHubService:
                 logger.info(f"Pull requests not found for {owner}/{repo}")
                 return []
             raise
-
-
-github_service = GitHubService()

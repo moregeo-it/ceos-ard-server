@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.dependencies import get_github_service
 from app.schemas.workspace import WorkspaceError
 from app.services.auth_service import get_current_user
-from app.services.github_service import github_service
+from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/pfs", tags=["PFS"])
 @router.get("", summary="List available PFS types", description="Retrieves all available PFS types for CEOS-ARD repository")
 async def list_pfs_folders(
     current_user=Depends(get_current_user),
+    github_service: GitHubService = Depends(get_github_service),
 ) -> dict[str, Any]:
     try:
         access_token = current_user["access_token"]

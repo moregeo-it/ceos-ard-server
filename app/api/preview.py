@@ -6,9 +6,10 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.dependencies import get_preview_service
 from app.schemas.preview import PreviewErrorMessage
 from app.services.auth_service import get_current_user
-from app.services.preview_service import preview_service
+from app.services.preview_service import PreviewService
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ async def generate_preview(
     db: Session = Depends(get_db),
     pfs: list[str] | None = Query(default=None, min_items=1, max_items=50),
     current_user: dict[str, Any] = Depends(get_current_user),
+    preview_service: PreviewService = Depends(get_preview_service),
 ):
     try:
         generated_previews = await preview_service.generate_preview(db=db, pfs=pfs, workspace_id=workspace_id, user_id=current_user["user"].id)

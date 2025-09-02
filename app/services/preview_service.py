@@ -4,15 +4,16 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.services.build_service import build_service
-from app.services.workspace_service import workspace_service
+from app.services.build_service import BuildService
+from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
 
 class PreviewService:
     def __init__(self):
-        self.build_service = build_service
+        self.build_service = BuildService()
+        self.workspace_service = WorkspaceService()
 
     async def generate_preview(self, db: Session, pfs: list[str] | None, workspace_id: str, user_id: str):
         if not workspace_id:
@@ -22,7 +23,7 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
         try:
-            workspace = workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             build_info = await self.build_service.start_build(
                 workspace_path=str(workspace.workspace_path), workspace_id=workspace_id, pfs=pfs or workspace.pfs

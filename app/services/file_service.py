@@ -8,8 +8,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.schemas.workspace import FilePatchRequest
-from app.services.git_service import git_service
-from app.services.workspace_service import workspace_service
+from app.services.git_service import GitService
+from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_file_media_type
 from app.utils.sanitization import sanitize_filename, sanitize_path
 
@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 class FileService:
     def __init__(self):
-        self.git_service = git_service
-        self.workspace_service = workspace_service
+        self.git_service = GitService()
+        self.workspace_service = WorkspaceService()
 
     async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str):
         if not workspace_id:
@@ -329,7 +329,7 @@ class FileService:
 
     async def _revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
-            return await git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
+            return await self.git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
 
@@ -406,7 +406,7 @@ class FileService:
             if not workspace_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
 
-            git_status = await git_service.get_git_status(workspace_path)
+            git_status = await self.git_service.get_git_status(workspace_path)
 
             changed_files = []
 

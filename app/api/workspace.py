@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.dependencies import get_workspace_service
 from app.schemas.workspace import (
     CreatePFSRequest,
     PFSResponse,
@@ -16,7 +17,7 @@ from app.schemas.workspace import (
     WorkspaceUpdate,
 )
 from app.services.auth_service import get_current_user
-from app.services.workspace_service import workspace_service
+from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 async def create_workspace(
     workspace_data: WorkspaceCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     user_id = current_user["user"].id
     username = current_user["user"].username
@@ -54,6 +56,7 @@ async def create_workspace(
 async def get_user_workspaces(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
         return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["access_token"])
@@ -74,6 +77,7 @@ async def get_user_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
         return workspace_service.get_workspace_by_id(
@@ -93,6 +97,7 @@ async def update_workspace(
     update_data: WorkspaceUpdate,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
         return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
@@ -114,6 +119,7 @@ async def delete_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
         return await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
@@ -134,6 +140,7 @@ async def get_workspace_status(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
         return await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
@@ -155,6 +162,7 @@ async def propose_changes(
     propose_data: ProposeChangesRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
         access_token = current_user.get("access_token")
@@ -181,6 +189,7 @@ async def list_workspace_pfs_types(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> list[PFSResponse]:
     try:
         return await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
@@ -197,6 +206,7 @@ async def create_workspace_pfs(
     create_pfs_request: CreatePFSRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(get_current_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> PFSResponse:
     try:
         return await workspace_service.create_workspace_pfs(

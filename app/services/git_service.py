@@ -244,6 +244,3 @@ class GitService:
         except Exception as e:
             logger.error(f"Error reverting file changes: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revert file changes") from e
-
-
-git_service = GitService()

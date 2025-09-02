@@ -6,9 +6,10 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.dependencies import get_file_service
 from app.schemas.workspace import CreateFileRequest, FilePatchRequest
 from app.services.auth_service import get_current_user
-from app.services.file_service import file_service
+from app.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/workspaces", tags=["Files"])
 async def list_workspace_files(
     workspace_id: str,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
     path: str | None = Query(default="/", description="Path to list files from"),
 ):
@@ -46,6 +48,7 @@ async def create(
     workspace_id: str,
     create_file_request: CreateFileRequest,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -68,6 +71,7 @@ async def read_file_content(
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -90,6 +94,7 @@ async def store_file_content(
     workspace_id: str,
     db: Session = Depends(get_db),
     content: UploadFile = File(...),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -118,6 +123,7 @@ async def delete(
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -138,6 +144,7 @@ async def patch_file(
     workspace_id: str,
     operation_request: FilePatchRequest,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -165,6 +172,7 @@ async def search_files(
     workspace_id: str,
     search_query: str,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
@@ -183,7 +191,12 @@ async def search_files(
     summary="Get list of changed files",
     description="Retrieve a list of changed files in a workspace - includes untracked files",
 )
-async def get_changed_files(workspace_id: str, db: Session = Depends(get_db), current_user: dict[str, Any] = Depends(get_current_user)):
+async def get_changed_files(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
     try:
         changed_files = await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
@@ -202,6 +215,7 @@ async def get_file_diff(
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
