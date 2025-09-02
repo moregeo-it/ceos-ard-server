@@ -235,7 +235,7 @@ class WorkspaceService:
             logger.error(f"Error updating workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from e
 
-    async def delete_workspace(self, db: Session, workspace_id: str, user_id: str) -> bool:
+    async def delete_workspace(self, db: Session, workspace_id: str, user_id: str) -> str:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
