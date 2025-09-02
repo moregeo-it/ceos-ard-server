@@ -24,9 +24,9 @@ strictyaml = ">=1.7.3,<2"
 gitpython = ">=3.1.45,<4"
 
 [feature.dev.dependencies]
-ruff = "*"
-pytest = "*"
-pre-commit = "*"
+ruff = ">=0.12.0,<0.13.0"
+pytest = ">=8.3.0,<9.0.0"
+pre-commit = ">=4.0.0,<5.0.0"
 
 [feature.dev.tasks]
 lint = "ruff check ."
@@ -34,11 +34,12 @@ format = "ruff format ."
 lint-fix = "ruff check --fix ."
 pre-commit-run = "pre-commit run --all-files"
 pre-commit-install = "pre-commit install"
+test = { cmd = "pytest test/ -v", env = { PYTHONPATH = "." } }
 
 [environments]
 default = { solve-group = "default" }
 dev = { features = ["dev"], solve-group = "default" }
 
 [pypi-dependencies]
-ceos-ard-cli = "*"
+ceos-ard-cli = ">= 0.2.0,<0.3.0"
 bibtexparser = "==2.0.0b8"
