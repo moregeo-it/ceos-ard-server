@@ -44,21 +44,24 @@ def sanitize_github_params(params: dict[str, Any]) -> dict[str, str]:
 
 
 def sanitize_filename(filename: str) -> str:
+    if not isinstance(filename, str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename must be a string",
+        )
+
+    filename = filename.strip()
+
     if not filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Filename is required",
         )
 
-    if filename.endswith(
-        (
-            ".",
-            " ",
-        )
-    ):
+    if filename.endswith("."):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename cannot end with a dot or whitespace",
+            detail="Filename cannot end with a dot",
         )
 
     if ".." in filename:
@@ -67,15 +70,20 @@ def sanitize_filename(filename: str) -> str:
             detail="Filename cannot contain consecutive dots",
         )
 
-    sanitized = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    allowed_pattern = r"^[a-zA-Z0-9._-]+$"
+    if not re.match(allowed_pattern, filename):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename contains invalid characters. Only alphanumeric characters, dots, hyphens and underscores are allowed",
+        )
 
-    if sanitized.startswith("."):
+    if filename.startswith("."):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Filename cannot start with a dot",
         )
 
-    return sanitized
+    return filename
 
 
 def sanitize_path(path: str, workspace_path: Path) -> Path:
@@ -100,26 +108,38 @@ def sanitize_path(path: str, workspace_path: Path) -> Path:
     if not path or path == "/":
         return workspace_path.resolve()
 
-    sanitized_path = path.strip("/")
+    normalized = path.replace("\\", "/")
 
-    allowed_patterns = r"^[a-zA-Z0-9/_\-\.]+$"
-
-    if not re.match(allowed_patterns, path):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Path contains invalid characters or patterns",
-        )
-
-    if sanitized_path.startswith("/") or len(sanitized_path) > 1 and sanitized_path[1] == ":":
+    if Path(normalized).is_absolute():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Absolute paths are not allowed",
         )
 
-    target_path = (workspace_path / sanitized_path).resolve()
-    workspace_path_resolved = workspace_path.resolve()
+    # Remove leading/trailing slashes
+    sanitized_path = normalized.strip("/")
+
+    # Reject empty segments and '..' explicitly
+    segments = [s for s in sanitized_path.split("/") if s != ""]
+    if any(seg == ".." for seg in segments):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path must not contain '..'")
+    if len(segments) == 0:
+        return workspace_path.resolve()
+
+    # Validate allowed characters per segment (dots allowed inside names)
+    allowed_segment = re.compile(r"^[a-zA-Z0-9._-]+$")  # letters, digits, dot, underscore, hyphen
+    for seg in segments:
+        if not allowed_segment.match(seg):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Path may only contain alphanumeric characters, dots, hyphens and underscores",
+            )
+
+    # Reconstruct and resolve
+    joined = "/".join(segments)
+    target_path = (workspace_path / joined).resolve()
     try:
-        target_path.relative_to(workspace_path_resolved)
+        target_path.relative_to(workspace_path.resolve())
         return target_path
     except ValueError as e:
         raise HTTPException(
