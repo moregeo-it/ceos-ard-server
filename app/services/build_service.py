@@ -30,7 +30,7 @@ class BuildService:
             return False
 
         except Exception as e:
-            logger.error(f"Error checking prequisites: {e}")
+            logger.error(f"Error checking prerequisites: {e}")
             return False
 
     async def start_build(self, workspace_path: str, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
