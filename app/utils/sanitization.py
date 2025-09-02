@@ -117,9 +117,9 @@ def sanitize_path(path: str, workspace_path: Path) -> Path:
         )
 
     target_path = (workspace_path / sanitized_path).resolve()
-    worksapace_path_resolved = workspace_path.resolve()
+    workspace_path_resolved = workspace_path.resolve()
     try:
-        target_path.relative_to(worksapace_path_resolved)
+        target_path.relative_to(workspace_path_resolved)
         return target_path
     except ValueError as e:
         raise HTTPException(
