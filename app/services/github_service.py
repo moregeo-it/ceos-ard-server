@@ -14,44 +14,93 @@ class GitHubService:
         self.base_url = settings.GITHUB_API_BASE_URL
         self.default_headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "CEOS-ARD-Editor"}
 
-    async def get_repository_contents(self, owner: str, repo: str, token: str, path: str = "", branch: str = "main") -> list[dict[str, Any]]:
-        if not token:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing GitHub access token")
+    def _get_auth_headers(self, token: str, auth_type: str = "Bearer") -> dict[str, str]:
+        """Create headers with authorization token.
 
+        Args:
+            token: The access token
+            auth_type: Either 'Bearer' or 'token' depending on the GitHub API endpoint
+        """
         headers = self.default_headers.copy()
-        headers["Authorization"] = f"token {token}"
+        headers["Authorization"] = f"{auth_type} {token}"
+        return headers
 
-        url = f"{self.base_url}/repos/{owner}/{repo}/contents"
+    async def _make_github_request(
+        self, method: str, url: str, token: str, auth_type: str = "Bearer", params: dict = None, json_data: dict = None, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """Make a GitHub API request with comprehensive error handling.
 
-        if path:
-            url += f"/{path}"
+        Args:
+            method: HTTP method ('GET', 'POST', etc.)
+            url: Full URL for the request
+            token: GitHub access token
+            auth_type: Either 'Bearer' or 'token'
+            params: Query parameters
+            json_data: JSON body for POST requests
+            timeout: Request timeout in seconds
 
-        params = {"ref": branch}
+        Returns:
+            JSON response data
+
+        Raises:
+            HTTPException: For various error conditions with appropriate status codes
+        """
+        headers = self._get_auth_headers(token, auth_type)
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=headers, params=params)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                if method.upper() == "GET":
+                    response = await client.get(url, headers=headers, params=params)
+                elif method.upper() == "POST":
+                    response = await client.post(url, headers=headers, params=params, json=json_data)
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
 
-                if response.status_code == 404:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} or path '{path}' not found")
+                # Handle common GitHub API status codes
+                if response.status_code == 200 or response.status_code == 201 or response.status_code == 202:
+                    return response.json()
+                elif response.status_code == 404:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GitHub resource not found")
                 elif response.status_code == 403:
                     # Check if it's a rate limit issue
                     if "rate limit" in response.text.lower():
                         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="GitHub API rate limit exceeded")
                     else:
                         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to GitHub repository")
-                elif response.status_code != 200:
+                elif response.status_code == 422:
+                    error_data = response.json()
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"GitHub API validation error: {error_data.get('message', 'Unknown error')}",
+                    )
+                else:
                     logger.error(f"GitHub API error: {response.status_code} - {response.text}")
                     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
 
-                return response.json()
-
         except httpx.TimeoutException as e:
-            logger.error(f"Timeout requesting GitHub API for {owner}/{repo}/{path}")
+            logger.error(f"Timeout requesting GitHub API: {url}")
             raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
         except httpx.RequestError as e:
             logger.error(f"Network error requesting GitHub API: {e}")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+
+    async def get_repository_contents(self, owner: str, repo: str, token: str, path: str = "", branch: str = "main") -> list[dict[str, Any]]:
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing GitHub access token")
+
+        url = f"{self.base_url}/repos/{owner}/{repo}/contents"
+        if path:
+            url += f"/{path}"
+
+        params = {"ref": branch}
+
+        try:
+            return await self._make_github_request("GET", url, token, "token", params=params)
+        except HTTPException as e:
+            # Add more specific context for this endpoint
+            if e.status_code == 404:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} or path '{path}' not found") from e
+            raise
 
     async def get_pfs_types(self, owner: str, repo: str, token: str, branch: str) -> list[str]:
         try:
@@ -72,60 +121,35 @@ class GitHubService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve PFS information") from e
 
     async def check_user_fork(self, access_token: str, username: str, upstream_owner: str, upstream_repo: str) -> dict[str, Any] | None:
+        url = f"{self.base_url}/repos/{username}/{upstream_repo}"
+
         try:
-            url = f"{self.base_url}/repos/{username}/{upstream_repo}"
-            headers = self.default_headers.copy()
-            headers["Authorization"] = f"Bearer {access_token}"
+            fork_repo = await self._make_github_request("GET", url, access_token)
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=headers)
+            if fork_repo["fork"] and fork_repo["owner"]["login"] == upstream_owner:
+                logger.info(f"User {username} has forked {upstream_owner}/{upstream_repo}")
+                return fork_repo
 
-            if response.status_code == status.HTTP_200_OK:
-                fork_repo = response.json()
-                if fork_repo["fork"] and fork_repo["owner"]["login"] == upstream_owner:
-                    logger.info(f"User {username} has forked {upstream_owner}/{upstream_repo}")
-                    return fork_repo
-            elif response.status_code == status.HTTP_404_NOT_FOUND:
+            return None
+
+        except HTTPException as e:
+            if e.status_code == 404:
                 logger.info(f"User {username} has not forked {upstream_owner}/{upstream_repo}")
                 return None
-            else:
-                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Timeout requesting GitHub API for {username}/{upstream_repo}")
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
-        except httpx.RequestError as e:
-            logger.error(f"Network error requesting GitHub API: {e}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+            raise
 
     async def create_fork(self, access_token: str, upstream_owner: str, upstream_repo: str) -> dict[str, Any]:
         url = f"{self.base_url}/repos/{upstream_owner}/{upstream_repo}/forks"
-        headers = self.default_headers.copy()
-        headers["Authorization"] = f"Bearer {access_token}"
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(url, headers=headers)
-
-            if response.status_code == status.HTTP_202_ACCEPTED:
-                fork_repo = response.json()
-                logger.info(f"Successfully forked {upstream_owner}/{upstream_repo} to {fork_repo['owner']['login']}/{fork_repo['name']}")
-                return fork_repo
-            elif response.status_code == status.HTTP_403_FORBIDDEN:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to GitHub repository")
-            elif response.status_code == status.HTTP_404_NOT_FOUND:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {upstream_owner}/{upstream_repo} not found")
-            else:
-                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Timeout requesting GitHub API for {upstream_owner}/{upstream_repo}")
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
-        except httpx.RequestError as e:
-            logger.error(f"Network error requesting GitHub API: {e}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+            fork_repo = await self._make_github_request("POST", url, access_token, timeout=60.0)
+            logger.info(f"Successfully forked {upstream_owner}/{upstream_repo} to {fork_repo['owner']['login']}/{fork_repo['name']}")
+            return fork_repo
+        except HTTPException as e:
+            # Add more specific context for this endpoint
+            if e.status_code == 404:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {upstream_owner}/{upstream_repo} not found") from e
+            raise
 
     async def get_or_create_fork(self, username: str, access_token: str, upstream_owner: str, upstream_repo: str) -> tuple[dict[str, Any], bool]:
         fork_repo = await self.check_user_fork(access_token, username, upstream_owner, upstream_repo)
@@ -139,67 +163,31 @@ class GitHubService:
 
     async def create_pull_request(self, access_token: str, upstream_owner: str, upstream_repo: str, pr_data: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}/repos/{upstream_owner}/{upstream_repo}/pulls"
-        headers = self.default_headers.copy()
-        headers["Authorization"] = f"Bearer {access_token}"
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(url, headers=headers, json=pr_data)
-
-            if response.status_code == status.HTTP_201_CREATED:
-                pr_response = response.json()
-                logger.info(f"Successfully created pull request for {upstream_owner}/{upstream_repo}")
-
-                return pr_response
-            elif response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
-                error_data = response.json()
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Failed to create pull request: {error_data.get('message', 'Unknown error')}",
-                )
-            elif response.status_code == status.HTTP_403_FORBIDDEN:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to GitHub repository")
-            elif response.status_code == status.HTTP_404_NOT_FOUND:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {upstream_owner}/{upstream_repo} not found")
-            else:
-                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Timeout requesting GitHub API for {upstream_owner}/{upstream_repo}")
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
-        except httpx.RequestError as e:
-            logger.error(f"Network error requesting GitHub API: {e}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+            pr_response = await self._make_github_request("POST", url, access_token, json_data=pr_data, timeout=60.0)
+            logger.info(f"Successfully created pull request for {upstream_owner}/{upstream_repo}")
+            return pr_response
+        except HTTPException as e:
+            # Add more specific context for this endpoint
+            if e.status_code == 404:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {upstream_owner}/{upstream_repo} not found") from e
+            raise
 
     async def get_pull_request(self, owner: str, repo: str, number: int, access_token: str) -> dict[str, Any]:
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}"
-        headers = self.default_headers.copy()
-        headers["Authorization"] = f"Bearer {access_token}"
-
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(url, headers=headers)
-
-            if response.status_code == status.HTTP_200_OK:
-                return response.json()
-            else:
-                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Timeout requesting GitHub API for {owner}/{repo}")
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
-        except httpx.RequestError as e:
-            logger.error(f"Network error requesting GitHub API: {e}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+            return await self._make_github_request("GET", url, access_token, timeout=60.0)
+        except HTTPException as e:
+            if e.status_code == 404:
+                logger.info(f"Pull request {number} not found for {owner}/{repo}")
+                return None
+            raise
 
     async def get_repo_pull_requests(
         self, owner: str, repo: str, access_token: str, state: str = "all", per_page: int = 100, page: int = 1, since: str = None
     ) -> list[dict[str, Any]]:
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
-        headers = self.default_headers.copy()
-        headers["Authorization"] = f"Bearer {access_token}"
 
         params = {
             "page": page,
@@ -211,21 +199,12 @@ class GitHubService:
             params["since"] = since
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(url, headers=headers, params=params)
-
-            if response.status_code == status.HTTP_200_OK:
-                return response.json()
-            else:
-                logger.error(f"GitHub API error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned status {response.status_code}")
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Timeout requesting GitHub API for {owner}/{repo}")
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="GitHub API request timed out") from e
-        except httpx.RequestError as e:
-            logger.error(f"Network error requesting GitHub API: {e}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to GitHub API") from e
+            return await self._make_github_request("GET", url, access_token, params=params, timeout=60.0)
+        except HTTPException as e:
+            if e.status_code == 404:
+                logger.info(f"Pull requests not found for {owner}/{repo}")
+                return []
+            raise
 
 
 github_service = GitHubService()
