@@ -5,33 +5,14 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from app.utils.cli_checker import CEOS_ARD_AVAILABLE
+
 logger = logging.getLogger(__name__)
 
 
 class BuildService:
     def __init__(self):
-        self.prereqs_ok = self.check_prerequisites()  # Check prerequisites on initialization
-
-    async def check_prerequisites(self) -> bool:
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "ceos-ard",
-                "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            await process.communicate()
-
-            return process.returncode == 0
-
-        except FileNotFoundError:
-            logger.error("ceos-ard CLI is not installed or not available in the PATH")
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking prerequisites: {e}")
-            return False
+        self.prereqs_ok = CEOS_ARD_AVAILABLE  # Use the global check result
 
     async def start_build(self, workspace_path: str, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
         if not self.prereqs_ok or not workspace_path or not workspace_id:
