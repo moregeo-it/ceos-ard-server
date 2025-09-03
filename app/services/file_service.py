@@ -407,36 +407,49 @@ class FileService:
             if not workspace_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
 
-            for file_path in workspace_path.rglob("*"):
-                if not file_path.is_file():
+            # Traverse the directory tree
+            for root_path, _dirs, files in workspace_path.walk():
+                # Skip .git directories completely
+                if ".git" in root_path.parts:
                     continue
 
-                if search_query in file_path.name:
-                    search_results.append({"name": file_path.name, "type": "filename", "path": str(file_path.relative_to(workspace_path))})
-                    continue
+                # Process files in current directory
+                for file_name in files:
+                    # Skip dotfiles and ignored extensions
+                    if file_name.startswith("."):
+                        continue
 
-                if ignored_extensions.search(file_path.name):
-                    continue
+                    file_path = root_path / file_name
 
-                try:
-                    with file_path.open(encoding="utf-8", errors="ignore") as f:
-                        for i, line in enumerate(f):
-                            line_lower = line.lower()
-                            if search_query_lower in line_lower:
-                                column = line_lower.index(search_query_lower)
-                                search_results.append(
-                                    {
-                                        "name": file_path.name,
-                                        "type": "content",
-                                        "path": str(file_path.relative_to(workspace_path)),
-                                        "line": i + 1,
-                                        "column": column + 1,
-                                        "excerpt": line.strip(),
-                                    }
-                                )
-                                break
-                except (UnicodeDecodeError, FileNotFoundError) as e:
-                    logger.warning(f"Could not read file {file_path}: {str(e)}")
+                    # Skip files with ignored extensions
+                    if ignored_extensions.search(file_name):
+                        continue
+
+                    # Check if search query matches filename
+                    if search_query in file_name:
+                        search_results.append({"name": file_name, "type": "filename", "path": str(file_path.relative_to(workspace_path))})
+                        continue
+
+                    # Search within file content
+                    try:
+                        with file_path.open(encoding="utf-8", errors="ignore") as f:
+                            for i, line in enumerate(f):
+                                line_lower = line.lower()
+                                if search_query_lower in line_lower:
+                                    column = line_lower.index(search_query_lower)
+                                    search_results.append(
+                                        {
+                                            "name": file_name,
+                                            "type": "content",
+                                            "path": str(file_path.relative_to(workspace_path)),
+                                            "line": i + 1,
+                                            "column": column + 1,
+                                            "excerpt": line.strip(),
+                                        }
+                                    )
+                                    break
+                    except (UnicodeDecodeError, FileNotFoundError) as e:
+                        logger.warning(f"Could not read file {file_path}: {str(e)}")
 
             return search_results
         except Exception as e:

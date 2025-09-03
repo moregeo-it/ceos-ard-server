@@ -133,9 +133,9 @@ class FileSearchResponse(BaseModel):
     name: str
     type: str
     path: str
-    line: int | None
-    column: int | None
-    excerpt: str | None
+    line: int | None = None
+    column: int | None = None
+    excerpt: str | None = None
 
 
 class FileOperationResponse(BaseModel):
@@ -150,4 +150,4 @@ class FileStorageResponse(BaseModel):
 
 class ChangedFilesResponse(BaseModel):
     path: str
-    status: str | None
+    status: str | None = None
