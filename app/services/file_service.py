@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -41,38 +42,90 @@ class FileService:
 
             repo = git.Repo(workspace.workspace_path, search_parent_directories=True)
 
-            for file_path in target_path.rglob("*"):
-                if "build" in str(file_path) or ".git" in str(file_path):
-                    continue
-                if file_path.name in ["templates", "LICENSE"] or file_path.name.startswith("."):
-                    continue
-                if file_path.parent.name in ["templates"] or file_path.parent.name.startswith("."):
-                    continue
-                if file_path.is_file() and (file_path.name.startswith(".") or file_path.name.endswith(".pdf")):
+            # Use os.walk for better performance than rglob
+            for root, dirs, files in os.walk(target_path):
+                root_path = Path(root)
+
+                # Skip .git directories completely
+                if ".git" in root_path.parts:
                     continue
 
-                try:
-                    git_status = repo.git.status(file_path, porcelain=True)
+                # Calculate relative path for root-level exclusions
+                relative_root = root_path.relative_to(workspace_path.resolve())
+                root_parts = relative_root.parts if relative_root != Path(".") else ()
 
-                    if "A" in git_status:
-                        file_status = "added"
-                    elif "M" in git_status:
-                        file_status = "modified"
-                    elif "R" in git_status:
-                        file_status = "renamed"
-                    else:
-                        file_status = None
-                except git.exc.GitCommandError:
-                    file_status = "deleted"
+                # Skip root-level build, templates directories (LICENSE is a file, not directory)
+                if len(root_parts) >= 1 and root_parts[0] in ["build", "templates"]:
+                    dirs[:] = []  # Don't traverse subdirectories
+                    continue
 
-                file_and_folder.append(
-                    {
-                        "status": file_status,
-                        "name": file_path.name,
-                        "is_directory": file_path.is_dir(),
-                        "path": str(file_path.relative_to(workspace_path.resolve())),
-                    }
-                )
+                # Prune directories we don't want to traverse
+                dirs[:] = [d for d in dirs if not d.startswith(".") and not (len(root_parts) == 0 and d in ["build", "templates"])]
+
+                # Process directories in current level
+                for dir_name in dirs:
+                    if dir_name.startswith("."):
+                        continue
+
+                    dir_path = root_path / dir_name
+                    relative_dir_path = dir_path.relative_to(workspace_path.resolve())
+
+                    try:
+                        git_status = repo.git.status(dir_path, porcelain=True)
+                        if "A" in git_status:
+                            dir_status = "added"
+                        elif "M" in git_status:
+                            dir_status = "modified"
+                        elif "R" in git_status:
+                            dir_status = "renamed"
+                        else:
+                            dir_status = None
+                    except git.exc.GitCommandError:
+                        dir_status = "deleted"
+
+                    file_and_folder.append(
+                        {
+                            "status": dir_status,
+                            "name": dir_name,
+                            "is_directory": True,
+                            "path": str(relative_dir_path),
+                        }
+                    )
+
+                # Process files in current level
+                for file_name in files:
+                    # Skip dotfiles and PDFs
+                    if file_name.startswith(".") or file_name.endswith(".pdf"):
+                        continue
+
+                    # Skip root-level LICENSE file
+                    if len(root_parts) == 0 and file_name == "LICENSE":
+                        continue
+
+                    file_path = root_path / file_name
+                    relative_file_path = file_path.relative_to(workspace_path.resolve())
+
+                    try:
+                        git_status = repo.git.status(file_path, porcelain=True)
+                        if "A" in git_status:
+                            file_status = "added"
+                        elif "M" in git_status:
+                            file_status = "modified"
+                        elif "R" in git_status:
+                            file_status = "renamed"
+                        else:
+                            file_status = None
+                    except git.exc.GitCommandError:
+                        file_status = "deleted"
+
+                    file_and_folder.append(
+                        {
+                            "status": file_status,
+                            "name": file_name,
+                            "is_directory": False,
+                            "path": str(relative_file_path),
+                        }
+                    )
             return file_and_folder
         except HTTPException:
             raise
