@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 import shutil
 from pathlib import Path
@@ -42,10 +41,8 @@ class FileService:
 
             repo = git.Repo(workspace.workspace_path, search_parent_directories=True)
 
-            # Use os.walk for better performance than rglob
-            for root, dirs, files in os.walk(target_path):
-                root_path = Path(root)
-
+            # Walk through the directory tree
+            for root_path, dirs, files in target_path.walk():
                 # Skip .git directories completely
                 if ".git" in root_path.parts:
                     continue
@@ -63,15 +60,15 @@ class FileService:
                 dirs[:] = [d for d in dirs if not d.startswith(".") and not (len(root_parts) == 0 and d in ["build", "templates"])]
 
                 # Process directories in current level
-                for dir_name in dirs:
-                    if dir_name.startswith("."):
+                for dir_path in dirs:
+                    if dir_path.startswith("."):
                         continue
 
-                    dir_path = root_path / dir_name
-                    relative_dir_path = dir_path.relative_to(workspace_path.resolve())
+                    full_dir_path = root_path / dir_path
+                    relative_dir_path = full_dir_path.relative_to(workspace_path.resolve())
 
                     try:
-                        git_status = repo.git.status(dir_path, porcelain=True)
+                        git_status = repo.git.status(full_dir_path, porcelain=True)
                         if "A" in git_status:
                             dir_status = "added"
                         elif "M" in git_status:
@@ -86,27 +83,27 @@ class FileService:
                     file_and_folder.append(
                         {
                             "status": dir_status,
-                            "name": dir_name,
+                            "name": dir_path,
                             "is_directory": True,
                             "path": str(relative_dir_path),
                         }
                     )
 
                 # Process files in current level
-                for file_name in files:
+                for file_path in files:
                     # Skip dotfiles and PDFs
-                    if file_name.startswith(".") or file_name.endswith(".pdf"):
+                    if file_path.startswith(".") or file_path.endswith(".pdf"):
                         continue
 
                     # Skip root-level LICENSE file
-                    if len(root_parts) == 0 and file_name == "LICENSE":
+                    if len(root_parts) == 0 and file_path == "LICENSE":
                         continue
 
-                    file_path = root_path / file_name
-                    relative_file_path = file_path.relative_to(workspace_path.resolve())
+                    full_file_path = root_path / file_path
+                    relative_file_path = full_file_path.relative_to(workspace_path.resolve())
 
                     try:
-                        git_status = repo.git.status(file_path, porcelain=True)
+                        git_status = repo.git.status(full_file_path, porcelain=True)
                         if "A" in git_status:
                             file_status = "added"
                         elif "M" in git_status:
@@ -121,7 +118,7 @@ class FileService:
                     file_and_folder.append(
                         {
                             "status": file_status,
-                            "name": file_name,
+                            "name": file_path,
                             "is_directory": False,
                             "path": str(relative_file_path),
                         }
