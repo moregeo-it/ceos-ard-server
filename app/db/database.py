@@ -5,11 +5,9 @@ from app.config import settings
 
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
-# Set pool_pre_ping to True to check the connection before each query
-# Set pool_recycle to 7200 seconds (2 hours) to prevent stale connections
-# due to inactivity, while also considering the low traffic volume of our app.
-# This value is a trade-off between connection overhead and reliability.
-engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, pool_recycle=7200)
+# SQLite configuration
+# Enable foreign key constraints and allow multiple threads to access the same connection
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, echo=False)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

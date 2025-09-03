@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import ARRAY, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
@@ -28,7 +28,7 @@ class GitWorkspace(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String(50), nullable=False)
     description = Column(String(500), nullable=True)
-    pfs = Column(ARRAY(String(50)), nullable=True)
+    pfs = Column(JSON, nullable=True)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)

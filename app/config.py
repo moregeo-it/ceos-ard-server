@@ -28,7 +28,7 @@ class Settings:
     CEOS_ARD_MAIN_BRANCH: str = os.getenv("CEOS_ARD_MAIN_BRANCH", "main")
 
     SECRET_KEY: str = os.getenv("SECRET_KEY")
-    DATABASE_URL: str = os.getenv("DATABASE_URL")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ceos_ard_server.db")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
