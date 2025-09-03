@@ -31,7 +31,7 @@ class PreviewService:
 
             if build_info.get("status") == "success":
                 workspace_path = Path(workspace.workspace_path)
-                return await self._get_preview_files(workspace_path, pfs)
+                return await self._get_preview_files(workspace_path, pfs=pfs or workspace.pfs)
 
             else:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")
