@@ -119,6 +119,10 @@ CEOS_ARD_MAIN_BRANCH=main
 
 # Workspaces
 WORKSPACES_ROOT=workspaces
+
+# PFS Default Configuration
+PFS_DEFAULT_VERSION=1.0-draft
+PFS_DEFAULT_INTRODUCTION=what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal
 ```
 
 ### 5. OAuth Setup

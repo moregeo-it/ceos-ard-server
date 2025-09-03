@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.config import settings
+
 
 class WorkspaceError(BaseModel):
     message: str
@@ -102,13 +104,11 @@ class FilePatchRequest(BaseModel):
 class CreatePFSRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
-    version: str = Field(default="1.0-draft", description="PFS version")
+    version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
     base_pfs: str | None = Field(None, description="Base PFS ID")
     type: str | None = Field(None, description="PFS type")
-    introduction: list[str] | None = Field(
-        default=["what-are-ceos-ard-products", "when-is-a-product-ceos-ard", "difference-threshold-goal"], description="PFS introduction"
-    )
+    introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
 
     class ConfigDict:
         use_enum_values = True

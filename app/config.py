@@ -38,6 +38,15 @@ class Settings:
 
     WORKSPACES_ROOT: str = os.getenv("WORKSPACES_ROOT", "workspaces")
 
+    # PFS Default Configuration
+    PFS_DEFAULT_VERSION: str = os.getenv("PFS_DEFAULT_VERSION", "1.0-draft")
+    PFS_DEFAULT_INTRODUCTION: list[str] = [
+        item.strip()
+        for item in os.getenv("PFS_DEFAULT_INTRODUCTION", "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal").split(
+            ","
+        )
+    ]
+
     CORS_ORIGINS: list = [os.getenv("CORS_ORIGIN_CLIENT")]
 
 
