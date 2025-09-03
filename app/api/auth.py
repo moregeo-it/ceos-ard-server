@@ -8,7 +8,7 @@ from app.config import settings
 from app.db.database import get_db
 from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
-from app.schemas.auth import AuthError
+from app.schemas.error import create_error_detail
 from app.services.auth_service import get_current_user
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
@@ -41,7 +41,7 @@ async def initiate_login(request: Request, identity_provider: IdentityProvider =
         logger.error(f"Failed to initiate GitHub login: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to initiate GitHub login"),
+            detail=create_error_detail("initiate GitHub login", e),
         ) from e
 
 
@@ -65,7 +65,7 @@ async def logout(current_user=Depends(get_current_user)):
         logger.error(f"Failed to logout user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to logout user"),
+            detail=create_error_detail("logout user", e),
         ) from e
 
 
@@ -90,7 +90,7 @@ async def current_user(current_user=Depends(get_current_user)):
         logger.error(f"Failed to get current user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to get current user"),
+            detail=create_error_detail("get current user", e),
         ) from e
 
 
@@ -115,5 +115,5 @@ async def validate_auth(current_user=Depends(get_current_user)):
         logger.error(f"Failed to validate user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=AuthError(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="Failed to validate user"),
+            detail=create_error_detail("validate user", e),
         ) from e

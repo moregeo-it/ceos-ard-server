@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_preview_service
+from app.schemas.error import create_error_detail
 from app.services.auth_service import get_current_user
 from app.services.preview_service import PreviewService
 
@@ -38,5 +39,5 @@ async def generate_preview(
         logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate preview: {str(e)}",
+            detail=create_error_detail("generate preview", e),
         ) from e

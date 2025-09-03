@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_workspace_service
+from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     CreatePFSRequest,
     PFSResponse,
@@ -43,7 +44,7 @@ async def create_workspace(
         raise
     except Exception as e:
         logger.error(f"Error creating workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create workspace", e)) from e
 
 
 @router.get(
@@ -64,7 +65,7 @@ async def get_user_workspaces(
         raise
     except Exception as e:
         logger.error(f"Error getting workspaces: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspaces") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspaces", e)) from e
 
 
 @router.get(
@@ -87,8 +88,7 @@ async def get_user_workspace(
         raise
     except Exception as e:
         logger.error(f"Error getting workspace: {e}")
-
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspace") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace", e)) from e
 
 
 @router.patch("/{workspace_id}", summary="Update a workspace", response_model=WorkspaceResponse, description="Update a workspace information")
@@ -105,7 +105,7 @@ async def update_workspace(
         raise
     except Exception as e:
         logger.error(f"Error updating workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update workspace") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("update workspace", e)) from e
 
 
 @router.delete(
@@ -127,7 +127,7 @@ async def delete_workspace(
         raise
     except Exception as e:
         logger.error(f"Error deleting workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete workspace") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace", e)) from e
 
 
 @router.get(
@@ -148,7 +148,7 @@ async def get_workspace_status(
         raise
     except Exception as e:
         logger.error(f"Error getting workspace status: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspace status") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace status", e)) from e
 
 
 @router.post(
@@ -179,7 +179,7 @@ async def propose_changes(
         raise
     except Exception as e:
         logger.error(f"Error proposing changes: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to propose changes") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("propose changes", e)) from e
 
 
 @router.get(
@@ -197,7 +197,7 @@ async def list_workspace_pfs_types(
         raise
     except Exception as e:
         logger.error(f"Error listing Workspace PFS types: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list PFS types") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list PFS types", e)) from e
 
 
 @router.post("/{workspace_id}/pfs", response_model=PFSResponse, summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
@@ -216,4 +216,4 @@ async def create_workspace_pfs(
         raise
     except Exception as e:
         logger.error(f"Error creating PFS: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create PFS") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create PFS", e)) from e

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import settings
 from app.dependencies import get_github_service
+from app.schemas.error import create_error_detail
 from app.services.auth_service import get_current_user
 from app.services.github_service import GitHubService
 
@@ -42,5 +43,5 @@ async def list_pfs_folders(
         logger.error(f"Unexpected error listing PFS folders: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while listing PFS folders",
+            detail=create_error_detail("list PFS folders", e),
         ) from e

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_file_service
+from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     ChangedFilesResponse,
     CreateFileRequest,
@@ -44,7 +45,7 @@ async def list_workspace_files(
         raise
     except Exception as e:
         logger.error(f"Error listing workspace files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list workspace files") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list workspace files", e)) from e
 
 
 @router.post(
@@ -67,7 +68,7 @@ async def create(
         raise
     except Exception as e:
         logger.error(f"Error creating file or folder: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create file or folder") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create file or folder", e)) from e
 
 
 @router.get(
@@ -89,7 +90,7 @@ async def read_file_content(
 
     except Exception as e:
         logger.error(f"Error reading file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to read file") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("read file", e)) from e
 
 
 @router.put(
@@ -119,7 +120,7 @@ async def store_file_content(
         raise
     except Exception as e:
         logger.error(f"Error storing file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to store file") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("store file", e)) from e
 
 
 @router.delete(
@@ -141,7 +142,7 @@ async def delete(
         raise
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete file") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete file", e)) from e
 
 
 @router.patch(
@@ -171,7 +172,7 @@ async def patch_file(
         raise
     except Exception as e:
         logger.error(f"Error updating file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update file") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("update file", e)) from e
 
 
 @router.get(
@@ -194,7 +195,7 @@ async def search_files(
         raise
     except Exception as e:
         logger.error(f"Error searching files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to search files") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("search files", e)) from e
 
 
 @router.get(
@@ -216,7 +217,7 @@ async def get_changed_files(
         raise
     except Exception as e:
         logger.error(f"Error getting changed files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get changed files") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get changed files", e)) from e
 
 
 @router.get(
@@ -237,4 +238,4 @@ async def get_file_diff(
         return Response(content=file_diff, media_type="text/plain; charset=utf-8", status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.error(f"Error getting file diff: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get file diff") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file diff", e)) from e
