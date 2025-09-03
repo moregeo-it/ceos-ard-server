@@ -152,7 +152,7 @@ async def get_workspace_status(
 
 
 @router.post(
-    "/{workspace_id/propose}",
+    "/{workspace_id}/propose",
     response_model=ProposeChangesResponse,
     summary="Propose changes to a workspace",
     description="Propose changes to a workspace by creating a pull request",
