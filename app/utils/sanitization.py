@@ -58,29 +58,17 @@ def sanitize_filename(filename: str) -> str:
             detail="Filename is required",
         )
 
-    if filename.endswith("."):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename cannot end with a dot",
-        )
-
     if ".." in filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Filename cannot contain consecutive dots",
         )
 
-    allowed_pattern = r"^[a-zA-Z0-9._-]+$"
-    if not re.match(allowed_pattern, filename):
+    allowed_pattern = r"^[\w][\w._-]+\w$"
+    if not re.match(allowed_pattern, filename, flags=re.IGNORECASE):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename contains invalid characters. Only alphanumeric characters, dots, hyphens and underscores are allowed",
-        )
-
-    if filename.startswith("."):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename cannot start with a dot",
+            detail="Filename contains invalid characters. Only alphanumeric characters, dots, hyphens and underscores are allowed. At the beginning and end only alphanumeric characters are allowed.",
         )
 
     return filename
