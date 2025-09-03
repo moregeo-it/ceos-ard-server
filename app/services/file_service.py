@@ -504,12 +504,13 @@ class FileService:
                 is_tracked = True
             except git.GitCommandError:
                 is_tracked = False
-
+            # If not tracked, read the file content
             if not is_tracked:
                 try:
+                    # Read the file content
                     with open(target_path, encoding="utf-8", errors="ignore") as f:
                         content = f.read()
-
+                    # Get the lines of the file and create a diff output
                     lines = content.splitlines()
                     diff_out = f"--- /dev/null\n+++ {relative_file_str}\n@@ -0,0 +1,{len(lines)} @@\n"
 
@@ -524,12 +525,15 @@ class FileService:
                 except Exception as e:
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
+            # If tracked, get the diff from Git
             try:
                 diff_out = repo.git.diff(relative_file_str)
 
+                # If no unstaged changes, check for staged changes
                 if not diff_out:
                     diff_out = repo.git.diff("--cached", relative_file_str)
 
+                    # If still no changes, return a message
                     if not diff_out:
                         return f"No changes found for {relative_file_str}"
 
