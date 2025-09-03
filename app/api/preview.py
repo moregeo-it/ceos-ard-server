@@ -1,13 +1,12 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_preview_service
-from app.schemas.preview import PreviewErrorMessage
 from app.services.auth_service import get_current_user
 from app.services.preview_service import PreviewService
 
@@ -20,6 +19,7 @@ router = APIRouter(prefix="/workspaces", tags=["Preview"])
     "/{workspace_id}/previews",
     summary="Generate Previews",
     description="Generate Previews for a workspace",
+    status_code=status.HTTP_200_OK,
 )
 async def generate_preview(
     workspace_id: str,
@@ -32,10 +32,11 @@ async def generate_preview(
         generated_previews = await preview_service.generate_preview(db=db, pfs=pfs, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         return Response(content=generated_previews, status_code=status.HTTP_200_OK, media_type="text/html")
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={PreviewErrorMessage(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message=str(e))},
-        )
+            detail=f"Failed to generate preview: {str(e)}",
+        ) from e

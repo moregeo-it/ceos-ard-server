@@ -409,7 +409,7 @@ class WorkspaceService:
 
                 # Add changes to the repository
                 try:
-                    repo.git.add(str(new_pfs_path))
+                    repo.git.add(str(new_pfs_path.relative_to(workspace_path)))
                 except git.GitCommandError as e:
                     logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e

@@ -120,3 +120,34 @@ class PFSResponse(BaseModel):
 
     class ConfigDict:
         from_attributes = True
+
+
+class FileListResponse(BaseModel):
+    status: str | None
+    name: str
+    is_directory: bool
+    path: str
+
+
+class FileSearchResponse(BaseModel):
+    name: str
+    type: str
+    path: str
+    line: int | None
+    column: int | None
+    excerpt: str | None
+
+
+class FileOperationResponse(BaseModel):
+    path: str
+    name: str
+    directory: bool
+
+
+class FileStorageResponse(BaseModel):
+    message: str
+
+
+class ChangedFilesResponse(BaseModel):
+    path: str
+    status: str | None

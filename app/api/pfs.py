@@ -2,11 +2,9 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.dependencies import get_github_service
-from app.schemas.workspace import WorkspaceError
 from app.services.auth_service import get_current_user
 from app.services.github_service import GitHubService
 
@@ -15,7 +13,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pfs", tags=["PFS"])
 
 
-@router.get("", summary="List available PFS types", description="Retrieves all available PFS types for CEOS-ARD repository")
+@router.get(
+    "",
+    summary="List available PFS types",
+    description="Retrieves all available PFS types for CEOS-ARD repository",
+    status_code=status.HTTP_200_OK,
+)
 async def list_pfs_folders(
     current_user=Depends(get_current_user),
     github_service: GitHubService = Depends(get_github_service),
@@ -31,14 +34,13 @@ async def list_pfs_folders(
 
         pfs_types = await github_service.get_pfs_types(owner=final_owner, repo=final_repo, token=access_token, branch=final_branch)
 
-        return JSONResponse(content={"pfsTypes": pfs_types}, status_code=status.HTTP_200_OK)
+        return {"pfsTypes": pfs_types}
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error listing PFS folders: {e}")
         raise HTTPException(
-            response_model=WorkspaceError,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=WorkspaceError(message="An error occurred while listing PFS folders", code=status.HTTP_500_INTERNAL_SERVER_ERROR),
+            detail="An error occurred while listing PFS folders",
         ) from e

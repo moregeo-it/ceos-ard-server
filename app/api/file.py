@@ -2,12 +2,20 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_file_service
-from app.schemas.workspace import CreateFileRequest, FilePatchRequest
+from app.schemas.workspace import (
+    ChangedFilesResponse,
+    CreateFileRequest,
+    FileListResponse,
+    FileOperationResponse,
+    FilePatchRequest,
+    FileSearchResponse,
+    FileStorageResponse,
+)
 from app.services.auth_service import get_current_user
 from app.services.file_service import FileService
 
@@ -20,6 +28,8 @@ router = APIRouter(prefix="/workspaces", tags=["Files"])
     "/{workspace_id}/files",
     summary="List files in a workspace",
     description="List files and folders in a workspace",
+    response_model=list[FileListResponse],
+    status_code=status.HTTP_200_OK,
 )
 async def list_workspace_files(
     workspace_id: str,
@@ -29,9 +39,7 @@ async def list_workspace_files(
     path: str | None = Query(default="/", description="Path to list files from"),
 ):
     try:
-        files_and_folder = await file_service.get_workspace_files(db=db, path=path, workspace_id=workspace_id, user_id=current_user["user"].id)
-
-        return JSONResponse(content=files_and_folder, status_code=status.HTTP_200_OK)
+        return await file_service.get_workspace_files(db=db, path=path, workspace_id=workspace_id, user_id=current_user["user"].id)
     except HTTPException:
         raise
     except Exception as e:
@@ -43,6 +51,8 @@ async def list_workspace_files(
     "/{workspace_id}/files",
     summary="Create a file or folder in a workspace",
     description="Create a file or folder in a workspace",
+    response_model=FileOperationResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 async def create(
     workspace_id: str,
@@ -52,11 +62,9 @@ async def create(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        file_or_folder = await file_service.create(
-            db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id
-        )
-
-        return JSONResponse(content=file_or_folder, status_code=status.HTTP_201_CREATED)
+        return await file_service.create(db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating file or folder: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create file or folder") from e
@@ -88,6 +96,8 @@ async def read_file_content(
     "/{workspace_id}/files/{file_path:path}",
     summary="Store content of a file",
     description="Store content of a file",
+    response_model=FileStorageResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def store_file_content(
     file_path: str,
@@ -98,16 +108,15 @@ async def store_file_content(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        file_stored = await file_service.store_file_content(
+        return await file_service.store_file_content(
             db=db,
             workspace_id=workspace_id,
             file_path=file_path,
             content=await content.read(),
             user_id=current_user["user"].id,
         )
-
-        return JSONResponse(content=file_stored, status_code=status.HTTP_200_OK)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error storing file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to store file") from e
@@ -128,7 +137,8 @@ async def delete(
 ):
     try:
         return await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete file") from e
@@ -138,6 +148,8 @@ async def delete(
     "/{workspace_id}/files/{file_path:path}",
     summary="Update file metadata or operations",
     description="Perform file operations such rename or revert changes",
+    response_model=FileOperationResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def patch_file(
     file_path: str,
@@ -148,16 +160,15 @@ async def patch_file(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        file_updated = await file_service.update_file(
+        return await file_service.update_file(
             db=db,
             file_path=file_path,
             workspace_id=workspace_id,
             operation_request=operation_request,
             user_id=current_user["user"].id,
         )
-
-        return JSONResponse(content=file_updated, status_code=status.HTTP_200_OK)
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update file") from e
@@ -167,6 +178,8 @@ async def patch_file(
     "/{workspace_id}/search",
     summary="Search files in a workspace",
     description="search through all files in a workspace",
+    response_model=list[FileSearchResponse],
+    status_code=status.HTTP_200_OK,
 )
 async def search_files(
     workspace_id: str,
@@ -176,11 +189,9 @@ async def search_files(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        files_and_folder = await file_service.search_files(
-            db=db, workspace_id=workspace_id, search_query=search_query, user_id=current_user["user"].id
-        )
-
-        return JSONResponse(content=files_and_folder, status_code=status.HTTP_200_OK)
+        return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=search_query, user_id=current_user["user"].id)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error searching files: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to search files") from e
@@ -190,6 +201,8 @@ async def search_files(
     "/{workspace_id}/diffs",
     summary="Get list of changed files",
     description="Retrieve a list of changed files in a workspace - includes untracked files",
+    response_model=list[ChangedFilesResponse],
+    status_code=status.HTTP_200_OK,
 )
 async def get_changed_files(
     workspace_id: str,
@@ -198,9 +211,9 @@ async def get_changed_files(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     try:
-        changed_files = await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-
-        return JSONResponse(content=changed_files, status_code=status.HTTP_200_OK)
+        return await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting changed files: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get changed files") from e
