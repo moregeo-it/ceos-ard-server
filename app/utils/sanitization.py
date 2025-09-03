@@ -68,7 +68,10 @@ def sanitize_filename(filename: str) -> str:
     if not re.match(allowed_pattern, filename, flags=re.IGNORECASE):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename contains invalid characters. Only alphanumeric characters, dots, hyphens and underscores are allowed. At the beginning and end only alphanumeric characters are allowed.",
+            detail=(
+                "Filename contains invalid characters. Only alphanumeric characters, dots, hyphens and "
+                "underscores are allowed. At the beginning and end only alphanumeric characters are allowed."
+            ),
         )
 
     return filename

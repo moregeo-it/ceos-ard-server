@@ -2,6 +2,7 @@
 target-version = "py311"
 line-length = 150
 
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -27,5 +28,5 @@ exclude = [
 [tool.ruff.format]
 quote-style = "double"
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["app"]
