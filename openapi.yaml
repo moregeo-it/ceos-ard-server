@@ -1,0 +1,1348 @@
+openapi: 3.1.0
+info:
+  title: CEOS ARD Editor API
+  version: 0.1.0
+  description: |
+    RESTful API for the CEOS ARD Editor application that provides workspace management,
+    file editing, building block management, and GitHub integration capabilities.
+  contact:
+    name: CEOS ARD Team
+    url: https://github.com/ceos-org/ceos-ard-editor
+  license:
+    name: Apache-2.0
+    url: https://github.com/ceos-org/ceos-ard-editor/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://ceos-ard-editor.example.com/api
+    description: Production server
+
+security:
+  - bearerAuth: []
+
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Workspaces
+    description: Workspace CRUD operations and management
+  - name: Files
+    description: File and building block operations
+  - name: Previews
+    description: Preview generation and management
+  - name: PFS
+    description: Product Family Specification management
+
+paths:
+  /pfs:
+    get:
+      summary: List available PFS types
+      description: Retrieves all available PFS types for CEOS-ARD (as available on the main branch of the ceos-ard repository)
+      operationId: listPFSTypes
+      tags:
+        - PFS
+      responses:
+        '200':
+          description: Available PFS types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pfsTypes:
+                    description: List of available PFS types.
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/pfsId'
+              example:
+                pfsTypes:
+                  - SAR-NRB
+                  - SAR-POL
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    get:
+      summary: Initiate GitHub login
+      description: Redirects to GitHub for authentication
+      operationId: initiateLogin
+      tags:
+        - Authentication
+      security: []
+      responses:
+        '302':
+          description: Redirect to GitHub authentication
+          headers:
+            Location:
+              description: GitHub authentication URL
+              schema:
+                type: string
+                format: uri
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/callback:
+    get:
+      summary: GitHub OAuth callback
+      description: Handles GitHub OAuth callback and returns JWT token
+      operationId: authCallback
+      tags:
+        - Authentication
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Authorization code from GitHub
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          description: State parameter for CSRF protection
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - accessToken
+                  - refreshToken
+                  - expiresIn
+                  - user
+                properties:
+                  accessToken:
+                    type: string
+                    description: JWT access token
+                  refreshToken:
+                    type: string
+                    description: Refresh token for token renewal
+                  expiresIn:
+                    type: integer
+                    description: Token expiration time in seconds
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    get:
+      summary: Logout user
+      description: Invalidates current session and tokens
+      operationId: logout
+      tags:
+        - Authentication
+      responses:
+        '302':
+          description: Successfully logged out
+          headers:
+            Location:
+              description: Redirect URL after logout
+              schema:
+                type: string
+                format: uri
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/user:
+    get:
+      summary: Get current user information
+      description: Returns current authenticated user's information
+      operationId: getCurrentUser
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: User information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces:
+    get:
+      summary: List all workspaces
+      description: Retrieves all workspaces for the authenticated user
+      operationId: listWorkspaces
+      tags:
+        - Workspaces
+      responses:
+        '200':
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspaces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workspace'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create new workspace
+      description: Creates a new workspace with cloned repository
+      operationId: createWorkspace
+      tags:
+        - Workspaces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+                  description: Workspace title
+                  minLength: 1
+                  maxLength: 100
+                description:
+                  type: string
+                  description: Workspace description
+                pfs:
+                  $ref: '#/components/schemas/pfs'
+      responses:
+        '201':
+          description: Workspace created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}:
+    get:
+      summary: Get workspace details
+      description: Retrieves detailed information about a specific workspace
+      operationId: getWorkspace
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Workspace details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      summary: Update workspace
+      description: Updates workspace information
+      operationId: updateWorkspace
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: Workspace title
+                description:
+                  type: string
+                  description: Workspace description
+                pfs:
+                  $ref: '#/components/schemas/pfs'
+                status:
+                  type: string
+                  enum:
+                    - active
+                    - archived
+                  description: |-
+                    Archives/Unarchives a workspace.
+
+                    Can only be unarchived if the PR status is not closed or merged.
+      responses:
+        '200':
+          description: Workspace updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete workspace
+      description: Deletes a workspace and all its associated data
+      operationId: deleteWorkspace
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '204':
+          description: Workspace deleted successfully
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/files:
+    get:
+      summary: List files in workspace
+      description: |-
+        Retrieves files and folders in the workspace.
+
+        Doesn't list the following files / folders:
+        - Files/folders starting with a dot (.)
+        - PDF files (files with .pdf extension)
+
+        Additionalls, doesn't list the following Files/folders at the root:
+        - templates
+        - build
+        - LICENSE
+      operationId: listFiles
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: path
+          in: query
+          description: Directory path to list (defaults to root)
+          schema:
+            type: string
+            default: "/"
+      responses:
+        '200':
+          description: List of files and folders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FileItem'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create new empty file or folder
+      description: Creates a new empty file or folder in the workspace
+      operationId: createFileOrFolder
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: File or folder name
+                  minLength: 1
+                path:
+                  type: string
+                  description: Directory path where to create the file/folder
+                type:
+                  type: string
+                  enum:
+                    - file
+                    - directory
+                  description: Type of item to create
+              required:
+                - name
+                - path
+                - type
+      responses:
+        '201':
+          description: File created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileItem'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/files/{filePath}:
+    get:
+      summary: Get file content
+      description: Retrieves the content of a specific file
+      operationId: getFileContent
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '200':
+          description: File content
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: Upload file content
+      description: |-
+        Uploads the content of a specific file.
+
+        Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
+        File should be stored as is without parsing, e.g. comments in YAML files should be preserved.
+      operationId: uploadFileContent
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: File updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileItem'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete file
+      description: Deletes a specific file
+      operationId: deleteFile
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '204':
+          description: File deleted successfully
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      summary: Update file metadata or operations
+      description: Performs file operations such as rename or revert
+      operationId: patchFile
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operation:
+                  type: string
+                  enum:
+                    - rename
+                    - revert
+                  description: The operation to perform on the file
+              required:
+                - operation
+              oneOf:
+                - properties:
+                    operation:
+                      const: rename
+                    target:
+                      description: New name for the file
+                      type: string
+                  required:
+                    - target
+                - properties:
+                    operation:
+                      const: revert
+      responses:
+        '200':
+          description: File operation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileItem'
+        '400':
+          description: Invalid request data or operation conflicts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/search:
+    get:
+      summary: Search files in workspace
+      description: Searches through all files in the workspace
+      operationId: searchFiles
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: query
+          in: query
+          required: true
+          description: Search query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - path
+                        - type
+                      properties:
+                        name:
+                          type: string
+                          description: Name to the file containing the match
+                        path:
+                          type: string
+                          description: Absolute path to the file starting from the workspace root
+                        type:
+                          type: string
+                          description: Where the match was found
+                          enum:
+                            - filename
+                            - content
+                      oneOf:
+                        - type: object
+                          properties:
+                            type:
+                              const: filename
+                        - type: object
+                          required:
+                            - line
+                            - column
+                            - excerpt
+                          properties:
+                            type:
+                              const: content
+                            line:
+                              type: integer
+                              description: Line number of the match
+                            column:
+                              type: integer
+                              description: Column number of the match
+                            excerpt:
+                              type: string
+                              description: Text excerpt around the match
+        '400':
+          description: Invalid search query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/diffs:
+    get:
+      summary: Get list of changed files
+      description: Retrieves a list of files that are not unchanged (including added, deleted, modified, etc.) according to git
+      operationId: getChangedFiles
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: List of changed files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - path
+                        - status
+                      properties:
+                        path:
+                          type: string
+                          description: Absolute path to the file starting from the workspace root
+                        status:
+                          type: string
+                          enum:
+                            - A
+                            - M
+                            - D
+                            - R
+                          description: |-
+                            Status of the file
+
+                            - A=Added
+                            - M=Modified
+                            - D=Deleted
+                            - R=Renamed
+                      if:
+                        properties:
+                          status:
+                            const: R
+                      then:
+                        required:
+                          - target
+                        properties:
+                          target:
+                            type: string
+                            description: New path (for renamed files)
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/diffs/{filePath}:
+    get:
+      summary: Get diff for specific file
+      description: Retrieves the git diff for a specific file, if available
+      operationId: getFileDiff
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '200':
+          description: File diff information
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Diff content in unified diff format
+                example: |-
+                  diff --git a/glossary/ups.yaml b/glossary/ups.yaml
+                  index fafae97..e231b87 100644
+                  --- a/glossary/ups.yaml
+                  +++ b/glossary/ups.yaml
+                  @@ -1,2 +1,2 @@
+                  term: UPS
+                  -description: Universal Polar Stereographic
+                  \ No newline at end of file
+                  +description: United Parcel Service
+                  \ No newline at end of file
+        '404':
+          description: Workspace or file not found, or no diff available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/context/{filePath}:
+    get:
+      summary: Get additional contextual information for specific file
+      description: |-
+        Retrieves the context for a specific file, if available.
+
+        This is currently a list of PFS that use the specified file.
+      operationId: getFileContext
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '200':
+          description: Contextual information retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usage:
+                    type: array
+                    items:
+                      type: string
+                      description: PFS ID that uses the specified file
+        '404':
+          description: Workspace or file not found, or no diff available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/previews:
+    get:
+      summary: Generate preview
+      description: Generates preview for the current workspace state
+      operationId: generatePreview
+      tags:
+        - Previews
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/PfsType'
+      responses:
+        '200':
+          description: Preview generated successfully
+          content:
+            text/html:
+              schema:
+                type: string
+                description: HTML content of the preview
+        '202':
+          description: Preview generation in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Preview generation started"
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # todo
+  /workspaces/{workspaceId}/proposals:
+    post:
+      summary: Create proposal
+      description: Creates a new proposal for the workspace changes
+      operationId: createProposal
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - description
+              properties:
+                title:
+                  type: string
+                  description: PR title
+                  minLength: 1
+                  maxLength: 200
+                description:
+                  type: string
+                  description: PR description
+                  maxLength: 2000
+      responses:
+        '201':
+          description: Pull request created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  number:
+                    type: integer
+                    description: GitHub PR number
+                  title:
+                    type: string
+                    description: PR title
+                  description:
+                    type: string
+                    description: PR description
+                  url:
+                    type: string
+                    format: uri
+                    description: URL to the GitHub PR
+                  state:
+                    type: string
+                    enum: [open, closed, merged]
+                    description: PR state
+                  createdAt:
+                    type: string
+                    format: date-time
+                    description: PR creation timestamp
+                  updatedAt:
+                    type: string
+                    format: date-time
+                    description: PR last update timestamp
+                  author:
+                    $ref: '#/components/schemas/User'
+                  mergeable:
+                    type: boolean
+                    description: Whether the PR can be merged
+                  checksStatus:
+                    type: string
+                    enum: [pending, success, failure]
+                    description: Status of CI checks
+                required:
+                  - number
+                  - title
+                  - url
+                  - state
+                  - createdAt
+                  - updatedAt
+                  - author
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/pfs:
+    get:
+      summary: List available PFS types
+      description: Retrieves all available PFS types for the workspace
+      operationId: listWorkspacePFSTypes
+      tags:
+        - PFS
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Available PFS types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pfsTypes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/pfsType'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create new PFS
+      description: >-
+        Creates a new PFS based on an existing one.
+
+        The generated documents should be validated against the strictyaml schemas.
+      operationId: createPFS
+      tags:
+        - PFS
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base:
+                  type:
+                    - string
+                    - "null"
+                  description: Existing PFS to base the new one on
+                  default: null
+                id:
+                  type: string
+                  description: ID for the new PFS
+                title:
+                  type: string
+                  description: Title for the new PFS
+                version:
+                  type: string
+                  description: Version of the new PFS
+                  default: "1.0"
+                type:
+                  type: string
+                  description: Type of the new PFS
+                  enum:
+                    - Optical
+                    - SAR
+                applies_to:
+                  type: string
+                  description: Description of the new PFS
+                introduction:
+                  type: array
+                  items:
+                    type: string
+                  default:
+                    - what-are-ceos-ard-products
+                    - when-is-a-product-ceos-ard
+                    - difference-threshold-goal
+              required:
+                - id
+                - title
+                - version
+      responses:
+        '201':
+          description: PFS created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/pfsType'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from authentication endpoint
+
+  parameters:
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      description: Unique identifier of the workspace
+      schema:
+        type: string
+        format: uuid
+
+    FilePath:
+      name: filePath
+      in: path
+      required: true
+      description: Path to the file
+      schema:
+        type: string
+
+    PfsType:
+      name: pfs
+      in: query
+      style: form
+      explode: true
+      description: |-
+        PFS type for preview generation.
+
+        If not provided, uses the default PFS type(s) that have been selected during workspace creation.
+      schema:
+        type: array
+        items:
+          type: string
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code
+      required:
+        - error
+        - code
+
+    User:
+      type: object
+      required:
+        - id
+        - username
+        - displayName
+        - email
+        - avatar
+      properties:
+        id:
+          type: string
+          description: User ID
+        username:
+          type: string
+          description: GitHub username
+        displayName:
+          type: string
+          description: User's display name
+        email:
+          type: string
+          format: email
+          description: User's email address
+        avatar:
+          type: string
+          format: uri
+          description: URL to user's avatar image
+
+    Workspace:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - repository
+        - branch
+        - pfs
+        - created
+        - pr
+        - owner
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique workspace identifier
+        title:
+          type: string
+          description: Workspace title
+        description:
+          type: string
+          description: Workspace description
+        repository:
+          type: string
+          format: uri
+          description: URL of the Git repository for the workspace
+        branch:
+          type: string
+          description: Name of the branch in the repository
+        pfs:
+          $ref: '#/components/schemas/pfs'
+        created:
+          type: string
+          format: date-time
+          description: Workspace creation timestamp
+        status:
+          type: string
+          enum:
+            - active
+            - archived
+          description: |-
+            Workspace status.
+
+            archived if the PR is closed or merged or has been archived by the user manually, active otherwise.
+        pr:
+          type:
+            - string
+            - "null"
+          description: ID to the GitHub PR
+          default: null
+        pr_status:
+          type:
+            - string
+            - "null"
+          enum:
+            - unknown
+            - open
+            - approved
+            - closed
+            - merged
+            - null
+          description: Status of the PR
+          default: null
+        owner:
+          type: string
+          description: The user ID of the workspace owner
+
+    FileItem:
+      type: object
+      required:
+        - name
+        - path
+      properties:
+        name:
+          type: string
+          description: File or folder name
+        path:
+          type: string
+          description: Absolute path to the file/folder starting from the workspace root
+        directory:
+          type: boolean
+          description: Whether the item is a Directory
+          default: false
+        status:
+          type:
+            - string
+            - "null"
+          enum:
+            - A
+            - M
+            - D
+            - R
+            - null
+          default: null
+          description: |-
+            Status of the file
+
+            - *null*=Unchanged
+            - A=Added
+            - M=Modified
+            - D=Deleted
+            - R=Renamed
+
+    pfs:
+      description: List of PFS types assigned to the workspace, used for preview generation.
+      type: array
+      items:
+        $ref: '#/components/schemas/pfsId'
+      example:
+        - SAR-NRB
+        - SAR-POL
+
+    pfsType:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/pfsId'
+        name:
+          type: string
+          description: Human-readable name
+      required:
+        - id
+        - name
+      example:
+        id: SAR-NRB
+        name: SAR Normalised Radar Backscatter
+
+    pfsId:
+      type: string
+      description: PFS type identifier
+      pattern: ^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$
+      example: SAR-NRB
