@@ -1,7 +1,9 @@
-from dotenv import load_dotenv
 import os
 
+from dotenv import load_dotenv
+
 load_dotenv()
+
 
 class Settings:
     GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID")
@@ -10,24 +12,42 @@ class Settings:
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET")
 
-    GITHUB_CLIENT_RESPONSE_TYPE: str = os.getenv("GITHUB_CLIENT_RESPONSE_TYPE", "code")
-    GITHUB_API_BASE_URL: str = os.getenv("GITHUB_API_BASE_URL", "https://api.github.com")
-    GITHUB_CLIENT_SCOPE: str = os.getenv("GITHUB_CLIENT_SCOPE", "user:email read:org repo repo:status")
-    GITHUB_TOKEN_URL: str = os.getenv("GITHUB_TOKEN_URL", "https://github.com/login/oauth/access_token")
-    GITHUB_AUTHORIZE_URL: str = os.getenv("GITHUB_AUTHORIZE_URL", "https://github.com/login/oauth/authorize")
+    GITHUB_CLIENT_RESPONSE_TYPE: str = "code"
+    GITHUB_API_BASE_URL: str = "https://api.github.com"
+    GITHUB_CLIENT_SCOPE: str = "user:email read:org repo repo:status"
+    GITHUB_TOKEN_URL: str = "https://github.com/login/oauth/access_token"
+    GITHUB_AUTHORIZE_URL: str = "https://github.com/login/oauth/authorize"
 
-    GOOGLE_CLIENT_RESPONSE_TYPE: str = os.getenv("GOOGLE_CLIENT_RESPONSE_TYPE", "code")
-    GOOGLE_CLIENT_SCOPE: str = os.getenv("GOOGLE_CLIENT_SCOPE", "openid email profile")
-    GOOGLE_API_BASE_URL: str = os.getenv("GOOGLE_API_BASE_URL", "https://www.googleapis.com")
-    GOOGLE_DISCOVERY_URL: str = os.getenv("GOOGLE_DISCOVERY_URL", "https://accounts.google.com/.well-known/openid-configuration")
+    GOOGLE_CLIENT_RESPONSE_TYPE: str = "code"
+    GOOGLE_CLIENT_SCOPE: str = "openid email profile"
+    GOOGLE_API_BASE_URL: str = "https://www.googleapis.com"
+    GOOGLE_DISCOVERY_URL: str = "https://accounts.google.com/.well-known/openid-configuration"
+
+    CEOS_ARD_OWNER: str = os.getenv("CEOS_ARD_OWNER", "ceos-org")
+    CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
+    CEOS_ARD_MAIN_BRANCH: str = os.getenv("CEOS_ARD_MAIN_BRANCH", "main")
 
     SECRET_KEY: str = os.getenv("SECRET_KEY")
-    DATABASE_URL: str = os.getenv("DATABASE_URL")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ceos_ard_server.db")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    
+
     LOGOUT_REDIRECT: str = os.getenv("LOGOUT_REDIRECT")
     AUTH_SUCCESS_REDIRECT: str = os.getenv("AUTH_SUCCESS_REDIRECT")
+
+    WORKSPACES_ROOT: str = os.getenv("WORKSPACES_ROOT", "workspaces")
+
+    # PFS Default Configuration
+    PFS_DEFAULT_VERSION: str = os.getenv("PFS_DEFAULT_VERSION", "1.0-draft")
+    PFS_DEFAULT_INTRODUCTION: list[str] = [
+        item.strip()
+        for item in os.getenv("PFS_DEFAULT_INTRODUCTION", "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal").split(
+            ","
+        )
+    ]
+
+    CORS_ORIGINS: list = [os.getenv("CORS_ORIGIN_CLIENT")]
+
 
 settings = Settings()

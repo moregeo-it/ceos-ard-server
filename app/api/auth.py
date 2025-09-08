@@ -1,28 +1,33 @@
-from sqlalchemy.orm import Session
-from fastapi.responses import RedirectResponse
-from fastapi import APIRouter, Request, Depends, HTTPException, status, Query
-
 import logging
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+
 from app.config import settings
-from app.oauth.handler import oauth
-from app.db.dependency import get_db
+from app.db.database import get_db
 from app.models.user import IdentityProvider
-from app.services.auth import get_current_user
+from app.oauth.handler import oauth
+from app.schemas.error import create_error_detail
+from app.services.auth_service import get_current_user
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(
+    prefix="/auth",
+    tags=["Authentication"],
+)
 
 oauth_clients = {
     IdentityProvider.github: oauth.github,
     IdentityProvider.google: oauth.google,
 }
 
-@router.get("/login")
-async def login(request: Request, identity_provider: IdentityProvider = Query(IdentityProvider.github)):
+
+@router.get("/login", summary="Initiate login for a specific identity provider", description="Initiate login for a specific identity provider")
+async def initiate_login(request: Request, identity_provider: IdentityProvider = Query(IdentityProvider.github)):
     try:
         if identity_provider in oauth_clients:
             redirect_uri = f"{settings.CALLBACK_BASE_URI}/{identity_provider.value}"
@@ -36,48 +41,79 @@ async def login(request: Request, identity_provider: IdentityProvider = Query(Id
         logger.error(f"Failed to initiate GitHub login: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initiate GitHub login",   
-        )
+            detail=create_error_detail("initiate GitHub login", e),
+        ) from e
 
-@router.get("/callback/github")
-async def github_callback(request: Request, db: Session = Depends(get_db)):
+
+@router.get("/callback/github", summary="Handle GitHub OAuth callback", description="Handle GitHub OAuth callback")
+async def github_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "github", oauth.github, extract_github_user_info)
 
-@router.get("/callback/google")
-async def google_callback(request: Request, db: Session = Depends(get_db)):
+
+@router.get("/callback/google", summary="Handle Google OAuth callback", description="Handle Google OAuth callback")
+async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "google", oauth.google, extract_google_user_info)
 
-@router.get("/logout")
-async def logout(request: Request):
 
-    response = RedirectResponse(
-        url=settings.LOGOUT_REDIRECT,
-        status_code=status.HTTP_302_FOUND
-    )
+@router.get("/logout", summary="Logout user", description="Logout user")
+async def logout(current_user=Depends(get_current_user)):
+    try:
+        response = RedirectResponse(url=settings.LOGOUT_REDIRECT, status_code=status.HTTP_302_FOUND)
 
-    return response
+        return response
+    except Exception as e:
+        logger.error(f"Failed to logout user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_detail("logout user", e),
+        ) from e
 
-@router.get("/profile")
-async def profile(current_user = Depends(get_current_user)):
-    user = current_user["user"]
-    access_token = current_user["access_token"]
 
-    return {
-        "id": user.id,
-        "email": user.email,
-        "username": user.username,
-        "full_name": user.full_name,
-        "access_token": access_token,
-        "created_at": user.created_at,
-        "updated_at": user.updated_at,
-        "external_id": user.external_id,
-        "identity_provider": user.identity_provider,
-    }
+@router.get("/user")
+async def current_user(current_user=Depends(get_current_user)):
+    try:
+        user = current_user["user"]
+        access_token = current_user["access_token"]
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "access_token": access_token,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "external_id": user.external_id,
+            "identity_provider": user.identity_provider,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get current user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_detail("get current user", e),
+        ) from e
+
 
 @router.get("/validate")
-async def validate_auth(current_user = Depends(get_current_user)):
-    return {
-        "authenticated": True,
-        "user_id": current_user["user"].id,
-        "username": current_user["user"].username
-    }
+async def validate_auth(current_user=Depends(get_current_user)):
+    try:
+        user = current_user["user"]
+        access_token = current_user["access_token"]
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "access_token": access_token,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "external_id": user.external_id,
+            "identity_provider": user.identity_provider,
+        }
+    except Exception as e:
+        logger.error(f"Failed to validate user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_detail("validate user", e),
+        ) from e

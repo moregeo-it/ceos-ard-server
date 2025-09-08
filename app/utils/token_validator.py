@@ -1,15 +1,16 @@
-from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
+import logging
+from typing import Any
 
 import httpx
-import logging
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-async def validate_github_token(access_token: str, db: Session) -> Optional[Dict[str, Any]]:
+
+async def validate_github_token(access_token: str, db: Session) -> dict[str, Any] | None:
     try:
         async with httpx.AsyncClient() as client:
             headers = {"Authorization": f"Bearer {access_token}"}
@@ -18,7 +19,7 @@ async def validate_github_token(access_token: str, db: Session) -> Optional[Dict
         if response.status_code != 200:
             logger.debug(f"GitHub token validation failed with status: {response.status_code}")
             return None
-        
+
         res = response.json()
         external_id = str(res.get("id"))
 
@@ -26,21 +27,14 @@ async def validate_github_token(access_token: str, db: Session) -> Optional[Dict
             logger.warning("GitHub API response missing user ID")
             return None
 
-        user = db.query(User).filter(
-            User.external_id == external_id,
-            User.identity_provider == "github"
-        ).first()
-        
+        user = db.query(User).filter(User.external_id == external_id, User.identity_provider == "github").first()
+
         if not user:
             logger.debug(f"GitHub user with external_id {external_id} not found in database")
             return None
-        
-        return {
-            "user": user,
-            "access_token": access_token,
-            "provider": "github"
-        }
-        
+
+        return {"user": user, "access_token": access_token, "provider": "github"}
+
     except httpx.RequestError as e:
         logger.error(f"Network error validating GitHub token: {e}")
         return None
@@ -48,7 +42,8 @@ async def validate_github_token(access_token: str, db: Session) -> Optional[Dict
         logger.error(f"Unexpected error validating GitHub token: {e}")
         return None
 
-async def validate_google_token(access_token: str, db: Session) -> Optional[Dict[str, Any]]:
+
+async def validate_google_token(access_token: str, db: Session) -> dict[str, Any] | None:
     try:
         async with httpx.AsyncClient() as client:
             headers = {"Authorization": f"Bearer {access_token}"}
@@ -57,29 +52,16 @@ async def validate_google_token(access_token: str, db: Session) -> Optional[Dict
         if response.status_code != 200:
             logger.debug(f"Google token validation failed with status: {response.status_code}")
             return None
-        
         res = response.json()
         external_id = str(res.get("id"))
-
         if not external_id:
             logger.warning("Google API response missing user ID")
             return None
-
-        user = db.query(User).filter(
-            User.external_id == external_id,
-            User.identity_provider == "google"
-        ).first()
-        
+        user = db.query(User).filter(User.external_id == external_id, User.identity_provider == "google").first()
         if not user:
             logger.debug(f"Google user with external_id {external_id} not found in database")
             return None
-        
-        return {
-            "user": user,
-            "access_token": access_token,
-            "provider": "google"
-        }
-        
+        return {"user": user, "access_token": access_token, "provider": "google"}
     except httpx.RequestError as e:
         logger.error(f"Network error validating Google token: {e}")
         return None

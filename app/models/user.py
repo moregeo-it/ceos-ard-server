@@ -1,17 +1,20 @@
-from sqlalchemy import Column, String, DateTime, Enum as SQLAlchemyEnum
-
+import uuid
 from enum import Enum
+
+from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy.orm import relationship
 
 from app.db.database import Base
 
-import uuid
 
 class IdentityProvider(str, Enum):
     github = "github"
     google = "google"
 
+
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     full_name = Column(String, nullable=True)
@@ -21,3 +24,8 @@ class User(Base):
     identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
+
+    workspaces = relationship("GitWorkspace", back_populates="user")
+
+    def __repr__(self):
+        return f"<User id={self.id} username={self.username} email={self.email} provider={self.identity_provider} external_id={self.external_id}>"
