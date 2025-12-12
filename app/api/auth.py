@@ -38,10 +38,10 @@ async def initiate_login(request: Request, identity_provider: IdentityProvider =
                 detail="Invalid identity provider",
             )
     except Exception as e:
-        logger.error(f"Failed to initiate GitHub login: {e}")
+        logger.error(f"Failed to initiate {identity_provider.value} login: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("initiate GitHub login", e),
+            detail=create_error_detail(f"initiate {identity_provider.value} login", e),
         ) from e
 
 
@@ -73,14 +73,12 @@ async def logout(current_user=Depends(get_current_user)):
 async def current_user(current_user=Depends(get_current_user)):
     try:
         user = current_user["user"]
-        access_token = current_user["access_token"]
 
         return {
             "id": user.id,
             "email": user.email,
             "username": user.username,
             "full_name": user.full_name,
-            "access_token": access_token,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
             "external_id": user.external_id,
@@ -98,14 +96,12 @@ async def current_user(current_user=Depends(get_current_user)):
 async def validate_auth(current_user=Depends(get_current_user)):
     try:
         user = current_user["user"]
-        access_token = current_user["access_token"]
 
         return {
             "id": user.id,
             "email": user.email,
             "username": user.username,
             "full_name": user.full_name,
-            "access_token": access_token,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
             "external_id": user.external_id,

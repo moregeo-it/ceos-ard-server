@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -8,7 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.user import User
+from app.models.user import IdentityProvider, User
+from app.services.jwt_service import JWTService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
             )
 
         user_info = await user_info_extractor(token)
-
         # Validate required fields
         required_fields = ["email", "username", "external_id", "full_name"]
         if not all(user_info.get(field) for field in required_fields):
@@ -34,14 +34,19 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
                 detail=f"Failed to retrieve required user information from {provider}",
             )
 
-        # Create or update user in database
-        user_to_use = await create_or_update_user(db, user_info, provider)
+        # Create or update user in database (stores provider tokens)
+        user_to_use = await create_or_update_user(db, user_info, provider, token)
 
-        # Build redirect URL with access token
-        access_token = token.get("access_token")
+        # Generate JWT token for client (never expose provider token)
+        # JWT expiry is derived from provider token expiry stored in user.token_expiry
+        jwt_data = JWTService.create_access_token(user_to_use)
+
+        # Build redirect URL with JWT token (not provider token)
         redirect_url = (
             f"{settings.AUTH_SUCCESS_REDIRECT}"
-            f"?access_token={access_token}"
+            f"?access_token={jwt_data['access_token']}"
+            f"&token_type={jwt_data['token_type']}"
+            f"&expires_in={jwt_data['expires_in']}"
             f"&user_id={user_to_use.id}"
             f"&username={user_to_use.username}"
             f"&provider={provider}"
@@ -62,20 +67,43 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
         )
 
 
-async def create_or_update_user(db: Session, user_info: dict[str, Any], provider: str) -> User:
+async def create_or_update_user(db: Session, user_info: dict[str, Any], provider: str, token: dict[str, Any]) -> User:
     try:
         email = user_info["email"]
         username = user_info["username"]
         full_name = user_info["full_name"]
         external_id = user_info["external_id"]
 
-        existing_user = db.query(User).filter_by(external_id=external_id, identity_provider=provider).first()
+        # Extract token information
+        access_token = token.get("access_token")  # Provider's access token
+        refresh_token = token.get("refresh_token")
+        expires_in = token.get("expires_in")
+
+        # Calculate access token expiry time (use UTC for consistency with JWT)
+        if expires_in:
+            # Google provides expires_in (typically 3600 seconds = 1 hour)
+            token_expiry = datetime.utcnow() + timedelta(seconds=int(expires_in))
+        elif provider == IdentityProvider.github.value:
+            # GitHub doesn't provide expires_in, but tokens typically last 8 hours
+            token_expiry = datetime.utcnow() + timedelta(hours=8)
+            logger.info("GitHub token created with default 8-hour expiry")
+        else:
+            # Default fallback
+            token_expiry = datetime.utcnow() + timedelta(hours=1)
+            logger.warning(f"No expires_in for {provider}, using 1-hour default")
+
+        provider_enum = IdentityProvider(provider)
+
+        existing_user = db.query(User).filter_by(external_id=external_id, identity_provider=provider_enum).first()
 
         if existing_user:
             existing_user.email = email
             existing_user.username = username
             existing_user.full_name = full_name
-            existing_user.updated_at = datetime.now()
+            existing_user.access_token = access_token  # Store provider token
+            existing_user.refresh_token = refresh_token
+            existing_user.token_expiry = token_expiry
+            existing_user.updated_at = datetime.utcnow()
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
@@ -86,9 +114,12 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
                 username=username,
                 full_name=full_name,
                 external_id=external_id,
-                identity_provider=provider,
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+                identity_provider=provider_enum,
+                access_token=access_token,  # Store provider token
+                refresh_token=refresh_token,
+                token_expiry=token_expiry,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
             )
 
             db.add(new_user)

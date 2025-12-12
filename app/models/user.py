@@ -22,6 +22,9 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     external_id = Column(String, unique=True, index=True, nullable=False)
     identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
+    access_token = Column(String, nullable=True)  # Provider's access token (stored server-side)
+    refresh_token = Column(String, nullable=True)  # Provider's refresh token (stored server-side)
+    token_expiry = Column(DateTime, nullable=True)  # Access token expiry
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
 
