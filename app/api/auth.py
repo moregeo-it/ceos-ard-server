@@ -1,7 +1,9 @@
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -93,30 +95,67 @@ async def current_user(current_user=Depends(get_current_user)):
 
 
 @router.post(
-    "/validate", summary="Validate JWT and refresh if needed", description="Validate JWT token, auto-refresh provider tokens, and return fresh JWT"
+    "/validate",
+    summary="Validate JWT and refresh if needed",
+    description="Validate JWT token, auto-refresh provider tokens, and return fresh JWT if nearing expiry",
 )
-async def validate_auth(current_user=Depends(get_current_user)):
-    """Validate JWT and provider tokens, return fresh JWT.
+async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user=Depends(get_current_user)):
+    """Validate JWT and provider tokens, return fresh JWT only if nearing expiry.
 
     This endpoint is designed for periodic client polling (e.g., every 5 minutes) to:
     - Validate the JWT is still valid
     - Check provider token status
     - For Google: Auto-refresh provider token if expired (transparent)
     - For GitHub: Return 401 if provider token expired (requires re-login)
-    - Return a fresh JWT to keep all tabs/browsers in sync
+    - Return a fresh JWT ONLY if current JWT expires within 3 × ping_interval (15 minutes)
+
+    This optimization reduces unnecessary JWT generation while ensuring tokens are
+    refreshed before they expire.
 
     Returns:
-        - 200: Valid, returns fresh JWT with user info
+        - 200: Valid, returns current or fresh JWT with user info
         - 401: JWT expired, provider token expired, or refresh failed
     """
     try:
         user = current_user["user"]
         provider = current_user["provider"]
 
-        # Generate fresh JWT (extends session for valid users)
-        jwt_data = JWTService.create_access_token(user)
+        # Decode current JWT to check expiry
+        jwt_token = authorization.credentials
+        payload = JWTService.decode_access_token(jwt_token)
 
-        logger.info(f"Token validation successful for {user.username} ({provider.value}), issued fresh JWT")
+        # Configuration: ping interval in minutes
+        PING_INTERVAL_MINUTES = 5
+        REFRESH_THRESHOLD_MINUTES = 3 * PING_INTERVAL_MINUTES  # 15 minutes
+
+        # Check if JWT is nearing expiry
+        jwt_exp = datetime.fromtimestamp(payload["exp"])
+        time_until_expiry = jwt_exp - datetime.utcnow()
+        should_refresh = time_until_expiry.total_seconds() < (REFRESH_THRESHOLD_MINUTES * 60)
+
+        if should_refresh:
+            # Generate fresh JWT (extends session)
+            jwt_data = JWTService.create_access_token(user)
+            logger.info(
+                f"Token validation for {user.username} ({provider.value}): "
+                f"JWT expiring in {int(time_until_expiry.total_seconds() / 60)} minutes, issued fresh JWT"
+            )
+            access_token = jwt_data["access_token"]
+            token_refreshed = True
+        else:
+            # Return current JWT (still valid for more than 15 minutes)
+            logger.info(
+                f"Token validation for {user.username} ({provider.value}): "
+                f"JWT valid for {int(time_until_expiry.total_seconds() / 60)} minutes, no refresh needed"
+            )
+            jwt_data = {
+                "access_token": jwt_token,
+                "token_type": "Bearer",
+                "expires_in": int(time_until_expiry.total_seconds()),
+                "expires_at": jwt_exp.isoformat(),
+            }
+            access_token = jwt_token
+            token_refreshed = False
 
         return {
             "valid": True,
@@ -128,7 +167,8 @@ async def validate_auth(current_user=Depends(get_current_user)):
             "token_type": jwt_data["token_type"],
             "expires_in": jwt_data["expires_in"],
             "expires_at": jwt_data["expires_at"],
-            "access_token": jwt_data["access_token"],
+            "access_token": access_token,
+            "token_refreshed": token_refreshed,  # Indicates if new JWT was issued
         }
     except HTTPException:
         # Re-raise authentication errors (401) from get_current_user

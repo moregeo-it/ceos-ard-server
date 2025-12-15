@@ -12,7 +12,7 @@ import jwt
 from fastapi import HTTPException, status
 
 from app.config import settings
-from app.models.user import IdentityProvider, User
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +20,21 @@ logger = logging.getLogger(__name__)
 class JWTService:
     """Service for creating and validating JWT tokens."""
 
-    # Fallback expiry values if provider token expiry is not available
-    GITHUB_TOKEN_EXPIRY_HOURS = 8
-    GOOGLE_REFRESH_TOKEN_DAYS = 180  # Google refresh tokens last ~6 months
+    # JWT expiry: 8 hours for both providers (sliding window with periodic validation)
+    JWT_EXPIRY_HOURS = 8
 
     @staticmethod
     def create_access_token(user: User, provider_token_expiry: datetime | None = None) -> dict[str, Any]:
         """Create a JWT access token for the user.
 
-        The JWT expiry is derived from the provider token:
-        - GitHub: Uses actual provider token expiry (no refresh available)
-        - Google: Uses refresh token lifetime since we can auto-refresh access token
+        JWT expiry is set to 8 hours for both GitHub and Google users.
+        With periodic validation (every 5 minutes), active users get fresh JWTs
+        before expiry, creating a sliding window session. Inactive users are
+        logged out after 8 hours.
+
+        The backend handles provider token differences transparently:
+        - GitHub: 8-hour provider token, no refresh (JWT matches provider lifetime)
+        - Google: 1-hour provider token, auto-refreshed (JWT independent of provider)
 
         Args:
             user: User object with identity provider info and token_expiry
@@ -39,32 +43,8 @@ class JWTService:
         Returns:
             Dictionary with token and expiry info
         """
-        # Use the actual provider token expiry from the user object or parameter
-        actual_token_expiry = user.token_expiry or provider_token_expiry
-
-        # Calculate JWT expiry based on provider capabilities
-        if user.identity_provider == IdentityProvider.github:
-            # GitHub: No refresh token, JWT must expire when provider token expires
-            if actual_token_expiry:
-                expires_delta = actual_token_expiry - datetime.utcnow()
-            else:
-                # Fallback if token expiry not available
-                logger.warning(f"GitHub token expiry not available for user {user.username}, using fallback")
-                expires_delta = timedelta(hours=JWTService.GITHUB_TOKEN_EXPIRY_HOURS)
-        else:  # google
-            # Google: We have refresh token, so JWT can last as long as refresh token (~6 months)
-            # Backend automatically refreshes the access token as needed
-            # Google doesn't provide refresh token expiry, so we use the standard ~180 day lifetime
-            if user.refresh_token:
-                expires_delta = timedelta(days=JWTService.GOOGLE_REFRESH_TOKEN_DAYS)
-            else:
-                # Fallback to access token expiry if no refresh token
-                logger.warning(f"Google refresh token not available for user {user.username}, using access token expiry")
-                if actual_token_expiry:
-                    expires_delta = actual_token_expiry - datetime.utcnow()
-                else:
-                    expires_delta = timedelta(days=JWTService.GOOGLE_REFRESH_TOKEN_DAYS)
-
+        # Use 8-hour expiry for both providers (sliding window session)
+        expires_delta = timedelta(hours=JWTService.JWT_EXPIRY_HOURS)
         expiry_time = datetime.utcnow() + expires_delta
 
         # Create JWT payload
