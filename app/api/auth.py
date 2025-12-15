@@ -10,6 +10,7 @@ from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
 from app.schemas.error import create_error_detail
 from app.services.auth_service import get_current_user
+from app.services.jwt_service import JWTService
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
 
@@ -81,7 +82,6 @@ async def current_user(current_user=Depends(get_current_user)):
             "full_name": user.full_name,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
-            "external_id": user.external_id,
             "identity_provider": user.identity_provider,
         }
     except Exception as e:
@@ -92,21 +92,47 @@ async def current_user(current_user=Depends(get_current_user)):
         ) from e
 
 
-@router.get("/validate")
+@router.post(
+    "/validate", summary="Validate JWT and refresh if needed", description="Validate JWT token, auto-refresh provider tokens, and return fresh JWT"
+)
 async def validate_auth(current_user=Depends(get_current_user)):
+    """Validate JWT and provider tokens, return fresh JWT.
+
+    This endpoint is designed for periodic client polling (e.g., every 5 minutes) to:
+    - Validate the JWT is still valid
+    - Check provider token status
+    - For Google: Auto-refresh provider token if expired (transparent)
+    - For GitHub: Return 401 if provider token expired (requires re-login)
+    - Return a fresh JWT to keep all tabs/browsers in sync
+
+    Returns:
+        - 200: Valid, returns fresh JWT with user info
+        - 401: JWT expired, provider token expired, or refresh failed
+    """
     try:
         user = current_user["user"]
+        provider = current_user["provider"]
+
+        # Generate fresh JWT (extends session for valid users)
+        jwt_data = JWTService.create_access_token(user)
+
+        logger.info(f"Token validation successful for {user.username} ({provider.value}), issued fresh JWT")
 
         return {
-            "id": user.id,
+            "valid": True,
+            "user_id": user.id,
             "email": user.email,
             "username": user.username,
-            "full_name": user.full_name,
-            "created_at": user.created_at,
+            "provider": provider.value,
             "updated_at": user.updated_at,
-            "external_id": user.external_id,
-            "identity_provider": user.identity_provider,
+            "token_type": jwt_data["token_type"],
+            "expires_in": jwt_data["expires_in"],
+            "expires_at": jwt_data["expires_at"],
+            "access_token": jwt_data["access_token"],
         }
+    except HTTPException:
+        # Re-raise authentication errors (401) from get_current_user
+        raise
     except Exception as e:
         logger.error(f"Failed to validate user: {e}")
         raise HTTPException(
