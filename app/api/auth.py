@@ -2,7 +2,6 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -58,14 +57,42 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "google", oauth.google, extract_google_user_info)
 
 
-@router.get("/logout", summary="Logout user", description="Logout user")
-async def logout(current_user=Depends(get_current_user)):
+@router.post("/logout", summary="Logout user", description="Logout user and clear provider tokens")
+async def logout(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        response = RedirectResponse(url=settings.LOGOUT_REDIRECT, status_code=status.HTTP_302_FOUND)
+        user = current_user["user"]
+        provider = current_user["provider"]
 
-        return response
+        # Revoke token with OAuth provider
+        try:
+            if provider == IdentityProvider.google and user.refresh_token:
+                # Revoke Google refresh token
+                await oauth.google.revoke_token(user.refresh_token)
+                logger.info(f"Revoked Google token for user {user.username}")
+            elif provider == IdentityProvider.github and user.access_token:
+                # Revoke GitHub token
+                await oauth.github.revoke_token(user.access_token)
+                logger.info(f"Revoked GitHub token for user {user.username}")
+        except Exception as revoke_error:
+            # Log but don't fail - still clear from DB
+            logger.warning(f"Failed to revoke {provider.value} token for {user.username}: {revoke_error}")
+
+        # Clear provider tokens from database
+        user.access_token = None
+        user.refresh_token = None
+        user.token_expiry = None
+        user.updated_at = datetime.utcnow()
+        db.commit()
+
+        logger.info(f"User {user.username} logged out successfully, provider tokens cleared")
+
+        return {
+            "status": "success",
+            "message": f"User {user.username} logged out successfully",
+        }
     except Exception as e:
         logger.error(f"Failed to logout user: {e}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=create_error_detail("logout user", e),

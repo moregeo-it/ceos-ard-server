@@ -106,7 +106,7 @@ ALGORITHM=HS256
 # Application URLs
 CALLBACK_BASE_URI=http://localhost:8000/auth/callback
 LOGOUT_REDIRECT=http://localhost:3000
-AUTH_SUCCESS_REDIRECT=http://localhost:3000/dashboard
+AUTH_SUCCESS_CLIENT_REDIRECT=http://localhost:3000/auth/callback
 CORS_ORIGIN_CLIENT=http://localhost:3000
 
 # Environment
@@ -314,7 +314,7 @@ SECRET_KEY=your-production-secret-key
 
 # Set production URLs
 CALLBACK_BASE_URI=https://yourdomain.com/auth/callback
-AUTH_SUCCESS_REDIRECT=https://yourdomain.com/dashboard
+AUTH_SUCCESS_CLIENT_REDIRECT=https://yourdomain.com/auth/callback
 LOGOUT_REDIRECT=https://yourdomain.com
 CORS_ORIGIN_CLIENT=https://yourdomain.com
 

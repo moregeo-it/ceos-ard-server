@@ -43,7 +43,7 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
 
         # Build redirect URL with JWT token (not provider token)
         redirect_url = (
-            f"{settings.AUTH_SUCCESS_REDIRECT}"
+            f"{settings.AUTH_SUCCESS_CLIENT_REDIRECT}"
             f"?access_token={jwt_data['access_token']}"
             f"&token_type={jwt_data['token_type']}"
             f"&expires_in={jwt_data['expires_in']}"
