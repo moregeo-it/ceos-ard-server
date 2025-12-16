@@ -120,9 +120,6 @@ class WorkspaceService:
                 .all()
             )
 
-            if not workspaces:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No workspaces found for this user")
-
             # Update pull request status if needed
             for workspace in workspaces:
                 if (
