@@ -114,7 +114,7 @@ class WorkspaceService:
 
             workspaces = (
                 db.query(GitWorkspace)
-                .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
+                .filter(GitWorkspace.user_id == user_id)
                 .order_by(GitWorkspace.created_at.desc())
                 .with_for_update(of=GitWorkspace)
                 .all()
@@ -268,6 +268,7 @@ class WorkspaceService:
             return "Workspace deleted successfully"
 
         except Exception as e:
+            db.rollback()
             logger.error(f"Error deleting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
