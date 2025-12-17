@@ -40,6 +40,8 @@ class GitWorkspace(Base):
     status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=datetime.now(), nullable=False)
+    archived_at = Column(DateTime, nullable=True)
+    deletion_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="workspaces")
 
