@@ -228,7 +228,7 @@ class WorkspaceService:
                 if workspace.status != WorkspaceStatus.ARCHIVED:
                     archived_at = datetime.utcnow()
                     update_dict["archived_at"] = archived_at
-                    update_dict["deletion_at"] = archived_at + relativedelta(minutes=1)
+                    update_dict["deletion_at"] = archived_at + relativedelta(months=1)
                     logger.info(f"Archiving workspace {workspace_id}, scheduled for deletion at {update_dict['deletion_at']}")
 
             # Handle reactivation - clear timestamps when status changes from ARCHIVED to ACTIVE
