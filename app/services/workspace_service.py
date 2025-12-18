@@ -114,14 +114,11 @@ class WorkspaceService:
 
             workspaces = (
                 db.query(GitWorkspace)
-                .filter(GitWorkspace.user_id == user_id, GitWorkspace.status != WorkspaceStatus.ARCHIVED)
+                .filter(GitWorkspace.user_id == user_id)
                 .order_by(GitWorkspace.created_at.desc())
                 .with_for_update(of=GitWorkspace)
                 .all()
             )
-
-            if not workspaces:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No workspaces found for this user")
 
             # Update pull request status if needed
             for workspace in workspaces:
@@ -220,10 +217,23 @@ class WorkspaceService:
             update_dict = update_data.model_dump(exclude_unset=True)
 
             if not update_dict:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description or title must be provided")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description, title, or status must be provided")
 
             if "status" in update_dict and isinstance(update_dict["status"], str):
                 update_dict["status"] = update_dict["status"].upper()
+
+            # Handle archiving - set timestamps when status changes to ARCHIVED
+            if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ARCHIVED.value.upper():
+                if workspace.status != WorkspaceStatus.ARCHIVED:
+                    archived_at = datetime.utcnow()
+                    update_dict["archived_at"] = archived_at
+                    logger.info(f"Archiving workspace {workspace_id}, deletion scheduled for 1 month from now")
+
+            # Handle reactivation - clear timestamps when status changes from ARCHIVED to ACTIVE
+            if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ACTIVE.value.upper():
+                if workspace.status == WorkspaceStatus.ARCHIVED:
+                    update_dict["archived_at"] = None
+                    logger.info(f"Reactivating archived workspace {workspace_id}, clearing archival timestamp")
 
             for key, value in update_dict.items():
                 if hasattr(workspace, key):
@@ -243,34 +253,26 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-        workspace_path = str(workspace.workspace_path)
-
-        if workspace.status != WorkspaceStatus.ACTIVE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
-
-        if workspace.status == WorkspaceStatus.ARCHIVED:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is already deleted")
-
-        if not Path(workspace_path).exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+        workspace_path = Path(workspace.workspace_path)
 
         if workspace.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
 
         try:
-            workspace.status = WorkspaceStatus.ARCHIVED
+            if workspace_path.exists():
+                shutil.rmtree(workspace_path)
+                logger.info(f"Deleted workspace files at {workspace_path}")
+            else:
+                logger.warning(f"Workspace path does not exist: {workspace_path}")
+
+            db.delete(workspace)
             db.commit()
 
-            if Path(workspace_path).exists():
-                shutil.rmtree(workspace_path)
-                logger.info(f"Deleted workspace at {workspace_path}")
-            else:
-                logger.warning(f"Workspace at {workspace_path} does not exist")
-
-            logger.info(f"Successfully deleted workspace {workspace_id}")
+            logger.info(f"Successfully deleted workspace {workspace_id} (title: {workspace.title})")
             return "Workspace deleted successfully"
 
         except Exception as e:
+            db.rollback()
             logger.error(f"Error deleting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 

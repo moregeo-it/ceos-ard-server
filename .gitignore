@@ -65,6 +65,10 @@ db.sqlite3-journal
 *.db
 ceos_ard.db
 
+# Workspaces directory
+# Contains user workspace clones and generated files
+workspaces/
+
 # Flask stuff:
 instance/
 .webassets-cache

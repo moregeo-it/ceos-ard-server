@@ -36,4 +36,8 @@ oauth.register(
         "scope": settings.GOOGLE_CLIENT_SCOPE,
         "response_type": settings.GOOGLE_CLIENT_RESPONSE_TYPE,
     },
+    authorize_params={
+        "access_type": "offline",  # Required to receive refresh tokens
+        "prompt": "consent",  # Force consent screen to ensure refresh token every time
+    },
 )

@@ -34,7 +34,7 @@ class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 
     LOGOUT_REDIRECT: str = os.getenv("LOGOUT_REDIRECT")
-    AUTH_SUCCESS_REDIRECT: str = os.getenv("AUTH_SUCCESS_REDIRECT")
+    AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT")
 
     WORKSPACES_ROOT: str = os.getenv("WORKSPACES_ROOT", "workspaces")
 

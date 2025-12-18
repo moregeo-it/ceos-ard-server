@@ -294,7 +294,18 @@ paths:
 
     patch:
       summary: Update workspace
-      description: Updates workspace information
+      description: |
+        Updates workspace information including title, description, PFS, and status.
+
+        **Archiving behavior:**
+        - Setting status to "archived" will set archived_at to current time and deletion_at to 1 month later
+        - Workspace files remain on disk during the 1-month retention period
+        - Archived workspaces are automatically deleted after deletion_at date
+
+        **Reactivation behavior:**
+        - Setting status to "active" on an archived workspace will clear archived_at and deletion_at
+        - Reactivation is only allowed if the pull request status is not "merged" or "closed"
+        - Returns 400 error if attempting to reactivate a workspace with merged/closed PR
       operationId: updateWorkspace
       tags:
         - Workspaces
@@ -320,10 +331,12 @@ paths:
                   enum:
                     - active
                     - archived
-                  description: |-
-                    Archives/Unarchives a workspace.
+                  description: |
+                    Workspace status.
 
-                    Can only be unarchived if the PR status is not closed or merged.
+                    - Set to "archived" to archive the workspace (sets archived_at and deletion_at)
+                    - Set to "active" to reactivate an archived workspace (clears archived_at and deletion_at)
+                    - Reactivation only allowed if PR status is not "merged" or "closed"
       responses:
         '200':
           description: Workspace updated successfully
@@ -332,11 +345,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/Workspace'
         '400':
-          description: Invalid request data
+          description: |
+            Invalid request data or business rule violation.
+
+            Possible errors:
+            - Cannot reactivate workspace with merged or closed pull request
+            - At least one of description, title, or status must be provided
+            - Invalid workspace status
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+              examples:
+                cannotReactivate:
+                  summary: Cannot reactivate merged/closed workspace
+                  value:
+                    detail: Cannot reactivate an archived workspace with a merged or closed pull request
         '404':
           description: Workspace not found
           content:
@@ -351,8 +375,16 @@ paths:
                 $ref: '#/components/schemas/Error'
 
     delete:
-      summary: Delete workspace
-      description: Deletes a workspace and all its associated data
+      summary: Delete workspace permanently
+      description: |
+        Permanently deletes a workspace immediately.
+
+        **Warning:** This action is irreversible.
+        - Workspace files are immediately deleted from disk
+        - Database record is immediately deleted
+        - No recovery possible
+
+        **Note:** To archive a workspace with a 1-month grace period, use PATCH with status="archived" instead.
       operationId: deleteWorkspace
       tags:
         - Workspaces
@@ -369,6 +401,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - user not authorized to delete this workspace
           content:
             application/json:
               schema:
@@ -1254,10 +1292,35 @@ components:
           enum:
             - active
             - archived
-          description: |-
+          description: |
             Workspace status.
 
-            archived if the PR is closed or merged or has been archived by the user manually, active otherwise.
+            - "archived": Workspace has been archived (manually or due to merged/closed PR)
+            - "active": Workspace is active and can be worked on
+        archived_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: |
+            Timestamp when workspace was archived.
+
+            Set automatically when status changes to "archived".
+            Cleared when workspace is reactivated.
+          default: null
+        deletion_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: |
+            Scheduled permanent deletion timestamp (computed as archived_at + 1 month).
+
+            **Note**: This is a computed property, not stored in the database.
+            After this time, workspace files and database record will be permanently deleted by cleanup script.
+            Automatically null when workspace is not archived.
+          default: null
+          readOnly: true
         pr:
           type:
             - string

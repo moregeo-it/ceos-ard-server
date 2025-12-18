@@ -25,7 +25,7 @@ async def list_pfs_folders(
     github_service: GitHubService = Depends(get_github_service),
 ) -> dict[str, Any]:
     try:
-        access_token = current_user["access_token"]
+        access_token = current_user["user"].access_token
 
         final_owner = settings.CEOS_ARD_OWNER
         final_repo = settings.CEOS_ARD_REPO
