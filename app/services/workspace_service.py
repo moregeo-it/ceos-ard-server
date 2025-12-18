@@ -7,7 +7,6 @@ from typing import Any
 
 import git
 from ceos_ard_cli.schema import PFS_DOCUMENT
-from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from strictyaml import YAMLValidationError, as_document, load
@@ -228,15 +227,13 @@ class WorkspaceService:
                 if workspace.status != WorkspaceStatus.ARCHIVED:
                     archived_at = datetime.utcnow()
                     update_dict["archived_at"] = archived_at
-                    update_dict["deletion_at"] = archived_at + relativedelta(months=1)
-                    logger.info(f"Archiving workspace {workspace_id}, scheduled for deletion at {update_dict['deletion_at']}")
+                    logger.info(f"Archiving workspace {workspace_id}, deletion scheduled for 1 month from now")
 
             # Handle reactivation - clear timestamps when status changes from ARCHIVED to ACTIVE
             if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ACTIVE.value.upper():
                 if workspace.status == WorkspaceStatus.ARCHIVED:
                     update_dict["archived_at"] = None
-                    update_dict["deletion_at"] = None
-                    logger.info(f"Reactivating archived workspace {workspace_id}, clearing archival timestamps")
+                    logger.info(f"Reactivating archived workspace {workspace_id}, clearing archival timestamp")
 
             for key, value in update_dict.items():
                 if hasattr(workspace, key):

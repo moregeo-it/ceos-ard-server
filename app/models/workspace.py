@@ -41,9 +41,17 @@ class GitWorkspace(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=datetime.now(), nullable=False)
     archived_at = Column(DateTime, nullable=True)
-    deletion_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="workspaces")
+
+    @property
+    def deletion_at(self):
+        """Calculate deletion date as 1 month after archived_at"""
+        if self.archived_at:
+            from dateutil.relativedelta import relativedelta
+
+            return self.archived_at + relativedelta(months=1)
+        return None
 
     def __repr__(self):
         return f"<Workspace id={self.id} title={self.title} status={self.status}>"

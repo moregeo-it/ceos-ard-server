@@ -4,7 +4,7 @@ Cleanup script to permanently delete archived workspaces past their deletion_at 
 This script should be run periodically (e.g., via cron job) to clean up archived workspaces.
 It deletes the workspace files from disk and database records for workspaces where:
 - status = ARCHIVED
-- deletion_at <= current_time
+- archived_at + 1 month <= current_time (deletion_at is computed dynamically)
 
 Usage:
     python scripts/cleanup_archived_workspaces.py [--dry-run]
@@ -18,14 +18,16 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from app.db.database import SessionLocal
-
-# Import User first to register it with SQLAlchemy before GitWorkspace
-from app.models.user import User  # noqa: F401
-from app.models.workspace import GitWorkspace, WorkspaceStatus
+from dateutil.relativedelta import relativedelta
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.db.database import SessionLocal  # noqa: E402
+
+# Import User first to register it with SQLAlchemy before GitWorkspace
+from app.models.user import User  # noqa: E402, F401
+from app.models.workspace import GitWorkspace, WorkspaceStatus  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,14 +47,16 @@ def cleanup_archived_workspaces(dry_run: bool = False):
 
     try:
         current_time = datetime.utcnow()
+        # Calculate cutoff date: workspaces archived more than 1 month ago
+        cutoff_date = current_time - relativedelta(months=1)
 
-        # Find archived workspaces past their deletion date
+        # Find archived workspaces past their deletion date (archived_at + 1 month <= now)
         workspaces_to_delete = (
             db.query(GitWorkspace)
             .filter(
                 GitWorkspace.status == WorkspaceStatus.ARCHIVED,
-                GitWorkspace.deletion_at.isnot(None),
-                GitWorkspace.deletion_at <= current_time,
+                GitWorkspace.archived_at.isnot(None),
+                GitWorkspace.archived_at <= cutoff_date,
             )
             .all()
         )

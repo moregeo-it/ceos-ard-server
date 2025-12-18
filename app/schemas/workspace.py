@@ -60,7 +60,7 @@ class WorkspaceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
-    deletion_at: datetime | None
+    deletion_at: datetime | None  # Computed from archived_at + 1 month
 
     class ConfigDict:
         from_attributes = True

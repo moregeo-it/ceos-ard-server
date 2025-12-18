@@ -1314,12 +1314,13 @@ components:
             - "null"
           format: date-time
           description: |
-            Scheduled permanent deletion timestamp (archived_at + 1 month).
+            Scheduled permanent deletion timestamp (computed as archived_at + 1 month).
 
+            **Note**: This is a computed property, not stored in the database.
             After this time, workspace files and database record will be permanently deleted by cleanup script.
-            Set automatically when status changes to "archived".
-            Cleared when workspace is reactivated.
+            Automatically null when workspace is not archived.
           default: null
+          readOnly: true
         pr:
           type:
             - string
