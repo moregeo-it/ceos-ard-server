@@ -17,7 +17,7 @@ from app.schemas.workspace import (
     FileSearchResponse,
     FileStorageResponse,
 )
-from app.services.auth_service import get_current_user
+from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ async def list_workspace_files(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     path: str | None = Query(default="/", description="Path to list files from"),
 ):
     try:
@@ -60,7 +60,7 @@ async def create(
     create_file_request: CreateFileRequest,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         return await file_service.create(db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id)
@@ -81,7 +81,7 @@ async def read_file_content(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         file_info = await file_service.read_file_content(db=db, workspace_id=workspace_id, file_path=file_path, user_id=current_user["user"].id)
@@ -106,7 +106,7 @@ async def store_file_content(
     db: Session = Depends(get_db),
     content: UploadFile = File(...),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         return await file_service.store_file_content(
@@ -134,7 +134,7 @@ async def delete(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         return await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
@@ -158,7 +158,7 @@ async def patch_file(
     operation_request: FilePatchRequest,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         return await file_service.update_file(
@@ -187,7 +187,7 @@ async def search_files(
     search_query: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=search_query, user_id=current_user["user"].id)
@@ -209,7 +209,7 @@ async def get_changed_files(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         return await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
@@ -230,7 +230,7 @@ async def get_file_diff(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         file_diff = await file_service.get_file_diff(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)

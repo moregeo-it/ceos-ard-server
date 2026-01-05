@@ -17,7 +17,7 @@ from app.schemas.workspace import (
     WorkspaceStatusResponse,
     WorkspaceUpdate,
 )
-from app.services.auth_service import get_current_user
+from app.services.auth_service import require_github_user
 from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 async def create_workspace(
     workspace_data: WorkspaceCreate,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     user_id = current_user["user"].id
@@ -56,7 +56,7 @@ async def create_workspace(
 )
 async def get_user_workspaces(
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
@@ -77,7 +77,7 @@ async def get_user_workspaces(
 async def get_user_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
@@ -96,7 +96,7 @@ async def update_workspace(
     workspace_id: str,
     update_data: WorkspaceUpdate,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
@@ -118,7 +118,7 @@ async def update_workspace(
 async def delete_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
@@ -139,7 +139,7 @@ async def delete_workspace(
 async def get_workspace_status(
     workspace_id: str,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
@@ -161,7 +161,7 @@ async def propose_changes(
     workspace_id: str,
     propose_data: ProposeChangesRequest,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
@@ -188,7 +188,7 @@ async def propose_changes(
 async def list_workspace_pfs_types(
     workspace_id: str,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> list[PFSResponse]:
     try:
@@ -205,7 +205,7 @@ async def create_workspace_pfs(
     workspace_id: str,
     create_pfs_request: CreatePFSRequest,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> PFSResponse:
     try:

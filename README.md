@@ -9,13 +9,16 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 - **OAuth Integration**: Support for GitHub and Google OAuth providers
 - **JWT Token Management**: Secure token-based authentication
 - **User Management**: Automatic user creation and profile management
+- **GitHub-Only Workspaces**: All workspace features exclusively available to GitHub users
 
-### Workspace Management
+### Workspace Management (GitHub Users Only)
 
 - **Git-based Workspaces**: Create isolated workspaces with repository forking
-- **CRUD Operations**: Full workspace lifecycle management
+- **CRUD Operations**: Full workspace lifecycle management (create, read, update, delete)
+- **Workspace Archival**: Archive workspaces with automatic cleanup after 1 month
 - **Status Tracking**: Monitor workspace and Pull Request status
 - **Multi-user Support**: User-specific workspace isolation
+- **GitHub Authentication Required**: All workspace endpoints require GitHub OAuth
 
 ### File Operations
 
@@ -84,16 +87,24 @@ pixi install
 
 ### 3. Environment Configuration
 
+Create an `.env` file based on the [.env.example](./.env.example) file, e.g.
+by copying it:
+
 ```bash
-# Copy the example environment file
 cp .env.example .env
 ```
 
-Update the `.env` file accordingly.
+Update the `.env` file according to your needs.
+The following properties should be changed at least:
 
-### 4. OAuth Setup
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `SECRET_KEY`
+- `ENVIRONMENT`
 
-#### GitHub OAuth App
+### 5. OAuth Setup
+
+#### GitHub OAuth App (Required)
 
 1. Go to GitHub Settings → Developer settings → OAuth Apps
 2. Create a new OAuth App with:
@@ -102,13 +113,17 @@ Update the `.env` file accordingly.
    - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
 3. Copy the Client ID and Client Secret to your `.env` file
 
-#### Google OAuth App (Optional)
+**Note**: GitHub authentication is mandatory for workspace features. All workspace operations require GitHub OAuth.
+
+#### Google OAuth App (Optional - Future Use)
 
 1. Go to Google Cloud Console → APIs & Services → Credentials
 2. Create OAuth 2.0 Client ID with:
    - **Application type**: Web application
    - **Authorized redirect URIs**: `http://localhost:8000/auth/callback/google`
 3. Copy the Client ID and Client Secret to your `.env` file
+
+**Note**: Google authentication is currently not used for workspace features. Reserved for potential future functionality.
 
 ## 🚀 Running the Application
 
@@ -147,13 +162,13 @@ The API will be available at:
 
 ### Workspace Endpoints
 
-- `POST /workspaces` - Create a new workspace
+- `POST /workspaces` - Create a new workspace _(requires GitHub auth)_
 - `GET /workspaces` - List user workspaces
 - `GET /workspaces/{workspace_id}` - Get workspace details
-- `PATCH /workspaces/{workspace_id}` - Update workspace
-- `DELETE /workspaces/{workspace_id}` - Delete workspace
+- `PATCH /workspaces/{workspace_id}` - Update workspace (archive/reactivate) _(requires GitHub auth)_
+- `DELETE /workspaces/{workspace_id}` - Delete workspace permanently _(requires GitHub auth)_
 - `GET /workspaces/{workspace_id}/status` - Get workspace status
-- `POST /workspaces/{workspace_id}/propose` - Propose changes (create PR)
+- `POST /workspaces/{workspace_id}/propose` - Propose changes (create PR) _(requires GitHub auth)_
 
 ### File Management Endpoints
 
@@ -257,10 +272,31 @@ pixi run pre-commit-install
 
 The application uses SQLite as the database backend:
 
-- **File Location**: `./ceos_ard.db` (in project root)
+- **File Location**: `./ceos_ard_server.db` (in project root)
 - **Automatic Creation**: Database and tables are created automatically on first run
 - **No Installation Required**: SQLite is built into Python
 - **Git Ignored**: Database files are automatically ignored by git
+
+### Maintenance Tasks
+
+#### Cleanup Archived Workspaces
+
+Archived workspaces are automatically cleaned up after the retention period (default: 30 days).
+
+```bash
+# Dry-run to see what would be deleted
+pixi run python scripts/cleanup_archived_workspaces.py --dry-run
+
+# Actually delete expired archived workspaces
+pixi run python scripts/cleanup_archived_workspaces.py
+```
+
+**Recommended**: Set up a cron job or scheduled task to run cleanup daily:
+
+```bash
+# Add to crontab (run daily at 2 AM)
+0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py
+```
 
 ### Database Models
 
@@ -276,6 +312,8 @@ The application uses SQLite as the database backend:
 - Links to forked repositories and branches
 - Tracks Pull Request status and metadata
 - Stores PFS associations (JSON format)
+- Supports archival with automatic deletion after 1 month
+- Computes deletion date dynamically from archived_at timestamp
 
 ## 🔐 Security Features
 
@@ -285,6 +323,39 @@ The application uses SQLite as the database backend:
 - **CORS Protection**: Configurable cross-origin resource sharing
 - **Input Sanitization**: Protection against malicious input
 - **User Isolation**: Workspaces are isolated per user
+- **Provider-based Authorization**: Workspace access restricted to GitHub users only
+- **Token Refresh**: Automatic token refresh for Google; re-authentication required for expired GitHub tokens
+
+## 🔑 Authorization Model
+
+### GitHub Users (Workspace Access)
+
+Users authenticated with GitHub have full workspace access:
+
+- ✅ Create workspaces (fork repositories)
+- ✅ Delete workspaces
+- ✅ Archive/reactivate workspaces
+- ✅ Propose changes (create pull requests)
+- ✅ View and manage files
+- ✅ Generate previews
+- ✅ Access all workspace-related endpoints
+
+### Google Users (No Workspace Access)
+
+Users authenticated with Google **cannot access workspace features**:
+
+- ❌ No access to any workspace endpoints
+- ❌ Cannot view, create, delete, or manage workspaces
+- ❌ Cannot access workspace files or content
+- ❌ Cannot generate previews
+- ❌ Cannot propose changes
+
+**Why this restriction?**
+
+- Workspaces are git repositories that require GitHub API integration
+- All workspace operations (fork, clone, PR creation) require GitHub credentials
+- Google OAuth provides no GitHub repository access
+- To use workspace features, users must authenticate with GitHub
 
 ## 🚧 Deployment
 
@@ -304,7 +375,7 @@ CORS_ORIGIN_CLIENT=https://yourdomain.com
 ENVIRONMENT=production
 
 # Use absolute path for database in production
-DATABASE_URL=sqlite:////app/data/ceos_ard.db
+DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
 ```
 
 ### Docker Deployment (Example)

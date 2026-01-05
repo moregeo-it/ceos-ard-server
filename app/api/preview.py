@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.dependencies import get_preview_service
 from app.schemas.error import create_error_detail
-from app.services.auth_service import get_current_user
+from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ async def generate_preview(
     workspace_id: str,
     db: Session = Depends(get_db),
     pfs: list[str] | None = Query(default=None, min_items=1, max_items=50),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
 ):
     try:
