@@ -12,6 +12,7 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 - **GitHub-Only Workspaces**: All workspace features exclusively available to GitHub users
 
 ### Workspace Management (GitHub Users Only)
+
 - **Git-based Workspaces**: Create isolated workspaces with repository forking
 - **CRUD Operations**: Full workspace lifecycle management (create, read, update, delete)
 - **Workspace Archival**: Archive workspaces with automatic cleanup after 1 month
@@ -86,68 +87,40 @@ pixi install
 
 ### 3. Environment Configuration
 
+Create an `.env` file based on the [.env.example](./.env.example) file, e.g.
+by copying it:
+
 ```bash
-# Copy the example environment file
 cp .env.example .env
 ```
 
-Update the `.env` file accordingly.
+Update the `.env` file according to your needs.
+The following properties should be changed at least:
 
-Create a `.env` file with the following variables:
-
-```bash
-# GitHub OAuth (Required)
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-
-# GitHub OAuth URLs (default values, change only for GitHub Enterprise)
-GITHUB_API_BASE_URL=https://api.github.com
-GITHUB_TOKEN_URL=https://github.com/login/oauth/access_token
-GITHUB_AUTHORIZE_URL=https://github.com/login/oauth/authorize
-
-# Google OAuth (Optional)
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_DISCOVERY_URL=https://accounts.google.com/.well-known/openid-configuration
-
-# Application URLs
-CALLBACK_BASE_URI=http://localhost:8000/auth/callback
-CORS_ORIGIN_CLIENT=http://localhost:5173
-LOGOUT_REDIRECT=http://localhost:5173
-AUTH_SUCCESS_CLIENT_REDIRECT=http://localhost:5173/auth/callback
-
-# Security
-SECRET_KEY=your-super-secure-secret-key-here
-ALGORITHM=HS256
-
-# Environment
-ENVIRONMENT=development
-
-# Database
-DATABASE_URL=sqlite:///./ceos_ard_server.db
-
-# PFS Configuration
-PFS_DEFAULT_VERSION=1.0-draft
-PFS_DEFAULT_INTRODUCTION=what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal
-```
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `SECRET_KEY`
+- `ENVIRONMENT`
 
 ### 5. OAuth Setup
 
 #### GitHub OAuth App (Required)
+
 1. Go to GitHub Settings → Developer settings → OAuth Apps
 2. Create a new OAuth App with:
-  - **Application name**: CEOS-ARD
-  - **Homepage URL**: `http://localhost:8000`
-  - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
+   - **Application name**: CEOS-ARD
+   - **Homepage URL**: `http://localhost:8000`
+   - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
 3. Copy the Client ID and Client Secret to your `.env` file
 
 **Note**: GitHub authentication is mandatory for workspace features. All workspace operations require GitHub OAuth.
 
 #### Google OAuth App (Optional - Future Use)
+
 1. Go to Google Cloud Console → APIs & Services → Credentials
 2. Create OAuth 2.0 Client ID with:
-  - **Application type**: Web application
-  - **Authorized redirect URIs**: `http://localhost:8000/auth/callback/google`
+   - **Application type**: Web application
+   - **Authorized redirect URIs**: `http://localhost:8000/auth/callback/google`
 3. Copy the Client ID and Client Secret to your `.env` file
 
 **Note**: Google authentication is currently not used for workspace features. Reserved for potential future functionality.
@@ -188,13 +161,14 @@ The API will be available at:
 - `GET /auth/validate` - Validate authentication
 
 ### Workspace Endpoints
-- `POST /workspaces` - Create a new workspace *(requires GitHub auth)*
+
+- `POST /workspaces` - Create a new workspace _(requires GitHub auth)_
 - `GET /workspaces` - List user workspaces
 - `GET /workspaces/{workspace_id}` - Get workspace details
-- `PATCH /workspaces/{workspace_id}` - Update workspace (archive/reactivate) *(requires GitHub auth)*
-- `DELETE /workspaces/{workspace_id}` - Delete workspace permanently *(requires GitHub auth)*
+- `PATCH /workspaces/{workspace_id}` - Update workspace (archive/reactivate) _(requires GitHub auth)_
+- `DELETE /workspaces/{workspace_id}` - Delete workspace permanently _(requires GitHub auth)_
 - `GET /workspaces/{workspace_id}/status` - Get workspace status
-- `POST /workspaces/{workspace_id}/propose` - Propose changes (create PR) *(requires GitHub auth)*
+- `POST /workspaces/{workspace_id}/propose` - Propose changes (create PR) _(requires GitHub auth)_
 
 ### File Management Endpoints
 
@@ -306,6 +280,7 @@ The application uses SQLite as the database backend:
 ### Maintenance Tasks
 
 #### Cleanup Archived Workspaces
+
 Archived workspaces are automatically cleaned up after the retention period (default: 30 days).
 
 ```bash
@@ -317,6 +292,7 @@ pixi run python scripts/cleanup_archived_workspaces.py
 ```
 
 **Recommended**: Set up a cron job or scheduled task to run cleanup daily:
+
 ```bash
 # Add to crontab (run daily at 2 AM)
 0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py
@@ -353,7 +329,9 @@ pixi run python scripts/cleanup_archived_workspaces.py
 ## 🔑 Authorization Model
 
 ### GitHub Users (Workspace Access)
+
 Users authenticated with GitHub have full workspace access:
+
 - ✅ Create workspaces (fork repositories)
 - ✅ Delete workspaces
 - ✅ Archive/reactivate workspaces
@@ -363,7 +341,9 @@ Users authenticated with GitHub have full workspace access:
 - ✅ Access all workspace-related endpoints
 
 ### Google Users (No Workspace Access)
+
 Users authenticated with Google **cannot access workspace features**:
+
 - ❌ No access to any workspace endpoints
 - ❌ Cannot view, create, delete, or manage workspaces
 - ❌ Cannot access workspace files or content
@@ -371,6 +351,7 @@ Users authenticated with Google **cannot access workspace features**:
 - ❌ Cannot propose changes
 
 **Why this restriction?**
+
 - Workspaces are git repositories that require GitHub API integration
 - All workspace operations (fork, clone, PR creation) require GitHub credentials
 - Google OAuth provides no GitHub repository access
