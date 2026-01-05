@@ -101,3 +101,29 @@ async def get_current_user(authorization: str = Depends(HTTPBearer()), db: Sessi
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
         ) from e
+
+
+async def require_github_user(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Require user to be authenticated via GitHub.
+
+    This dependency wraps get_current_user and adds GitHub provider validation.
+    Use this for workspace-related endpoints that require GitHub integration.
+
+    Args:
+        current_user: User dict from get_current_user dependency
+
+    Returns:
+        User dict if authenticated with GitHub
+
+    Raises:
+        HTTPException: 403 if user authenticated with non-GitHub provider
+    """
+    user = current_user["user"]
+    if user.identity_provider != IdentityProvider.github:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires GitHub authentication. Please log in with your GitHub account.",
+        )
+    return current_user
