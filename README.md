@@ -108,9 +108,9 @@ The following properties should be changed at least:
 
 1. Go to GitHub Settings → Developer settings → OAuth Apps
 2. Create a new OAuth App with:
-   - **Application name**: CEOS-ARD
-   - **Homepage URL**: `http://localhost:8000`
-   - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
+  - **Application name**: CEOS-ARD
+  - **Homepage URL**: `http://localhost:8000`
+  - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
 3. Copy the Client ID and Client Secret to your `.env` file
 
 **Note**: GitHub authentication is mandatory for workspace features. All workspace operations require GitHub OAuth.
@@ -119,8 +119,8 @@ The following properties should be changed at least:
 
 1. Go to Google Cloud Console → APIs & Services → Credentials
 2. Create OAuth 2.0 Client ID with:
-   - **Application type**: Web application
-   - **Authorized redirect URIs**: `http://localhost:8000/auth/callback/google`
+  - **Application type**: Web application
+  - **Authorized redirect URIs**: `http://localhost:8000/auth/callback/google`
 3. Copy the Client ID and Client Secret to your `.env` file
 
 **Note**: Google authentication is currently not used for workspace features. Reserved for potential future functionality.
