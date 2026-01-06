@@ -33,7 +33,7 @@ class GitStatus(BaseModel):
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
     pfs: list[str] | None = Field(None, min_length=1, max_length=10, description="PFS to preview")
-    description: str | None = Field(..., min_length=1, max_length=1000, description="Workspace description")
+    description: str | None = Field(None, min_length=1, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
