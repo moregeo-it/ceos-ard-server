@@ -86,19 +86,24 @@ pixi install
 
 ### 3. Environment Configuration
 
+Create an `.env` file based on the [.env.example](./.env.example) file, e.g.
+by copying it:
+
 ```bash
-# Copy the example environment file
 cp .env.example .env
 ```
 
-Update the `.env` file accordingly.
+Update the `.env` file according to your needs.
+The following properties should be changed at least:
 
-Create a `.env` file with the following variables:
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `SECRET_KEY`
+- `ENVIRONMENT`
 
-```bash
-# GitHub OAuth (Required)
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
+### 5. OAuth Setup
+
+#### GitHub OAuth App (Required)
 
 # GitHub OAuth URLs (default values, change only for GitHub Enterprise)
 GITHUB_API_BASE_URL=https://api.github.com
@@ -142,6 +147,8 @@ PFS_DEFAULT_INTRODUCTION=what-are-ceos-ard-products,when-is-a-product-ceos-ard,d
 3. Copy the Client ID and Client Secret to your `.env` file
 
 **Note**: GitHub authentication is mandatory for workspace features. All workspace operations require GitHub OAuth.
+
+#### Google OAuth App (Optional - Future Use)
 
 #### Google OAuth App (Optional - Future Use)
 1. Go to Google Cloud Console → APIs & Services → Credentials
@@ -188,13 +195,14 @@ The API will be available at:
 - `GET /auth/validate` - Validate authentication
 
 ### Workspace Endpoints
-- `POST /workspaces` - Create a new workspace *(requires GitHub auth)*
+
+- `POST /workspaces` - Create a new workspace _(requires GitHub auth)_
 - `GET /workspaces` - List user workspaces
 - `GET /workspaces/{workspace_id}` - Get workspace details
-- `PATCH /workspaces/{workspace_id}` - Update workspace (archive/reactivate) *(requires GitHub auth)*
-- `DELETE /workspaces/{workspace_id}` - Delete workspace permanently *(requires GitHub auth)*
+- `PATCH /workspaces/{workspace_id}` - Update workspace (archive/reactivate) _(requires GitHub auth)_
+- `DELETE /workspaces/{workspace_id}` - Delete workspace permanently _(requires GitHub auth)_
 - `GET /workspaces/{workspace_id}/status` - Get workspace status
-- `POST /workspaces/{workspace_id}/propose` - Propose changes (create PR) *(requires GitHub auth)*
+- `POST /workspaces/{workspace_id}/propose` - Propose changes (create PR) _(requires GitHub auth)_
 
 ### File Management Endpoints
 
@@ -353,7 +361,9 @@ pixi run python scripts/cleanup_archived_workspaces.py
 ## 🔑 Authorization Model
 
 ### GitHub Users (Workspace Access)
+
 Users authenticated with GitHub have full workspace access:
+
 - ✅ Create workspaces (fork repositories)
 - ✅ Delete workspaces
 - ✅ Archive/reactivate workspaces
@@ -363,7 +373,9 @@ Users authenticated with GitHub have full workspace access:
 - ✅ Access all workspace-related endpoints
 
 ### Google Users (No Workspace Access)
+
 Users authenticated with Google **cannot access workspace features**:
+
 - ❌ No access to any workspace endpoints
 - ❌ Cannot view, create, delete, or manage workspaces
 - ❌ Cannot access workspace files or content
