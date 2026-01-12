@@ -21,6 +21,23 @@ class FileService:
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
 
+    def get_file_status(self, repo: git.Repo, path: Path):
+        try:
+            git_status = repo.git.status(path, porcelain=True)
+            if "A" in git_status:
+                dir_status = "added"
+            elif "M" in git_status:
+                dir_status = "modified"
+            elif "R" in git_status:
+                dir_status = "renamed"
+            else:
+                dir_status = None
+        except git.exc.GitCommandError:
+            dir_status = "deleted"
+
+        return dir_status
+
+
     async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str, recurse: bool = False):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
@@ -48,7 +65,8 @@ class FileService:
                     continue
 
                 # Calculate relative path for root-level exclusions
-                relative_root = root_path.relative_to(workspace_path.resolve())
+                resolved_workspace_path = workspace_path.resolve()
+                relative_root = root_path.relative_to(resolved_workspace_path)
                 root_parts = relative_root.parts if relative_root != Path(".") else ()
 
                 # Skip root-level build, templates directories (LICENSE is a file, not directory)
@@ -65,21 +83,8 @@ class FileService:
                         continue
 
                     full_dir_path = root_path / dir_path
-                    relative_dir_path = full_dir_path.relative_to(workspace_path.resolve())
-
-                    try:
-                        git_status = repo.git.status(full_dir_path, porcelain=True)
-                        if "A" in git_status:
-                            dir_status = "added"
-                        elif "M" in git_status:
-                            dir_status = "modified"
-                        elif "R" in git_status:
-                            dir_status = "renamed"
-                        else:
-                            dir_status = None
-                    except git.exc.GitCommandError:
-                        dir_status = "deleted"
-
+                    relative_dir_path = full_dir_path.relative_to(resolved_workspace_path)
+                    dir_status = self.get_file_status(repo, full_dir_path)
                     file_and_folder.append(
                         {
                             "status": dir_status,
@@ -100,21 +105,8 @@ class FileService:
                         continue
 
                     full_file_path = root_path / file_path
-                    relative_file_path = full_file_path.relative_to(workspace_path.resolve())
-
-                    try:
-                        git_status = repo.git.status(full_file_path, porcelain=True)
-                        if "A" in git_status:
-                            file_status = "added"
-                        elif "M" in git_status:
-                            file_status = "modified"
-                        elif "R" in git_status:
-                            file_status = "renamed"
-                        else:
-                            file_status = None
-                    except git.exc.GitCommandError:
-                        file_status = "deleted"
-
+                    relative_file_path = full_file_path.relative_to(resolved_workspace_path)
+                    file_status = self.get_file_status(repo, full_file_path)
                     file_and_folder.append(
                         {
                             "status": file_status,
@@ -123,6 +115,7 @@ class FileService:
                             "path": str(relative_file_path),
                         }
                     )
+
             return file_and_folder
         except HTTPException:
             raise
