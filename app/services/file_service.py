@@ -21,7 +21,7 @@ class FileService:
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
 
-    async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str):
+    async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str, recurse: bool = False):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -52,7 +52,7 @@ class FileService:
                 root_parts = relative_root.parts if relative_root != Path(".") else ()
 
                 # Skip root-level build, templates directories (LICENSE is a file, not directory)
-                if len(root_parts) >= 1 and root_parts[0] in ["build", "templates"]:
+                if len(root_parts) >= 1 and (not recurse or root_parts[0] in ["build", "templates"]):
                     dirs[:] = []  # Don't traverse subdirectories
                     continue
 
