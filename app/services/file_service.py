@@ -11,7 +11,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_file_media_type
-from app.utils.sanitization import sanitize_filename, sanitize_path
+from app.utils.sanitization import sanitize_filename, sanitize_path, fix_path
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class FileService:
                             "status": dir_status,
                             "name": dir_path,
                             "is_directory": True,
-                            "path": str(relative_dir_path),
+                            "path": fix_path(relative_dir_path),
                         }
                     )
 
@@ -112,7 +112,7 @@ class FileService:
                             "status": file_status,
                             "name": file_path,
                             "is_directory": False,
-                            "path": str(relative_file_path),
+                            "path": fix_path(relative_file_path),
                         }
                     )
 
@@ -203,7 +203,8 @@ class FileService:
 
         target_path.mkdir(parents=True, exist_ok=True)
 
-        return {"name": sanitized_name, "path": str(target_path.relative_to(workspace_path.resolve())), "directory": True}
+        rel_path = target_path.relative_to(workspace_path.resolve())
+        return {"name": sanitized_name, "path": fix_path(rel_path), "directory": True}
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not workspace_id:
@@ -368,7 +369,8 @@ class FileService:
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
 
-        return {"name": new_name, "path": str(new_file_path.relative_to(workspace_path.resolve())), "directory": False}
+        rel_path = new_file_path.relative_to(workspace_path.resolve())
+        return {"name": new_name, "path": fix_path(rel_path), "directory": False}
 
     async def _revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
@@ -418,9 +420,10 @@ class FileService:
                     if ignored_extensions.search(file_name):
                         continue
 
+                    rel_path = file_path.relative_to(workspace_path)
                     # Check if search query matches filename
                     if search_query in file_name:
-                        search_results.append({"name": file_name, "type": "filename", "path": str(file_path.relative_to(workspace_path))})
+                        search_results.append({"name": file_name, "type": "filename", "path": fix_path(rel_path)})
                         continue
 
                     # Search within file content
@@ -434,7 +437,7 @@ class FileService:
                                         {
                                             "name": file_name,
                                             "type": "content",
-                                            "path": str(file_path.relative_to(workspace_path)),
+                                            "path": fix_path(rel_path),
                                             "line": i + 1,
                                             "column": column + 1,
                                             "excerpt": line.strip(),
@@ -467,10 +470,10 @@ class FileService:
             changed_files = []
 
             for file in git_status["modified_files"]:
-                changed_files.append({"path": file.path, "status": file.status})
+                changed_files.append({"path": fix_path(file.path), "status": file.status})
 
             for file in git_status["untracked_files"]:
-                changed_files.append({"path": file, "status": "untracked"})
+                changed_files.append({"path": fix_path(file), "status": "untracked"})
 
             return changed_files
         except Exception as e:
@@ -498,7 +501,7 @@ class FileService:
             repo = git.Repo(workspace_path)
 
             relative_file_path = target_path.relative_to(workspace_path.resolve())
-            relative_file_str = str(relative_file_path).replace("\\", "/")  # Ensure forward slashes for git
+            relative_file_str = fix_path(relative_file_path)
 
             # Check if file is tracked by Git
             is_tracked = False

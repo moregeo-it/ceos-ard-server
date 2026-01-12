@@ -137,3 +137,6 @@ def sanitize_path(path: str, workspace_path: Path) -> Path:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Path is outside the workspace directory",
         ) from e
+
+def fix_path(filepath: str | Path) -> str:
+    return str(filepath).replace("\\", "/")
