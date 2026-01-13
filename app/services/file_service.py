@@ -20,6 +20,7 @@ class FileService:
     def __init__(self):
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
+        self.ignored_root_paths = {"build", "templates", ".git", "LICENSE"}
 
     def get_file_status(self, repo: git.Repo, path: Path):
         try:
@@ -47,80 +48,45 @@ class FileService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = Path(workspace.workspace_path)
+            workspace_path = Path(workspace.workspace_path).resolve()
 
             target_path = sanitize_path(path, workspace_path)
 
             if not target_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target path not found")
 
-            file_and_folder = []
-
             repo = git.Repo(workspace.workspace_path, search_parent_directories=True)
 
-            # Walk through the directory tree
-            for root_path, dirs, files in target_path.walk():
-                # Skip .git directories completely
-                if ".git" in root_path.parts:
-                    continue
-
-                # Calculate relative path for root-level exclusions
-                resolved_workspace_path = workspace_path.resolve()
-                relative_root = root_path.relative_to(resolved_workspace_path)
-                root_parts = relative_root.parts if relative_root != Path(".") else ()
-
-                # Skip root-level build, templates directories (LICENSE is a file, not directory)
-                if len(root_parts) >= 1 and (not recurse or root_parts[0] in ["build", "templates"]):
-                    dirs[:] = []  # Don't traverse subdirectories
-                    continue
-
-                # Prune directories we don't want to traverse
-                dirs[:] = [d for d in dirs if not d.startswith(".") and not (len(root_parts) == 0 and d in ["build", "templates"])]
-
-                # Process directories in current level
-                for dir_path in dirs:
-                    if dir_path.startswith("."):
-                        continue
-
-                    full_dir_path = root_path / dir_path
-                    relative_dir_path = full_dir_path.relative_to(resolved_workspace_path)
-                    dir_status = self.get_file_status(repo, full_dir_path)
-                    file_and_folder.append(
-                        {
-                            "status": dir_status,
-                            "name": dir_path,
-                            "is_directory": True,
-                            "path": fix_path(relative_dir_path),
-                        }
-                    )
-
-                # Process files in current level
-                for file_path in files:
-                    # Skip dotfiles and PDFs
-                    if file_path.startswith(".") or file_path.endswith(".pdf"):
-                        continue
-
-                    # Skip root-level LICENSE file
-                    if len(root_parts) == 0 and file_path == "LICENSE":
-                        continue
-
-                    full_file_path = root_path / file_path
-                    relative_file_path = full_file_path.relative_to(resolved_workspace_path)
-                    file_status = self.get_file_status(repo, full_file_path)
-                    file_and_folder.append(
-                        {
-                            "status": file_status,
-                            "name": file_path,
-                            "is_directory": False,
-                            "path": fix_path(relative_file_path),
-                        }
-                    )
-
-            return file_and_folder
+            return self.walk_files(target_path, workspace_path, repo, recurse)
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
+
+    def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool):
+        all_files = []
+        relative_path = str(target_path.relative_to(workspace_path))
+        for file in target_path.iterdir():
+            if relative_path == "." and file.name in self.ignored_root_paths:
+                continue
+            if file.name.startswith(".") or file.name.endswith(".pdf"):
+                continue
+
+            status = self.get_file_status(repo, file)
+            all_files.append({
+                "status": status,
+                "name": file.name,
+                "is_directory": file.is_dir(),
+                "path": fix_path(file.relative_to(workspace_path)),
+            })
+
+            if file.is_dir() and recurse:
+                all_files.extend(self.walk_files(file, workspace_path, repo, recurse))
+
+            # sort directories first, then files, both alphabetically
+            all_files.sort(key=lambda x: (x["is_directory"] == False, x["name"].lower()))
+
+        return all_files
 
     async def create(self, db: Session, workspace_id: str, request_data: dict, user_id: str):
         if not workspace_id:
