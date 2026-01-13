@@ -139,4 +139,7 @@ def sanitize_path(path: str, workspace_path: Path) -> Path:
         ) from e
 
 def fix_path(filepath: str | Path) -> str:
-    return str(filepath).replace("\\", "/")
+    filepath = str(filepath).replace("\\", "/")
+    if not filepath.startswith("/"):
+        filepath = "/" + filepath
+    return filepath
