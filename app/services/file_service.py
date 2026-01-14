@@ -22,37 +22,112 @@ class FileService:
         self.workspace_service = WorkspaceService()
         self.ignored_root_paths = {"build", "templates", ".git", "LICENSE"}
 
-    def get_file_status(self, repo: git.Repo, file_path: Path):
-        if file_path.is_dir():
-            return None
+    @staticmethod
+    def _is_direct_child(file_path: str, relative_target: str) -> bool:
+        """Check if file_path is a direct child of target directory."""
+        if relative_target == ".":
+            return "/" not in file_path
+        try:
+            rel = Path(file_path).relative_to(relative_target)
+            return "/" not in str(rel)
+        except ValueError:
+            return False
+
+    def _get_all_file_statuses(self, repo: git.Repo, target_path: Path, workspace_path: Path):
+        """Get all file statuses using GitPython API."""
+        status_map = {}
+
+        relative_target = str(target_path.relative_to(workspace_path))
 
         try:
-            git_status = repo.git.status(file_path, porcelain=True).strip()
+            path_filter = relative_target if relative_target != "." else None
 
-            if not git_status:
-                return None
+            # Process untracked files (added)
+            for file_path in repo.untracked_files:
+                if path_filter and not file_path.startswith(path_filter):
+                    continue
+                if not self._is_direct_child(file_path, relative_target):
+                    continue
+                filename = Path(file_path).name
+                status_map[filename] = "added"
 
-            status_code = git_status[:2] if len(git_status) >= 2 else ""
+            # Process unstaged changes (working tree vs index)
+            for diff in repo.index.diff(None, paths=path_filter):
+                if not self._is_direct_child(diff.a_path or diff.b_path, relative_target):
+                    continue
 
-            # Check index status (first character)
-            if status_code[0] == "A":
-                return "added"
-            elif status_code[0] == "M":
-                return "modified"
-            elif status_code[0] == "D":
-                return "deleted"
-            elif status_code[0] == "R":
-                return "renamed"
+                filename = Path(diff.b_path or diff.a_path).name
 
-            # Check working tree status (second character)
-            if status_code[1] == "M":
-                return "modified"
-            elif status_code[1] == "D":
-                return "deleted"
+                if diff.deleted_file:
+                    status_map[filename] = "deleted"
+                elif diff.renamed:
+                    status_map[filename] = "renamed"
+                else:
+                    status_map[filename] = "modified"
 
-            return None
-        except git.exc.GitCommandError:
-            return None
+            # Process staged changes (index vs HEAD)
+            for diff in repo.head.commit.diff(None, paths=path_filter):
+                if not self._is_direct_child(diff.a_path or diff.b_path, relative_target):
+                    continue
+
+                filename = Path(diff.b_path or diff.a_path).name
+
+                # Skip if already marked (unstaged takes precedence for status display)
+                if filename in status_map:
+                    continue
+
+                if diff.new_file:
+                    status_map[filename] = "added"
+                elif diff.deleted_file:
+                    status_map[filename] = "deleted"
+                elif diff.renamed:
+                    status_map[filename] = "renamed"
+                else:
+                    status_map[filename] = "modified"
+
+        except Exception:
+            pass
+
+        return status_map
+
+    def _get_deleted_files(self, repo: git.Repo, target_path: Path, workspace_path: Path):
+        """Get list of deleted tracked files that no longer exist on disk."""
+        deleted_files = []
+        seen_paths = set()
+
+        relative_target = str(target_path.relative_to(workspace_path))
+
+        def process_diff(diff):
+            """Process a diff object and add to deleted_files if valid."""
+            if not diff.a_path or diff.a_path in seen_paths:
+                return
+
+            if not self._is_direct_child(diff.a_path, relative_target):
+                return
+
+            seen_paths.add(diff.a_path)
+            deleted_files.append({
+                "status": "deleted",
+                "name": Path(diff.a_path).name,
+                "is_directory": False,
+                "path": fix_path(diff.a_path),
+            })
+
+        try:
+            path_filter = relative_target if relative_target != "." else None
+
+            # Process unstaged and staged deletions
+            for diff in repo.index.diff(None, paths=path_filter):
+                if diff.deleted_file:
+                    process_diff(diff)
+
+            for diff in repo.head.commit.diff(None, paths=path_filter):
+                if diff.change_type == 'D' or diff.deleted_file:
+                    process_diff(diff)
+        except Exception:
+            pass
+
+        return deleted_files
 
     async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str, recurse: bool = False):
         if not workspace_id:
@@ -82,6 +157,10 @@ class FileService:
         all_files = []
         relative_path = str(target_path.relative_to(workspace_path))
 
+        # Get all file statuses in one git call
+        status_map = self._get_all_file_statuses(repo, target_path, workspace_path)
+
+        # Get deleted files separately
         deleted_files = self._get_deleted_files(repo, target_path, workspace_path)
 
         for file in target_path.iterdir():
@@ -90,7 +169,9 @@ class FileService:
             if file.name.startswith(".") or file.name.endswith(".pdf"):
                 continue
 
-            status = self.get_file_status(repo, file)
+            # Look up status from the map (no git call per file)
+            status = status_map.get(file.name, None) if not file.is_dir() else None
+
             all_files.append({
                 "status": status,
                 "name": file.name,
@@ -108,54 +189,6 @@ class FileService:
         all_files.sort(key=lambda x: (x["is_directory"] == False, x["name"].lower()))
 
         return all_files
-
-    def _get_deleted_files(self, repo: git.Repo, target_path: Path, workspace_path: Path):
-        """Get list of deleted tracked files in the target directory."""
-        deleted_files = []
-        seen_paths = set()
-
-        def is_direct_child(file_path: str, parent: str) -> bool:
-            """Check if file_path is a direct child of parent directory."""
-            if parent == ".":
-                return "/" not in file_path
-            try:
-                rel = Path(file_path).relative_to(parent)
-                return "/" not in str(rel)
-            except ValueError:
-                return False
-
-        def process_diff(diff):
-            """Process a diff object and add to deleted_files if valid."""
-            if not diff.a_path or diff.a_path in seen_paths:
-                return
-
-            if not is_direct_child(diff.a_path, relative_target):
-                return
-
-            seen_paths.add(diff.a_path)
-            deleted_files.append({
-                "status": "deleted",
-                "name": Path(diff.a_path).name,
-                "is_directory": False,
-                "path": fix_path(diff.a_path),
-            })
-
-        try:
-            relative_target = str(target_path.relative_to(workspace_path))
-            path_filter = relative_target if relative_target != "." else None
-
-            # Process unstaged and staged deletions
-            for diff in repo.index.diff(None, paths=path_filter):
-                if diff.deleted_file:
-                    process_diff(diff)
-
-            for diff in repo.head.commit.diff(None, paths=path_filter):
-                if diff.change_type == 'D' or diff.deleted_file:
-                    process_diff(diff)
-        except Exception:
-            pass
-
-        return deleted_files
 
     async def create(self, db: Session, workspace_id: str, request_data: dict, user_id: str):
         if not workspace_id:
