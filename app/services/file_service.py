@@ -316,13 +316,23 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             workspace_path = Path(workspace.workspace_path)
 
-            response = await self._delete(workspace_path, file_path)
+            if not file_path:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
-            if response["message"] == "File deleted successfully":
+            if not workspace_path:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is required")
+
+            target_path = sanitize_path(file_path, workspace_path)
+
+            response = await self._delete(target_path)
+
+            if response["message"] in ["File deleted successfully", "Folder deleted successfully"]:
                 # Add changes to the repository
                 try:
                     repo = git.Repo(workspace_path, search_parent_directories=True)
-                    repo.git.add(file_path)
+
+                    relative_path = target_path.relative_to(workspace_path.resolve())
+                    repo.git.add(str(relative_path))
                 except git.exc.GitCommandError as e:
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
 
@@ -331,15 +341,7 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file or folder: {str(e)}") from e
 
-    async def _delete(self, workspace_path: Path, file_path: str):
-        if not file_path:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
-
-        if not workspace_path:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is required")
-
-        target_path = sanitize_path(file_path, workspace_path)
-
+    async def _delete(self, target_path: Path):
         if not Path(target_path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
 
