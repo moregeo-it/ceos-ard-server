@@ -178,7 +178,7 @@ The API will be available at:
 - `PUT /workspaces/{workspace_id}/files/{file_path}` - Store file content
 - `DELETE /workspaces/{workspace_id}/files/{file_path}` - Delete file or folder
 - `PATCH /workspaces/{workspace_id}/files/{file_path}` - Update file metadata
-- `GET /workspaces/{workspace_id}/search?search_query={query}` - Search files
+- `GET /workspaces/{workspace_id}/search?query={query}` - Search files
 - `GET /workspaces/{workspace_id}/diffs` - Get changed files
 - `GET /workspaces/{workspace_id}/diffs/{file_path}` - Get file diff
 

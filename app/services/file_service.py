@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
-from app.utils.extraction import get_file_media_type
+from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.validation import normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,6 @@ class FileService:
                 continue
 
             filepath = str(file.resolve())
-            print(filepath)
             file_status = status.get(filepath, None)
             all_files.append(self.get_file_dict(file, workspace_path, status=file_status))
 
@@ -312,13 +311,13 @@ class FileService:
             elif not workspace.abs_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
 
-            files = await self.get_workspace_files("", db, workspace_id, user_id, recurse=True)
+            files = await self.get_workspace_files("/", db, workspace_id, user_id, recurse=True)
 
             search_results = []
             pattern = search_query.lower()
             # Traverse the directory tree
             for file in files:
-                filepath = workspace.abs_path / file["path"]
+                filepath = workspace.abs_path / file["path"].lstrip("/")
 
                 # Ignore directories
                 if file["is_directory"]:
@@ -332,25 +331,25 @@ class FileService:
 
                 # Check if search query matches filename
                 if pattern in filepath.name.lower():
-                    search_results.append({"name": file["name"], "type": "filename", "path": file["path"]})
+                    file["type"] = "filename"
+                    search_results.append(file)
                     continue
 
                 # Search within file content
                 try:
                     with filepath.open(encoding="utf-8", errors="ignore") as f:
                         for i, line in enumerate(f):
-                            index = line.lower().find(pattern)
-                            if index >= 0:
-                                search_results.append(
+                            start = line.lower().find(pattern)
+                            if start >= 0:
+                                file.update(
                                     {
-                                        "name": file["name"],
                                         "type": "content",
-                                        "path": file["path"],
                                         "line": i + 1,
-                                        "column": index + 1,
-                                        "excerpt": line.strip(),
+                                        "column": start + 1,
+                                        "excerpt": get_excerpt(line, pattern, start),
                                     }
                                 )
+                                search_results.append(file)
                                 break  # todo: shall we return all results from within a file?
                 except (UnicodeDecodeError, FileNotFoundError) as e:
                     logger.warning(f"Could not read file '{file['path']}': {str(e)}")

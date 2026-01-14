@@ -185,13 +185,13 @@ async def patch_file(
 )
 async def search_files(
     workspace_id: str,
-    search_query: str,
+    query: str = Query(description="Search terms to look for in files and folders"),
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=search_query, user_id=current_user["user"].id)
+        return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=query, user_id=current_user["user"].id)
     except HTTPException:
         raise
     except Exception as e:
