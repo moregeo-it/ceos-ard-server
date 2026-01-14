@@ -26,12 +26,11 @@ class PreviewService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             build_info = await self.build_service.start_build(
-                workspace_path=str(workspace.workspace_path), workspace_id=workspace_id, pfs=pfs or workspace.pfs
+                workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs
             )
 
             if build_info.get("status") == "success":
-                workspace_path = Path(workspace.workspace_path)
-                return await self._get_preview_files(workspace_path, pfs=pfs or workspace.pfs)
+                return await self._get_preview_files(workspace.abs_path, pfs=pfs or workspace.pfs)
 
             else:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")

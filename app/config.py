@@ -1,6 +1,7 @@
 import os
 
 from dotenv import load_dotenv
+from pathlib import Path
 
 load_dotenv()
 
@@ -36,7 +37,7 @@ class Settings:
     LOGOUT_REDIRECT: str = os.getenv("LOGOUT_REDIRECT")
     AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT")
 
-    WORKSPACES_ROOT: str = os.getenv("WORKSPACES_ROOT", "workspaces")
+    WORKSPACES_ROOT: Path = Path(os.getenv("WORKSPACES_ROOT", "workspaces")).resolve()
 
     # PFS Default Configuration
     PFS_DEFAULT_VERSION: str = os.getenv("PFS_DEFAULT_VERSION", "1.0-draft")

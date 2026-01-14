@@ -3,35 +3,25 @@ import shutil
 from pathlib import Path
 
 import git
+import os
 from fastapi import HTTPException, status
 
 from app.config import settings
 from app.schemas.workspace import GitStatusFile
-from app.utils.sanitization import sanitize_path
+from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
 
 class GitService:
     def __init__(self):
-        self.workspaces_root = Path(settings.WORKSPACES_ROOT)
-        self._ensure_workspaces_directory()
-
-    def _ensure_workspaces_directory(self):
+        self.workspaces_root = settings.WORKSPACES_ROOT
         self.workspaces_root.mkdir(parents=True, exist_ok=True)
 
-    def generate_workspace_path(self, workspace_id: str) -> str:
-        return str(self.workspaces_root / workspace_id)
-
-    def generate_branch_name(self, workspace_id: str) -> str:
-        return f"workspace/{workspace_id}"
-
     async def clone_repository(
-        self, clone_url: str, workspace_path: str, branch_name: str, upstream_owner: str, upstream_repo: str, upstream_branch: str = "main"
+        self, clone_url: str, workspace_path: Path, branch_name: str, upstream_owner: str, upstream_repo: str, upstream_branch: str = "main"
     ) -> bool:
         try:
-            workspace_path = Path(workspace_path).resolve()
-
             if workspace_path.exists():
                 shutil.rmtree(workspace_path)
 
@@ -71,6 +61,11 @@ class GitService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {e}") from e
 
     async def get_git_status(self, workspace_path: Path) -> dict[str, list[GitStatusFile]]:
+        if not workspace_path.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+        elif not workspace_path.is_dir():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path is not a directory")
+
         try:
             repo = git.Repo(workspace_path)
 
@@ -169,13 +164,10 @@ class GitService:
 
     async def revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
-            target_file_path = sanitize_path(file_path, workspace_path)
+            target_file_path = validate_workspace_path(file_path, workspace_path)
+            relative_file_str = normalize_workspace_path(target_file_path, workspace_path, absolute=False)
 
             repo = git.Repo(workspace_path)
-
-            relative_file_path = target_file_path.relative_to(workspace_path.resolve())
-            relative_file_str = str(relative_file_path).replace("\\", "/")  # Ensure forward slashes for git
-
             # Check if file is tracked by Git (exists in HEAD commit)
             is_tracked = False
             try:
@@ -227,7 +219,7 @@ class GitService:
             if not target_file_path.exists():
                 # File was deleted, now it's restored
                 logger.info(f"Successfully reverted deleted file: {file_path}")
-                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
+                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory":     False}
             else:
                 logger.info(f"Successfully reverted changes for file: {file_path}")
                 return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}

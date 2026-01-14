@@ -52,7 +52,6 @@ class WorkspaceResponse(BaseModel):
     fork_repo_owner: str
     fork_repo_name: str
     branch_name: str
-    workspace_path: str
     status: WorkspaceStatus
     pull_request_number: str | None
     pull_request_status: str | None

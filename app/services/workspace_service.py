@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import git
+import os
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from app.schemas.workspace import CreatePFSRequest, WorkspaceCreate, WorkspaceUp
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
+
+from ..utils.validation import normalize_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +46,6 @@ class WorkspaceService:
             # Generate workspace path and branch name
             workspace_id = str(uuid.uuid4())
 
-            branch_name = self.git_service.generate_branch_name(workspace_id)
-            workspace_path = self.git_service.generate_workspace_path(workspace_id)
-
             # Create workspace record in database
             workspace = GitWorkspace(
                 user_id=user_id,
@@ -54,8 +54,6 @@ class WorkspaceService:
                 description=workspace_data.description,
                 fork_repo_owner=fork_repo["owner"]["login"],
                 fork_repo_name=fork_repo["name"],
-                branch_name=branch_name,
-                workspace_path=workspace_path,
                 status=WorkspaceStatus.ACTIVE,
             )
 
@@ -76,7 +74,7 @@ class WorkspaceService:
         try:
             success = await self.git_service.clone_repository(
                 clone_url=clone_url,
-                workspace_path=workspace.workspace_path,
+                workspace_path=workspace.abs_path,
                 branch_name=workspace.branch_name,
                 upstream_repo=settings.CEOS_ARD_REPO,
                 upstream_owner=settings.CEOS_ARD_OWNER,
@@ -103,7 +101,7 @@ class WorkspaceService:
         try:
             logger.info(f"Triggering build for workspace {workspace.id}")
 
-            await self.build_service.start_build(workspace_id=workspace.id, workspace_path=workspace.workspace_path, pfs=workspace.pfs)
+            await self.build_service.start_build(workspace_id=workspace.id, workspace_path=workspace.abs_path, pfs=workspace.pfs)
         except Exception as e:
             logger.error(f"Error triggering build for workspace {workspace.id}: {e}")
 
@@ -163,7 +161,6 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
 
             workspace = query.first()
-
             if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
@@ -253,18 +250,16 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-        workspace_path = Path(workspace.workspace_path)
 
         if workspace.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
 
         try:
-            if workspace_path.exists():
-                shutil.rmtree(workspace_path)
-                logger.info(f"Deleted workspace files at {workspace_path}")
+            if workspace.abs_path.exists():
+                shutil.rmtree(workspace.abs_path)
+                logger.info(f"Deleted workspace files at {workspace.abs_path}")
             else:
-                logger.warning(f"Workspace path does not exist: {workspace_path}")
-
+                logger.warning(f"Workspace path does not exist: {workspace.abs_path}")
             db.delete(workspace)
             db.commit()
 
@@ -278,13 +273,12 @@ class WorkspaceService:
 
     async def get_workspace_status(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-        workspace_path = Path(workspace.workspace_path)
 
         if workspace.status != WorkspaceStatus.ACTIVE:
             return {"workspace_status": workspace.status.value, "git_status": None}
 
         try:
-            git_status = await self.git_service.get_git_status(workspace_path)
+            git_status = await self.git_service.get_git_status(workspace.abs_path)
 
             return {"workspace_status": workspace.status.value, "git_status": git_status}
 
@@ -301,12 +295,11 @@ class WorkspaceService:
 
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = Path(workspace.workspace_path)
 
-            if not workspace_path.exists():
+            if not workspace.abs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            pfs_path = workspace_path / "pfs"
+            pfs_path = workspace.abs_path / "pfs"
 
             if not pfs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PFS directory not found in workspace")
@@ -355,15 +348,14 @@ class WorkspaceService:
 
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-            workspace_path = Path(workspace.workspace_path)
 
-            if not workspace_path.exists():
+            if not workspace.abs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if not create_pfs_request.id or not create_pfs_request.title:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-            new_pfs_path = workspace_path / "pfs" / create_pfs_request.id
+            new_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.id
 
             if new_pfs_path.exists():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
@@ -372,7 +364,7 @@ class WorkspaceService:
 
             try:
                 if create_pfs_request.base_pfs:
-                    base_pfs_path = workspace_path / "pfs" / create_pfs_request.base_pfs
+                    base_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.base_pfs
                     if not base_pfs_path.exists():
                         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
                     shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
@@ -411,7 +403,7 @@ class WorkspaceService:
 
                 # Add changes to the repository
                 try:
-                    repo.git.add(str(new_pfs_path.relative_to(workspace_path)))
+                    repo.git.add(normalize_workspace_path(new_pfs_path, workspace_path, absolute=False))
                 except git.GitCommandError as e:
                     logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
@@ -431,9 +423,8 @@ class WorkspaceService:
         self, db: Session, workspace_id: str, user_id: str, pr_title: str, pr_description: str, access_token: str
     ) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-        workspace_path = Path(workspace.workspace_path)
 
-        if not workspace_path.exists():
+        if not workspace.abs_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
         if workspace.status != WorkspaceStatus.ACTIVE:
@@ -449,12 +440,12 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already closed")
 
         try:
-            git_status = await self.git_service.get_git_status(workspace_path)
+            git_status = await self.git_service.get_git_status(workspace.abs_path)
 
             if git_status["is_clean"]:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")
 
-            repo = git.Repo(workspace.workspace_path)
+            repo = git.Repo(workspace.abs_path)
 
             # Add changes to the repository
             try:
