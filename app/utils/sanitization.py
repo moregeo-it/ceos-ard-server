@@ -4,8 +4,6 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
-_ALLOWED_SEGMENT_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
-
 
 def sanitize_string(value: str, max_length: int = 100) -> str:
     if not isinstance(value, str):
@@ -98,57 +96,32 @@ def sanitize_path(path: str, workspace_path: Path) -> Path:
             detail="Path must be a string",
         )
 
+    cleaned_path = ''.join(char for char in path if ord(char) > 31 and ord(char) != 127)
+
     # Normalize path separators and strip leading/trailing slashes
-    normalized = path.replace("\\", "/").strip("/")
+    normalized = cleaned_path.replace("\\", "/").strip("/")
 
     # Return workspace root for empty or root paths
     if not normalized:
         return workspace_path.resolve()
 
-    # Check for absolute paths after stripping (fixes leading slash issue)
-    if Path(normalized).is_absolute():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Absolute paths are not allowed",
-        )
-
-    # Split into segments and validate
-    segments = normalized.split("/")
-
-    for seg in segments:
-        # Reject empty segments (shouldn't happen after strip, but be defensive)
-        if not seg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Path contains empty segments",
-            )
-
-        # Reject path traversal attempts
-        if seg == "..":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Path must not contain '..'",
-            )
-
-        # Validate allowed characters per segment
-        if not _ALLOWED_SEGMENT_PATTERN.match(seg):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Path may only contain alphanumeric characters, dots, hyphens and underscores",
-            )
-
-    # Reconstruct and resolve
     target_path = (workspace_path / normalized).resolve()
 
-    # Final security check: ensure resolved path is within workspace
     try:
         target_path.relative_to(workspace_path.resolve())
-        return target_path
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Path is outside the workspace directory",
         ) from e
+
+    if len(str(target_path)) > 255:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path exceeds maximum length of 255 characters",
+        )
+
+    return target_path
 
 def fix_path(filepath: str | Path) -> str:
     filepath = str(filepath).replace("\\", "/")
