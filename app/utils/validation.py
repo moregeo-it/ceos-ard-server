@@ -105,6 +105,7 @@ def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool
 
     return abs_path
 
+
 def normalize_workspace_path(path: str | Path, workspace_path: Path, absolute: bool = True) -> str:
     if not isinstance(path, Path):
         path = Path(path)

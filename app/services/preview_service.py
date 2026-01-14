@@ -25,9 +25,7 @@ class PreviewService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
-            build_info = await self.build_service.start_build(
-                workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs
-            )
+            build_info = await self.build_service.start_build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs)
 
             if build_info.get("status") == "success":
                 return await self._get_preview_files(workspace.abs_path, pfs=pfs or workspace.pfs)

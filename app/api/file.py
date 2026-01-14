@@ -41,9 +41,7 @@ async def list_workspace_files(
     recurse: bool = Query(default=False, description="Whether to list files recursively"),
 ):
     try:
-        return await file_service.get_workspace_files(
-            db=db, path=path, workspace_id=workspace_id, user_id=current_user["user"].id, recurse=recurse
-        )
+        return await file_service.get_workspace_files(db=db, path=path, workspace_id=workspace_id, user_id=current_user["user"].id, recurse=recurse)
     except HTTPException:
         raise
     except Exception as e:

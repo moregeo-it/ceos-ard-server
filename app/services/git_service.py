@@ -3,7 +3,6 @@ import shutil
 from pathlib import Path
 
 import git
-import os
 from fastapi import HTTPException, status
 
 from app.config import settings
@@ -219,7 +218,7 @@ class GitService:
             if not target_file_path.exists():
                 # File was deleted, now it's restored
                 logger.info(f"Successfully reverted deleted file: {file_path}")
-                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory":     False}
+                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
             else:
                 logger.info(f"Successfully reverted changes for file: {file_path}")
                 return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}

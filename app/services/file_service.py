@@ -1,5 +1,4 @@
 import logging
-import re
 import shutil
 from pathlib import Path
 
@@ -11,7 +10,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_file_media_type
-from app.utils.validation import validate_pathname, validate_workspace_path, normalize_workspace_path
+from app.utils.validation import normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -175,11 +174,7 @@ class FileService:
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
 
-        return {
-            "name": name,
-            "path": normalize_workspace_path(target_path, workspace_path),
-            "directory": False
-        }
+        return {"name": name, "path": normalize_workspace_path(target_path, workspace_path), "directory": False}
 
     def _create_folder(self, workspace_path: Path, name: str, path: str):
         name = validate_pathname(name)
@@ -191,11 +186,7 @@ class FileService:
 
         target_path.mkdir(parents=True, exist_ok=True)
 
-        return {
-            "name": name,
-            "path": normalize_workspace_path(target_path, workspace_path),
-            "directory": True
-        }
+        return {"name": name, "path": normalize_workspace_path(target_path, workspace_path), "directory": True}
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         try:
@@ -204,10 +195,7 @@ class FileService:
             if not Path(file_path).is_file():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is not a file")
 
-            return {
-                "content": file_path.read_text(encoding="utf-8"),
-                "media_type": get_file_media_type(file_path)
-            }
+            return {"content": file_path.read_text(encoding="utf-8"), "media_type": get_file_media_type(file_path)}
 
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
@@ -264,12 +252,12 @@ class FileService:
             repo = git.Repo(workspace.abs_path, search_parent_directories=True)
             repo.git.add(relative_path)
         except git.exc.GitCommandError as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File or folder deleted successfully, but failed to make the changes in the repository") from e
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="File or folder deleted successfully, but failed to make the changes in the repository",
+            ) from e
 
-        return {
-            "message": "File or folder deleted successfully.",
-            "path": normalize_workspace_path(target_path, workspace.abs_path)
-        }
+        return {"message": "File or folder deleted successfully.", "path": normalize_workspace_path(target_path, workspace.abs_path)}
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         try:
@@ -304,11 +292,7 @@ class FileService:
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file/folder to repository") from e
 
-        return {
-            "name": new_name,
-            "path": normalize_workspace_path(new_path, workspace_path),
-            "directory": new_path.is_dir()
-        }
+        return {"name": new_name, "path": normalize_workspace_path(new_path, workspace_path), "directory": new_path.is_dir()}
 
     async def _revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
@@ -348,11 +332,7 @@ class FileService:
 
                 # Check if search query matches filename
                 if pattern in filepath.name.lower():
-                    search_results.append({
-                        "name": file["name"],
-                        "type": "filename",
-                        "path": file["path"]
-                    })
+                    search_results.append({"name": file["name"], "type": "filename", "path": file["path"]})
                     continue
 
                 # Search within file content
@@ -361,15 +341,17 @@ class FileService:
                         for i, line in enumerate(f):
                             index = line.lower().find(pattern)
                             if index >= 0:
-                                search_results.append({
-                                    "name": file["name"],
-                                    "type": "content",
-                                    "path": file["path"],
-                                    "line": i + 1,
-                                    "column": index + 1,
-                                    "excerpt": line.strip(),
-                                })
-                                break # todo: shall we return all results from within a file?
+                                search_results.append(
+                                    {
+                                        "name": file["name"],
+                                        "type": "content",
+                                        "path": file["path"],
+                                        "line": i + 1,
+                                        "column": index + 1,
+                                        "excerpt": line.strip(),
+                                    }
+                                )
+                                break  # todo: shall we return all results from within a file?
                 except (UnicodeDecodeError, FileNotFoundError) as e:
                     logger.warning(f"Could not read file '{file['path']}': {str(e)}")
 
@@ -385,16 +367,10 @@ class FileService:
             changed_files = []
 
             for file in git_status["modified_files"]:
-                changed_files.append({
-                    "path": normalize_workspace_path(file, workspace.abs_path),
-                    "status": file.status
-                })
+                changed_files.append({"path": normalize_workspace_path(file, workspace.abs_path), "status": file.status})
 
             for file in git_status["untracked_files"]:
-                changed_files.append({
-                    "path": normalize_workspace_path(file, workspace.abs_path),
-                    "status": "untracked"
-                })
+                changed_files.append({"path": normalize_workspace_path(file, workspace.abs_path), "status": "untracked"})
 
             return changed_files
         except Exception as e:
