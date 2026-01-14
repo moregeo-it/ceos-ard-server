@@ -14,19 +14,19 @@ class BuildService:
     def __init__(self):
         self.prereqs_ok = CEOS_ARD_AVAILABLE  # Use the global check result
 
-    async def start_build(self, workspace_path: str, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
+    async def start_build(self, workspace_path: Path, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
         if not self.prereqs_ok or not workspace_path or not workspace_id:
             raise ValueError("Workspace path and ID must be provided and prerequisites must be met")
 
-        if not Path(workspace_path).exists():
+        if not workspace_path.exists():
             raise FileNotFoundError(f"Workspace path {workspace_path} does not exist")
 
         return await self._execute_build(workspace_path, workspace_id, pfs)
 
-    async def _execute_build(self, workspace_path: str, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
-        output_dir = Path(workspace_path) / "build" / ("-".join(pfs) if pfs else "")
+    async def _execute_build(self, workspace_path: Path, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
+        output_dir = workspace_path / "build" / ("-".join(pfs) if pfs else "")
 
-        cmd_args = ["ceos-ard", "generate", *pfs, "-o", output_dir, "-i", workspace_path, "--pdf", "--docx"]
+        cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_dir), "-i", str(workspace_path), "--pdf", "--docx"]
 
         logger.info(f"Building workspace {workspace_id} {'with PFS ' + ' '.join(pfs) if pfs else '(all files)'}")
 

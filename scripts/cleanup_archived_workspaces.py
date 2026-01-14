@@ -71,23 +71,20 @@ def cleanup_archived_workspaces(dry_run: bool = False):
         error_count = 0
 
         for workspace in workspaces_to_delete:
-            workspace_path = Path(workspace.workspace_path)
-
             try:
                 if dry_run:
                     logger.info(
                         f"[DRY RUN] Would delete workspace {workspace.id} "
-                        f"(title: {workspace.title}, path: {workspace_path}, "
+                        f"(title: {workspace.title}, path: {workspace.abs_path}, "
                         f"archived: {workspace.archived_at}, deletion: {workspace.deletion_at})"
                     )
                 else:
                     # Delete workspace files if they exist
-                    if workspace_path.exists():
-                        shutil.rmtree(workspace_path)
-                        logger.info(f"Deleted workspace files for {workspace.id} at {workspace_path}")
+                    if workspace.abs_path.exists():
+                        shutil.rmtree(workspace.abs_path)
+                        logger.info(f"Deleted workspace files for {workspace.id} at {workspace.abs_path}")
                     else:
-                        logger.warning(f"Workspace {workspace.id} path does not exist: {workspace_path}")
-
+                        logger.warning(f"Workspace {workspace.id} path does not exist: {workspace.abs_path}")
                     # Delete database record
                     db.delete(workspace)
                     db.commit()
