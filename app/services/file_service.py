@@ -96,7 +96,7 @@ class FileService:
             # Add deleted files
             for filepath, status in status_map.items():
                 file = Path(filepath)
-                if status == "deleted" and (recurse or file.is_relative_to(target_path)):
+                if status == "deleted" and (recurse or file.parent == target_path):
                     files.append(self.get_file_dict(file, workspace.abs_path, status=status))
 
             # Sort directories first, then files, both alphabetically
