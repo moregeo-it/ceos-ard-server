@@ -301,10 +301,12 @@ class FileService:
         if not new_path.exists():
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename file/folder. Please try again.")
 
-        # Add changes to the repository
         try:
             repo = git.Repo(workspace_path, search_parent_directories=True)
-            repo.git.add(str(new_path), str(target_path))
+            relative_old = normalize_workspace_path(target_path, workspace_path, absolute=False)
+            relative_new = normalize_workspace_path(new_path, workspace_path, absolute=False)
+
+            repo.git.add(relative_new, relative_old)
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file/folder to repository") from e
 
