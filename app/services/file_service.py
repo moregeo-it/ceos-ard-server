@@ -96,7 +96,7 @@ class FileService:
             # Add deleted files
             for filepath, status in status_map.items():
                 file = Path(filepath)
-                if status == "deleted" and (recurse or file.is_relative_to(target_path)):
+                if status == "deleted" and (recurse or file.parent == target_path):
                     files.append(self.get_file_dict(file, workspace.abs_path, status=status))
 
             # Sort directories first, then files, both alphabetically
@@ -249,15 +249,32 @@ class FileService:
         try:
             relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
             repo = git.Repo(workspace.abs_path, search_parent_directories=True)
-            repo.git.add(relative_path)
+
+            # Check if file exists in HEAD (has git history)
+            is_committed = False
+            try:
+                repo.git.cat_file("-e", f"HEAD:{relative_path}")
+                is_committed = True
+            except git.GitCommandError:
+                is_committed = False
+
+            if is_committed:
+                # File is in git history - stage the deletion
+                repo.git.add(relative_path)
+            else:
+                # File not in git history - remove from index if staged
+                try:
+                    repo.git.rm("--cached", "--force", relative_path)
+                except git.GitCommandError:
+                    # File wasn't in index, nothing to do
+                    pass
         except git.exc.GitCommandError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="File or folder deleted successfully, but failed to make the changes in the repository",
             ) from e
 
-        return {"message": "File or folder deleted successfully.", "path": normalize_workspace_path(target_path, workspace.abs_path)}
-
+        return {"message": "File or folder deleted successfully."}
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)

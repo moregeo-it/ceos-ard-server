@@ -167,61 +167,40 @@ class GitService:
             relative_file_str = normalize_workspace_path(target_file_path, workspace_path, absolute=False)
 
             repo = git.Repo(workspace_path)
-            # Check if file is tracked by Git (exists in HEAD commit)
-            is_tracked = False
+
+            # Check if file exists in HEAD commit
             try:
                 repo.git.cat_file("-e", f"HEAD:{relative_file_str}")
-                is_tracked = True
+                # File exists in HEAD - restore it directly
+                repo.git.checkout("HEAD", "--", relative_file_str)
+                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
             except git.GitCommandError:
-                is_tracked = False
-
-            # Handle file existence based on tracking status
-            if not target_file_path.exists():
-                if not is_tracked:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File does not exist and is not tracked by Git")
-                # File is tracked but deleted - this is okay, we can restore it
-            elif not target_file_path.is_file():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
-
-            if not target_file_path.exists() and is_tracked:
+                # File not in HEAD - check if it's part of a rename
                 pass
-            elif target_file_path.exists():
-                has_changes = False
 
-                # Check for staged changes
-                staged_diff = repo.index.diff("HEAD", R=True)
-                for item in staged_diff:
-                    if item.a_path == relative_file_str or item.b_path == relative_file_str:
-                        has_changes = True
-                        break
+            # Check for renames in staged changes
+            for item in repo.index.diff("HEAD", R=True):
+                if item.change_type == "R" and item.b_path == relative_file_str:
+                    old_path = item.a_path
 
-                # Check for unstaged changes
-                if not has_changes:
-                    unstaged_diff = repo.index.diff(None)
-                    for item in unstaged_diff:
-                        if item.a_path == relative_file_str:
-                            has_changes = True
-                            break
+                    # Unstage the rename
+                    repo.git.reset("HEAD", "--", old_path, relative_file_str)
 
-                if not has_changes:
-                    return f"No changes to revert for file: {file_path}"
+                    # Restore original file from HEAD
+                    repo.git.checkout("HEAD", "--", old_path)
 
-            else:
-                # File does not exist and is not tracked by Git
-                if relative_file_str in repo.untracked_files:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert untracked file. Use delete instead.")
+                    # Remove new file if it exists
+                    if target_file_path.exists():
+                        target_file_path.unlink()
 
-            # Revert the file using GitPython
-            # This is equivalent to `git checkout -- file_path`
-            repo.git.checkout("--", relative_file_str)
+                    old_file_path = workspace_path / old_path
+                    return {"path": str(old_file_path), "name": str(old_file_path.name), "directory": False}
 
-            if not target_file_path.exists():
-                # File was deleted, now it's restored
-                logger.info(f"Successfully reverted deleted file: {file_path}")
-                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
-            else:
-                logger.info(f"Successfully reverted changes for file: {file_path}")
-                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
+            # File has no git history - cannot revert
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot revert file with no git history. File was never committed."
+            )
 
         except git.InvalidGitRepositoryError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
