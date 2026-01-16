@@ -494,6 +494,7 @@ class FileService:
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
                 "is_directory": target_path.is_dir(),
                 "status": status,
+                "usage": [],
             }
         except HTTPException:
             raise

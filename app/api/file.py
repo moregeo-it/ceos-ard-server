@@ -15,7 +15,7 @@ from app.schemas.workspace import (
     FileOperationResponse,
     FilePatchRequest,
     FileSearchResponse,
-    FileStorageResponse,
+    FileContextResponse,
 )
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
@@ -242,10 +242,10 @@ async def get_file_diff(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file diff", e)) from e
 
 @router.get(
-    "/workspaces/{workspace_id}/context/{file_path:path}",
+    "/{workspace_id}/context/{file_path:path}",
     summary="Get aditional context for a specific file",
     description="Retrieve additional context for a specific file in a workspace",
-    response_model=FileListResponse,
+    response_model=FileContextResponse,
     status_code=status.HTTP_200_OK,
 )
 async def get_file_context(

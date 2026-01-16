@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -130,6 +131,10 @@ class FileListResponse(BaseModel):
     path: str
 
 
+class FileContextResponse(FileListResponse):
+    usage: list[str]
+
+
 class FileSearchResponse(BaseModel):
     name: str
     type: str
@@ -143,10 +148,6 @@ class FileOperationResponse(BaseModel):
     path: str
     name: str
     directory: bool
-
-
-class FileStorageResponse(BaseModel):
-    message: str
 
 
 class ChangedFilesResponse(BaseModel):

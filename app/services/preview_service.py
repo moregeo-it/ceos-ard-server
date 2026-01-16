@@ -57,7 +57,9 @@ class PreviewService:
                     html_content += f.read() + "\n"
 
         def replace_edit_tags(match):
-            path = validate_workspace_path(match.group(1), workspace_path)
+            path = Path(match.group(1))
+            if not path.is_absolute():
+                path = workspace_path / path
             file_path = normalize_workspace_path(path, workspace_path)
             return f'<a name="{file_path}"></a><button class="edit" value="{file_path}">Edit</button>'
 
