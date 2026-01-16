@@ -26,7 +26,7 @@ class BuildService:
     async def _execute_build(self, workspace_path: Path, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
         output_dir = workspace_path / "build" / ("-".join(pfs) if pfs else "")
 
-        cmd_args = ["pixi", "run", "ceos-ard", "generate", *pfs, "-o", str(output_dir).replace("\\", "/"), "-i", str(workspace_path).replace("\\", "/"), "--pdf", "--docx"]
+        cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_dir).replace("\\", "/"), "-i", str(workspace_path).replace("\\", "/"), "--pdf", "--docx"]
 
         logger.info(f"Building workspace {workspace_id} {'with PFS ' + ' '.join(pfs) if pfs else '(all files)'}")
 
@@ -48,7 +48,7 @@ class BuildService:
                     "output_dir": str(output_dir),
                 }
 
-        except RuntimeError as e:
+        except Exception as e:
             error_msg = f"Build process error for workspace {workspace_id}: {e}"
             logger.error(error_msg)
             raise HTTPException(

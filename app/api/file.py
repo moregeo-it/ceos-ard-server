@@ -240,3 +240,24 @@ async def get_file_diff(
     except Exception as e:
         logger.error(f"Error getting file diff: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file diff", e)) from e
+
+@router.get(
+    "/workspaces/{workspace_id}/context/{file_path:path}",
+    summary="Get aditional context for a specific file",
+    description="Retrieve additional context for a specific file in a workspace",
+    response_model=FileListResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_file_context(
+    file_path: str,
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_user: dict[str, Any] = Depends(require_github_user),
+):
+    try:
+        file_context = await file_service.get_file_context(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return file_context
+    except Exception as e:
+        logger.error(f"Error getting file context: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file context", e)) from e
