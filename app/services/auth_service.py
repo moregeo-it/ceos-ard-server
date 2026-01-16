@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,40 @@ from app.services.token_refresh_service import TokenRefreshService
 logger = logging.getLogger(__name__)
 
 
-async def get_current_user(authorization: str = Depends(HTTPBearer()), db: Session = Depends(get_db)) -> dict[str, Any]:
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def get_jwt_token(
+    request: Request,
+    authorization: str | None = Query(default=None),
+) -> str:
+    """Extract JWT access token.
+
+    Priority:
+    1) Authorization header via HTTP Bearer scheme (expects: "Bearer <token>")
+    2) Query parameter "authorization" (expects: "<token>")
+    """
+    credentials = await bearer_scheme(request)
+    if credentials and credentials.credentials:
+        return credentials.credentials
+
+    if authorization:
+        token = authorization.strip()
+        if token.startswith("Bearer "):
+            token = token[7:].strip()
+        if token:
+            return token
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated - missing token",
+    )
+
+
+async def get_current_user(
+    token: str = Depends(get_jwt_token),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     """Validate JWT token and return user.
 
     The client sends a JWT token (not a provider token).
@@ -25,7 +58,7 @@ async def get_current_user(authorization: str = Depends(HTTPBearer()), db: Sessi
     Provider tokens are stored server-side and never exposed to clients.
 
     Args:
-        authorization: Bearer token from client (JWT)
+        jwt_token: JWT token from Authorization header or query param
         db: Database session
 
     Returns:
@@ -34,17 +67,9 @@ async def get_current_user(authorization: str = Depends(HTTPBearer()), db: Sessi
     Raises:
         HTTPException: If token is invalid or user not found
     """
-    jwt_token = authorization.credentials
-
-    if not jwt_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated - missing token",
-        )
-
     try:
         # Decode and validate JWT token
-        payload = JWTService.decode_access_token(jwt_token)
+        payload = JWTService.decode_access_token(token)
 
         user_id = payload.get("user_id")
         if not user_id:
