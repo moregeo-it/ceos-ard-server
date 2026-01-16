@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -40,4 +40,33 @@ async def generate_preview(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=create_error_detail("generate preview", e),
+        ) from e
+
+
+@router.get(
+    "/{workspace_id}/previews/{file_path:path}",
+    summary="Get preview static file asset",
+    description="Get preview static file asset for a workspace",
+    status_code=status.HTTP_200_OK,
+)
+async def get_preview_static_file(
+    workspace_id: str,
+    file_path: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    preview_service: PreviewService = Depends(get_preview_service),
+):
+    try:
+        file = await preview_service.get_preview_static_file(
+            db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id
+        )
+
+        return FileResponse(str(file))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting preview static file {file_path} for workspace {workspace_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_detail("get preview static file", e),
         ) from e
