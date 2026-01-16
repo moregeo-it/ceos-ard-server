@@ -207,7 +207,7 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
-            file_path.write_bytes(content, encoding="utf-8")
+            file_path.write_bytes(content)
 
             # Add changes to the repository
             try:
