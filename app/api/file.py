@@ -98,7 +98,7 @@ async def read_file_content(
     "/{workspace_id}/files/{file_path:path}",
     summary="Store content of a file",
     description="Store content of a file",
-    response_model=FileStorageResponse,
+    response_model=FileListResponse,
     status_code=status.HTTP_200_OK,
 )
 async def store_file_content(
