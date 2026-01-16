@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -98,14 +98,14 @@ async def read_file_content(
     "/{workspace_id}/files/{file_path:path}",
     summary="Store content of a file",
     description="Store content of a file",
-    response_model=FileStorageResponse,
+    response_model=FileListResponse,
     status_code=status.HTTP_200_OK,
 )
 async def store_file_content(
+    request: Request,
     file_path: str,
     workspace_id: str,
     db: Session = Depends(get_db),
-    content: UploadFile = File(...),
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
@@ -114,7 +114,7 @@ async def store_file_content(
             db=db,
             workspace_id=workspace_id,
             file_path=file_path,
-            content=await content.read(),
+            content=await request.body(),
             user_id=current_user["user"].id,
         )
     except HTTPException:
