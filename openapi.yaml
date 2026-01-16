@@ -529,7 +529,12 @@ paths:
   /workspaces/{workspaceId}/files/{filePath}:
     get:
       summary: Get file content
-      description: Retrieves the content of a specific file
+      description: |-
+        Retrieves the content of a specific file.
+
+        The endoint shall only return files that are made available through
+        `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
+        should not be accessible and return a 404 error.
       operationId: getFileContent
       tags:
         - Files
@@ -564,6 +569,10 @@ paths:
 
         Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
         File should be stored as is without parsing, e.g. comments in YAML files should be preserved.
+
+        The endoint shall only handle files that are made available through
+        `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
+        should not be changed and return a 404 error.
       operationId: uploadFileContent
       tags:
         - Files
@@ -605,7 +614,12 @@ paths:
 
     delete:
       summary: Delete file
-      description: Deletes a specific file
+      description: |-
+        Deletes a specific file.
+
+        The endoint shall only handle files that are made available through
+        `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
+        should not be deleted and return a 404 error.
       operationId: deleteFile
       tags:
         - Files
@@ -630,7 +644,12 @@ paths:
 
     patch:
       summary: Update file metadata or operations
-      description: Performs file operations such as rename or revert
+      description: |-
+        Performs file operations such as rename or revert.
+
+        The endoint shall only handle files that are made available through
+        `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
+        should not be changed and return a 404 error.
       operationId: patchFile
       tags:
         - Files
@@ -844,7 +863,12 @@ paths:
   /workspaces/{workspaceId}/diffs/{filePath}:
     get:
       summary: Get diff for specific file
-      description: Retrieves the git diff for a specific file, if available
+      description: |-
+        Retrieves the git diff for a specific file, if available.
+
+        The endoint shall only return files that are made available through
+        `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
+        should not be accessible and return a 404 error.
       operationId: getFileDiff
       tags:
         - Files
@@ -890,6 +914,10 @@ paths:
         Retrieves the context for a specific file, if available.
 
         This is currently a list of PFS that use the specified file.
+
+        The endoint shall only return files that are made available through
+        `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
+        should not be accessible and return a 404 error.
       operationId: getFileContext
       tags:
         - Files
@@ -952,6 +980,37 @@ paths:
                     example: "Preview generation started"
         '404':
           description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/previews/{filePath}:
+    get:
+      summary: Return static assets for the preview
+      description: Returns static assets for the preview of the current workspace state
+      operationId: getPreviewAsset
+      tags:
+        - Previews
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/PfsType'
+      responses:
+        '200':
+          description: File content
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found
           content:
             application/json:
               schema:
