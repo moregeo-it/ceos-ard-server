@@ -480,5 +480,25 @@ class FileService:
             logger.error(f"Failed to get file diff: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
+    async def get_file_context(self, db: Session, file_path: str, workspace_id: str, user_id: str):
+        try:
+            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+
+            repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+
+            status = self._get_file_status(repo, target_path)
+
+            return {
+                "name": target_path.name,
+                "path": normalize_workspace_path(target_path, workspace.abs_path),
+                "is_directory": target_path.is_dir(),
+                "status": status,
+                "usage": [],
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file context: {str(e)}") from e
 
 file_service = FileService()

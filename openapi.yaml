@@ -930,13 +930,17 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  usage:
-                    type: array
-                    items:
-                      type: string
-                      description: PFS ID that uses the specified file
+                allOf:
+                  - $ref: '#/components/schemas/FileItem'
+                  - type: object
+                    required:
+                      - usage
+                    properties:
+                      usage:
+                        type: array
+                        items:
+                          type: string
+                          description: PFS ID that uses the specified file
         '404':
           description: Workspace or file not found, or no diff available
           content:
