@@ -26,7 +26,7 @@ class BuildService:
     async def _execute_build(self, workspace_path: Path, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
         output_dir = workspace_path / "build" / ("-".join(pfs) if pfs else "")
 
-        cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_dir).replace("\\", "/"), "-i", str(workspace_path).replace("\\", "/"), "--pdf", "--docx"]
+        cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_dir), "-i", str(workspace_path), "--pdf", "--docx"]
 
         logger.info(f"Building workspace {workspace_id} {'with PFS ' + ' '.join(pfs) if pfs else '(all files)'}")
 
