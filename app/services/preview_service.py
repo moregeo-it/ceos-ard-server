@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.services.build_service import BuildService
 from app.services.workspace_service import WorkspaceService
-from app.utils.validation import validate_workspace_path
+from app.utils.validation import validate_workspace_path, normalize_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,13 @@ class PreviewService:
             if file.is_file() and file.suffix == ".html" and any(p in file.name for p in (pfs or [])):
                 with open(file, encoding="utf-8") as f:
                     html_content += f.read() + "\n"
+
+        def replace_edit_tags(match):
+            path = validate_workspace_path(match.group(1), workspace_path)
+            file_path = normalize_workspace_path(path, workspace_path)
+            return f'<a name="{file_path}"></a><button class="edit" value="{file_path}">Edit</button>'
+
+        html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\]+)\s*-->", replace_edit_tags, html_content)
 
         return html_content
 
