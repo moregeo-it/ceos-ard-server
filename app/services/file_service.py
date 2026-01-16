@@ -22,6 +22,22 @@ class FileService:
         self.ignored_root_paths = {"build", "templates", ".git", "LICENSE"}
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
+    def _get_file_status(self, repo: git.Repo, path: Path):
+        try:
+            git_status = repo.git.status(path, porcelain=True)
+            if "A" in git_status:
+                dir_status = "added"
+            elif "M" in git_status:
+                dir_status = "modified"
+            elif "R" in git_status:
+                dir_status = "renamed"
+            else:
+                dir_status = None
+        except git.exc.GitCommandError:
+            dir_status = "deleted"
+
+        return dir_status
+
     def _get_all_file_statuses(self, repo: git.Repo, target_path: Path, workspace_path: Path):
         """Get all file statuses using GitPython API."""
         status_map = {}
@@ -207,7 +223,7 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
-            file_path.write_bytes(content, encoding="utf-8")
+            file_path.write_bytes(content)
 
             # Add changes to the repository
             try:
@@ -216,7 +232,12 @@ class FileService:
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
 
-            return {"message": "File content stored successfully"}
+            return {
+                "name": file_path.name,
+                "path": normalize_workspace_path(file_path, workspace.abs_path),
+                "is_directory": file_path.is_dir(),
+                "status": self._get_file_status(repo, file_path),
+            }
 
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file content: {str(e)}") from e
