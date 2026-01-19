@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.services.build_service import BuildService
 from app.services.workspace_service import WorkspaceService
-from app.utils.validation import validate_workspace_path, normalize_workspace_path
+from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -87,5 +87,6 @@ class PreviewService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An error occurred while retrieving the preview static file. Please try again later." + str(e),
             ) from e
+
 
 preview_service = PreviewService()
