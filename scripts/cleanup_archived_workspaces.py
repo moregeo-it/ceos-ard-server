@@ -88,12 +88,12 @@ def cleanup_archived_workspaces(dry_run: bool = False):
                     # Delete database record
                     db.delete(workspace)
                     db.commit()
-                    logger.info(f"Deleted workspace {workspace.id} " f"(title: {workspace.title}) from database")
+                    logger.info(f"Deleted workspace {workspace.id} (title: {workspace.title}) from database")
                     deleted_count += 1
 
             except Exception as e:
                 db.rollback()
-                logger.error(f"Error deleting workspace {workspace.id} at {workspace_path}: {e}")
+                logger.error(f"Error deleting workspace {workspace.id} at {workspace.abs_path}: {e}")
                 error_count += 1
 
         if not dry_run:

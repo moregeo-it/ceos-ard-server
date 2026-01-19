@@ -24,15 +24,12 @@ gitpython = ">=3.1.45,<4"
 python-dateutil = ">=2.8.2,<3"
 
 [feature.dev.dependencies]
-ruff = ">=0.12.0,<0.13.0"
+ruff = ">=0.14.0,<0.15.0"
 pytest = ">=8.3.0,<9.0.0"
 pre-commit = ">=4.0.0,<5.0.0"
 
 [feature.dev.tasks]
-lint = "ruff check ."
-format = "ruff format ."
-lint-fix = "ruff check --fix ."
-pre-commit-run = "pre-commit run --all-files"
+pre-commit = "pre-commit run --all-files"
 pre-commit-install = "pre-commit install"
 test = { cmd = "pytest test/ -v", env = { PYTHONPATH = "." } }
 

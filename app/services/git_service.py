@@ -197,10 +197,7 @@ class GitService:
                     return {"path": str(old_file_path), "name": str(old_file_path.name), "directory": False}
 
             # File has no git history - cannot revert
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot revert file with no git history. File was never committed."
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert file with no git history. File was never committed.")
 
         except git.InvalidGitRepositoryError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e

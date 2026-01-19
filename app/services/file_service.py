@@ -116,7 +116,7 @@ class FileService:
                     files.append(self.get_file_dict(file, workspace.abs_path, status=status))
 
             # Sort directories first, then files, both alphabetically
-            files.sort(key=lambda x: (x["is_directory"] == False, x["name"].lower()))
+            files.sort(key=lambda x: (not x["is_directory"], x["name"].lower()))
 
             return files
         except HTTPException:
@@ -124,7 +124,9 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
-    def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict = {}) -> list[dict]:
+    def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict | None = None) -> list[dict]:
+        if status is None:
+            status = {}
         all_files = []
         relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
 
@@ -296,6 +298,7 @@ class FileService:
             ) from e
 
         return {"message": "File or folder deleted successfully."}
+
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -500,5 +503,6 @@ class FileService:
             raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file context: {str(e)}") from e
+
 
 file_service = FileService()

@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -57,9 +57,7 @@ async def get_preview_static_file(
     preview_service: PreviewService = Depends(get_preview_service),
 ):
     try:
-        file = await preview_service.get_preview_static_file(
-            db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id
-        )
+        file = await preview_service.get_preview_static_file(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         return FileResponse(str(file))
     except HTTPException:
