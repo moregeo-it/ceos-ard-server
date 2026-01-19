@@ -22,6 +22,18 @@ class FileService:
         self.ignored_root_paths = {"build", "templates", ".git", "LICENSE"}
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
+    def _check_file_access(self, target_path: Path, workspace_path: Path):
+        """
+        Checks if the file/folder is allowed to be accessed (not in ignored root paths, not hidden, not PDF).
+        Raises HTTPException(404) if access is not allowed.
+        """
+        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
+        root_entry = Path(relative_path).parts[0] if relative_path else target_path.name
+        if root_entry in self.ignored_root_paths:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
+        if target_path.name.startswith(".") or target_path.name.endswith(".pdf"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
+
     def _get_file_status(self, repo: git.Repo, path: Path):
         try:
             git_status = repo.git.status(path, porcelain=True)
@@ -159,100 +171,82 @@ class FileService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
+            name = validate_pathname(request_data.name)
+            folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
+
+            target_path = folder / name
+            self._check_file_access(target_path, workspace.abs_path)
+
+            if target_path.exists():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
             if request_data.type == "file":
-                return self._create_file(workspace.abs_path, request_data.name, request_data.path)
+                return self._create_file(workspace.abs_path, request_data.name, target_path)
             elif request_data.type == "folder":
-                return self._create_folder(workspace.abs_path, request_data.name, request_data.path)
+                return self._create_folder(workspace.abs_path, request_data.name, target_path)
             else:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
 
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file or folder: {str(e)}") from e
 
-    def _create_file(self, workspace_path: Path, name: str, path: str, content: str = None):
-        name = validate_pathname(name)
-        folder = validate_workspace_path(path, workspace_path, exists=True)
-
-        target_path = folder / name
-        if target_path.exists():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File already exists")
-
+    def _create_file(self, workspace_path: Path, name: str, target_path: Path, content: str = None):
         if content is not None:
             target_path.write_text(content, encoding="utf-8")
         else:
             target_path.touch()
-
-        # Add changes to the repository
         try:
             repo = git.Repo(workspace_path, search_parent_directories=True)
             repo.git.add(str(target_path))
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
-
         return {"name": name, "path": normalize_workspace_path(target_path, workspace_path), "directory": False}
 
-    def _create_folder(self, workspace_path: Path, name: str, path: str):
-        name = validate_pathname(name)
-        folder = validate_workspace_path(path, workspace_path)
-
-        target_path = folder / name
-        if target_path.exists():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Directory already exists")
-
+    def _create_folder(self, workspace_path: Path, name: str, target_path: Path):
         target_path.mkdir(parents=True, exist_ok=True)
-
         return {"name": name, "path": normalize_workspace_path(target_path, workspace_path), "directory": True}
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            file_path = validate_workspace_path(file_path, workspace.abs_path)
-            if not Path(file_path).is_file():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is not a file")
-
+            file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+            self._check_file_access(file_path, workspace.abs_path)
             return {"content": file_path.read_text(encoding="utf-8"), "media_type": get_file_media_type(file_path)}
-
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
         if not content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Content is required")
-
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+            self._check_file_access(file_path, workspace.abs_path)
             file_path.write_bytes(content)
-
             # Add changes to the repository
             try:
                 repo = git.Repo(workspace.abs_path, search_parent_directories=True)
                 repo.git.add(str(file_path))
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
-
             return {
                 "name": file_path.name,
                 "path": normalize_workspace_path(file_path, workspace.abs_path),
                 "is_directory": file_path.is_dir(),
                 "status": self._get_file_status(repo, file_path),
             }
-
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file content: {str(e)}") from e
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
-
-        target_path = validate_workspace_path(file_path, workspace.abs_path)
-
-        if not Path(target_path).exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
-
+        target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
+        self._check_file_access(target_path, workspace.abs_path)
         if target_path.is_file():
             try:
                 target_path.unlink()
@@ -265,12 +259,10 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete folder. Please try again.") from e
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is neither a file nor a folder.")
-
         # Add changes to the repository
         try:
             relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
             repo = git.Repo(workspace.abs_path, search_parent_directories=True)
-
             # Check if file exists in HEAD (has git history)
             is_committed = False
             try:
@@ -278,7 +270,6 @@ class FileService:
                 is_committed = True
             except git.GitCommandError:
                 is_committed = False
-
             if is_committed:
                 # File is in git history - stage the deletion
                 repo.git.add(relative_path)
@@ -294,8 +285,8 @@ class FileService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="File or folder deleted successfully, but failed to make the changes in the repository",
             ) from e
-
         return {"message": "File or folder deleted successfully."}
+
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -305,13 +296,13 @@ class FileService:
                 return await self._revert_file_changes(workspace.abs_path, file_path)
             else:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid operation")
-
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update: {str(e)}") from e
 
     async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str):
         new_name = validate_pathname(new_name)
         target_path = validate_workspace_path(file_path, workspace_path, exists=True)
+        self._check_file_access(target_path, workspace_path)
         new_path = target_path.parent / new_name
 
         if new_path.exists():
@@ -419,6 +410,8 @@ class FileService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+
+            self._check_file_access(target_path, workspace.abs_path)
             relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
             repo = git.Repo(workspace.abs_path)
@@ -484,6 +477,7 @@ class FileService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+            self._check_file_access(target_path, workspace.abs_path)
 
             repo = git.Repo(workspace.abs_path, search_parent_directories=True)
 
