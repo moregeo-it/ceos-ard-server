@@ -28,10 +28,7 @@ class FileService:
         Raises HTTPException(404) if access is not allowed.
         """
         relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
-        root_entry = Path(relative_path).parts[0] if relative_path else target_path.name
-        if root_entry in self.ignored_root_paths:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
-        if target_path.name.startswith(".") or target_path.name.endswith(".pdf"):
+        if self.ignore_file(target_path, relative_path):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
 
     def _get_file_status(self, repo: git.Repo, path: Path):
@@ -136,14 +133,19 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
+    def ignore_file(self, file: Path, relative_path: str) -> bool:
+        if relative_path == "" and file.name in self.ignored_root_paths:
+            return True
+        if file.name.startswith(".") or file.name.endswith(".pdf"):
+            return True
+        return False
+
     def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict = {}) -> list[dict]:
         all_files = []
         relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
 
         for file in target_path.iterdir():
-            if relative_path == "" and file.name in self.ignored_root_paths:
-                continue
-            if file.name.startswith(".") or file.name.endswith(".pdf"):
+            if self.ignore_file(file, relative_path):
                 continue
 
             filepath = str(file.resolve())
