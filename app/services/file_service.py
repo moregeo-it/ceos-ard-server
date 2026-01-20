@@ -128,7 +128,7 @@ class FileService:
         all_files = []
 
         for file in target_path.iterdir():
-            if ignore_file_path(file, file.relative_to(workspace_path), self.ignored_root_paths):
+            if ignore_file_path(file, str(file.relative_to(workspace_path)), self.ignored_root_paths):
                 continue
 
             filepath = str(file.resolve())
@@ -206,7 +206,7 @@ class FileService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
-            self._check_file_access(file_path, workspace.abs_path)
+
             file_path.write_bytes(content)
             # Add changes to the repository
             try:
@@ -230,7 +230,7 @@ class FileService:
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
         target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
-        self._check_file_access(target_path, workspace.abs_path)
+
         if target_path.is_file():
             try:
                 target_path.unlink()
@@ -286,7 +286,7 @@ class FileService:
     async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str):
         new_name = validate_pathname(new_name)
         target_path = validate_workspace_path(file_path, workspace_path, exists=True)
-        self._check_file_access(target_path, workspace_path)
+
         new_path = target_path.parent / new_name
 
         if new_path.exists():
@@ -395,7 +395,6 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
 
-            self._check_file_access(target_path, workspace.abs_path)
             relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
             repo = git.Repo(workspace.abs_path)
@@ -461,7 +460,6 @@ class FileService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
-            self._check_file_access(target_path, workspace.abs_path)
 
             repo = git.Repo(workspace.abs_path, search_parent_directories=True)
 

@@ -97,7 +97,7 @@ def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool
     if is_preview:
         IGNORE_ROOT_PATHS.discard("build")
 
-    if ignore_file_path(abs_path, abs_path.relative_to(workspace_path), IGNORE_ROOT_PATHS):
+    if ignore_file_path(abs_path, str(abs_path.relative_to(workspace_path)), IGNORE_ROOT_PATHS):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path '{path}' is not accessible",
@@ -129,7 +129,7 @@ def normalize_workspace_path(path: str | Path, workspace_path: Path, absolute: b
         path = path[1:]
     return path
 
-def ignore_file_path(file: Path, relative_path: Path, ignored_paths: set[str]) -> bool:
+def ignore_file_path(file: Path, relative_path: str, ignored_paths: set[str]) -> bool:
     if relative_path == ".":
         relative_path = ""
 
