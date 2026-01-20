@@ -42,7 +42,7 @@ def validate_pathname(filename: str) -> str:
     return filename
 
 
-def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool = None, type: str = None) -> Path:
+def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool = None, type: str = None, is_preview: bool = False) -> Path:
     if not workspace_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -92,6 +92,17 @@ def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool
             detail=f"Path '{path}' already exists in workspace",
         )
 
+    IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github", "LICENSE"}
+
+    if is_preview:
+        IGNORE_ROOT_PATHS.discard("build")
+
+    if ignore_file_path(abs_path, abs_path.relative_to(workspace_path), IGNORE_ROOT_PATHS):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Path '{path}' is not accessible",
+        )
+
     if type == "file" and not abs_path.is_file():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -117,3 +128,19 @@ def normalize_workspace_path(path: str | Path, workspace_path: Path, absolute: b
     elif not absolute and path.startswith("/"):
         path = path[1:]
     return path
+
+def ignore_file_path(file: Path, relative_path: Path, ignored_paths: set[str]) -> bool:
+    if relative_path == ".":
+        relative_path = ""
+
+    # Determine the root entry of the path to correctly apply ignore rules
+    root_entry = Path(relative_path).parts[0] if relative_path else file.name
+
+    # Ignore files and directories under configured root paths (e.g. build, templates, etc.)
+    if root_entry in ignored_paths:
+        return True
+
+    # Ignore hidden files and PDFs
+    if file.name.startswith(".") or file.name.endswith(".pdf"):
+        return True
+    return False

@@ -76,7 +76,7 @@ class PreviewService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            preview_file_path = validate_workspace_path("build/" + file_path, workspace.abs_path, type="file")
+            preview_file_path = validate_workspace_path(("build/" + file_path), workspace.abs_path, exists=True, type="file", is_preview=True)
 
             return preview_file_path
         except HTTPException:

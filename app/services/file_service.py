@@ -10,7 +10,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.validation import normalize_workspace_path, validate_pathname, validate_workspace_path
+from app.utils.validation import normalize_workspace_path, validate_pathname, validate_workspace_path, ignore_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +21,6 @@ class FileService:
         self.workspace_service = WorkspaceService()
         self.ignored_root_paths = {"build", "templates", ".git", "LICENSE"}
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
-
-    def _check_file_access(self, target_path: Path, workspace_path: Path):
-        """
-        Checks if the file/folder is allowed to be accessed (not in ignored root paths, not hidden, not PDF).
-        Raises HTTPException(404) if access is not allowed.
-        """
-        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
-        if self.ignore_file(target_path, relative_path):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File or folder not found")
 
     def _get_file_status(self, repo: git.Repo, path: Path):
         try:
@@ -133,25 +124,11 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
-    def ignore_file(self, file: Path, relative_path: str) -> bool:
-        # Determine the root entry of the path to correctly apply ignore rules
-        root_entry = Path(relative_path).parts[0] if relative_path else file.name
-
-        # Ignore files and directories under configured root paths (e.g. build, templates, etc.)
-        if root_entry in self.ignored_root_paths:
-            return True
-
-        # Ignore hidden files and PDFs
-        if file.name.startswith(".") or file.name.endswith(".pdf"):
-            return True
-        return False
-
     def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict = {}) -> list[dict]:
         all_files = []
-        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
 
         for file in target_path.iterdir():
-            if self.ignore_file(file, relative_path):
+            if ignore_file_path(file, file.relative_to(workspace_path), self.ignored_root_paths):
                 continue
 
             filepath = str(file.resolve())
@@ -183,7 +160,6 @@ class FileService:
             folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
 
             target_path = folder / name
-            self._check_file_access(target_path, workspace.abs_path)
 
             if target_path.exists():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
@@ -217,7 +193,7 @@ class FileService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
-            self._check_file_access(file_path, workspace.abs_path)
+
             return {"content": file_path.read_text(encoding="utf-8"), "media_type": get_file_media_type(file_path)}
         except HTTPException:
             raise
