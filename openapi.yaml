@@ -627,8 +627,18 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/FilePath'
       responses:
+        '200':
+          description: |-
+            A tracked file has been deleted, it could be reverted.
+            The file information is returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileItem'
         '204':
-          description: File deleted successfully
+          description: |-
+            An untracked file has been deleted permanently, it can't be restored.
+            No file information is returned.
         '404':
           description: File not found
           content:
@@ -685,7 +695,9 @@ paths:
                       const: revert
       responses:
         '200':
-          description: File operation completed successfully
+          description: |-
+            File operation completed successfully.
+            The updated file information is returned.
           content:
             application/json:
               schema:
