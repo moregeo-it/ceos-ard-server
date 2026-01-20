@@ -134,8 +134,14 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
     def ignore_file(self, file: Path, relative_path: str) -> bool:
-        if relative_path == "" and file.name in self.ignored_root_paths:
+        # Determine the root entry of the path to correctly apply ignore rules
+        root_entry = Path(relative_path).parts[0] if relative_path else file.name
+
+        # Ignore files and directories under configured root paths (e.g. build, templates, etc.)
+        if root_entry in self.ignored_root_paths:
             return True
+
+        # Ignore hidden files and PDFs
         if file.name.startswith(".") or file.name.endswith(".pdf"):
             return True
         return False
