@@ -10,7 +10,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.validation import normalize_workspace_path, validate_pathname, validate_workspace_path, ignore_file_path
+from app.utils.validation import ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,9 @@ class FileService:
             target_path = folder / name
 
             if target_path.exists():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists"
+                )
             if request_data.type == "file":
                 return self._create_file(workspace.abs_path, request_data.name, target_path)
             elif request_data.type == "folder":

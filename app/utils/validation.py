@@ -129,6 +129,7 @@ def normalize_workspace_path(path: str | Path, workspace_path: Path, absolute: b
         path = path[1:]
     return path
 
+
 def ignore_file_path(file: Path, relative_path: str, ignored_paths: set[str]) -> bool:
     if relative_path == ".":
         relative_path = ""
