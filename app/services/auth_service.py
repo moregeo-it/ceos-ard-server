@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException, status, Query, Request
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 

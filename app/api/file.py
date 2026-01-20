@@ -11,11 +11,11 @@ from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     ChangedFilesResponse,
     CreateFileRequest,
+    FileContextResponse,
     FileListResponse,
     FileOperationResponse,
     FilePatchRequest,
     FileSearchResponse,
-    FileContextResponse,
 )
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
@@ -240,6 +240,7 @@ async def get_file_diff(
     except Exception as e:
         logger.error(f"Error getting file diff: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file diff", e)) from e
+
 
 @router.get(
     "/{workspace_id}/context/{file_path:path}",

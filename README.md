@@ -238,17 +238,8 @@ app/
 ### Code Quality
 
 ```bash
-# Run linting
-pixi run lint
-
-# Format code
-pixi run format
-
-# Fix linting issues
-pixi run lint-fix
-
 # Run pre-commit hooks
-pixi run pre-commit-run
+pixi run pre-commit
 ```
 
 ### Testing

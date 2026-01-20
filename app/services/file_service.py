@@ -116,7 +116,7 @@ class FileService:
                     files.append(self.get_file_dict(file, workspace.abs_path, status=status))
 
             # Sort directories first, then files, both alphabetically
-            files.sort(key=lambda x: (x["is_directory"] == False, x["name"].lower()))
+            files.sort(key=lambda x: (not x["is_directory"], x["name"].lower()))
 
             return files
         except HTTPException:
@@ -124,7 +124,9 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
-    def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict = {}) -> list[dict]:
+    def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict | None = None) -> list[dict]:
+        if status is None:
+            status = {}
         all_files = []
 
         for file in target_path.iterdir():
@@ -476,5 +478,6 @@ class FileService:
             raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file context: {str(e)}") from e
+
 
 file_service = FileService()

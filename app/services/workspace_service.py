@@ -1,6 +1,5 @@
 import logging
 import shutil
-import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -40,9 +39,6 @@ class WorkspaceService:
 
             if was_created:
                 logger.info(f"Created new fork for user {username}")
-
-            # Generate workspace path and branch name
-            workspace_id = str(uuid.uuid4())
 
             # Create workspace record in database
             workspace = GitWorkspace(
@@ -314,7 +310,7 @@ class WorkspaceService:
 
                 try:
                     yaml_content = pfs_document_path.read_text()
-                    validated_document = load(yaml_content, PFS_DOCUMENT(file=pfs_document_path.name, base_path=workspace_path))
+                    validated_document = load(yaml_content, PFS_DOCUMENT(file=pfs_document_path.name, base_path=workspace.abs_path))
                     document_data = validated_document.data
 
                     if not document_data.get("id") or not document_data.get("title"):
@@ -397,11 +393,11 @@ class WorkspaceService:
 
                 logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
 
-                repo = git.Repo(workspace_path)
+                repo = git.Repo(workspace.abs_path)
 
                 # Add changes to the repository
                 try:
-                    repo.git.add(normalize_workspace_path(new_pfs_path, workspace_path, absolute=False))
+                    repo.git.add(normalize_workspace_path(new_pfs_path, workspace.abs_path, absolute=False))
                 except git.GitCommandError as e:
                     logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
