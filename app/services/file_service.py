@@ -10,7 +10,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.validation import ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
+from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ class FileService:
     def __init__(self):
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
-        self.ignored_root_paths = {"build", "templates", ".git", "LICENSE"}
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_file_status(self, repo: git.Repo, path: Path):
@@ -130,7 +129,7 @@ class FileService:
         all_files = []
 
         for file in target_path.iterdir():
-            if ignore_file_path(file, str(file.relative_to(workspace_path)), self.ignored_root_paths):
+            if ignore_file_path(file, file.relative_to(workspace_path), IGNORE_ROOT_PATHS):
                 continue
 
             filepath = str(file.resolve())
