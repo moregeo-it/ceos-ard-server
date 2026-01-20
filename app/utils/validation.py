@@ -3,6 +3,8 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
+IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github", "LICENSE"}
+
 
 def validate_pathname(filename: str) -> str:
     if not isinstance(filename, str) and len(filename) > 0:
@@ -42,7 +44,9 @@ def validate_pathname(filename: str) -> str:
     return filename
 
 
-def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool = None, type: str = None) -> Path:
+def validate_workspace_path(
+    path: str | Path, workspace_path: Path, exists: bool | None = None, type: str | None = None, is_preview: bool = False
+) -> Path:
     if not workspace_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -68,8 +72,9 @@ def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool
     if path.startswith("/"):
         path = path[1:]
 
+    base_path = workspace_path / "build" if is_preview else workspace_path
     abs_path = (workspace_path / path).resolve()
-    if not abs_path.is_relative_to(workspace_path):
+    if not abs_path.is_relative_to(base_path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path '{path}' is outside the workspace directory",
@@ -90,6 +95,18 @@ def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path '{path}' already exists in workspace",
+        )
+
+    if is_preview:
+        ignored_paths = IGNORE_ROOT_PATHS.copy()
+        ignored_paths.discard("build")
+    else:
+        ignored_paths = IGNORE_ROOT_PATHS
+
+    if ignore_file_path(abs_path, abs_path.relative_to(workspace_path), ignored_paths):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Path '{path}' is not accessible",
         )
 
     if type == "file" and not abs_path.is_file():
@@ -117,3 +134,20 @@ def normalize_workspace_path(path: str | Path, workspace_path: Path, absolute: b
     elif not absolute and path.startswith("/"):
         path = path[1:]
     return path
+
+
+def ignore_file_path(file: Path, relative_path: Path, ignored_paths: set[str]) -> bool:
+    # Determine the root entry of the path to correctly apply ignore rules
+    if relative_path == Path("."):
+        root_entry = file.name
+    else:
+        root_entry = relative_path.parts[0]
+
+    # Ignore files and directories under configured root paths (e.g. build, templates, etc.)
+    if root_entry in ignored_paths:
+        return True
+
+    # Ignore hidden files and PDFs
+    if file.name.startswith(".") or file.name.endswith(".pdf"):
+        return True
+    return False

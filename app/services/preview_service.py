@@ -30,7 +30,7 @@ class PreviewService:
             build_info = await self.build_service.start_build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs)
 
             if build_info.get("status") == "success":
-                return await self._get_preview_files(workspace.abs_path, pfs=pfs or workspace.pfs)
+                return await self._get_preview_files(workspace.abs_path, pfs=pfs or workspace.pfs, file_prefix=build_info.get("output_file"))
 
             else:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")
@@ -42,19 +42,14 @@ class PreviewService:
                 detail="An error occurred while generating the preview files. Please try again later." + str(e),
             ) from e
 
-    async def _get_preview_files(self, workspace_path: Path, pfs: list[str] | None = None):
+    async def _get_preview_files(self, workspace_path: Path, pfs: list[str] | None = None, file_prefix: str | None = None):
         build_dir = workspace_path / "build"
 
         if not build_dir.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build directory not found")
 
-        preview_list = build_dir.iterdir()
-
-        html_content = ""
-        for file in preview_list:
-            if file.is_file() and file.suffix == ".html" and any(p in file.name for p in (pfs or [])):
-                with open(file, encoding="utf-8") as f:
-                    html_content += f.read() + "\n"
+        filepath = Path(file_prefix + ".html")
+        html_content = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
 
         def replace_edit_tags(match):
             path = Path(match.group(1))
@@ -76,9 +71,7 @@ class PreviewService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            preview_file_path = validate_workspace_path("build/" + file_path, workspace.abs_path, type="file")
-
-            return preview_file_path
+            return validate_workspace_path(("build/" + file_path), workspace.abs_path, exists=True, type="file", is_preview=True)
         except HTTPException:
             raise
         except Exception as e:

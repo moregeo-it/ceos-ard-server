@@ -24,9 +24,9 @@ class BuildService:
         return await self._execute_build(workspace_path, workspace_id, pfs)
 
     async def _execute_build(self, workspace_path: Path, workspace_id: str, pfs: list[str] | None) -> dict[str, Any]:
-        output_dir = workspace_path / "build" / ("-".join(pfs) if pfs else "")
+        output_file = workspace_path / "build" / ("-".join(pfs) if pfs else "")
 
-        cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_dir), "-i", str(workspace_path), "--pdf", "--docx"]
+        cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_file), "-i", str(workspace_path), "--pdf", "--docx"]
 
         logger.info(f"Building workspace {workspace_id} {'with PFS ' + ' '.join(pfs) if pfs else '(all files)'}")
 
@@ -36,12 +36,12 @@ class BuildService:
             stdout, stderr = await process.communicate()
 
             if process.returncode == 0:
-                return {"status": "success", "message": f"Build completed successfully for workspace {workspace_id}", "output_dir": str(output_dir)}
+                return {"status": "success", "message": f"Build completed successfully for workspace {workspace_id}", "output_file": str(output_file)}
             else:
                 return {
                     "status": "error",
                     "message": f"Build failed for workspace {workspace_id}: Process exited with code {process.returncode}",
-                    "output_dir": str(output_dir),
+                    "output_file": str(output_file),
                 }
 
         except Exception as e:
