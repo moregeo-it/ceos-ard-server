@@ -44,7 +44,9 @@ def validate_pathname(filename: str) -> str:
     return filename
 
 
-def validate_workspace_path(path: str | Path, workspace_path: Path, exists: bool | None = None, type: str | None = None, is_preview: bool = False) -> Path:
+def validate_workspace_path(
+    path: str | Path, workspace_path: Path, exists: bool | None = None, type: str | None = None, is_preview: bool = False
+) -> Path:
     if not workspace_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
