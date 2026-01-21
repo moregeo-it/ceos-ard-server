@@ -133,6 +133,7 @@ class FileListResponse(BaseModel):
 class FileContextResponse(FileListResponse):
     usage: list[str]
 
+
 class FileSearchResponse(BaseModel):
     name: str
     type: str
