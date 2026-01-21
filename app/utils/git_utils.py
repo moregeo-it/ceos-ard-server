@@ -19,7 +19,7 @@ def get_file_status(repo: git.Repo, path: Path) -> str | None:
 def extract_status(line: str) -> str:
     code = line[:2].strip()
 
-    status_map = {"A": "added", "M": "modified", "D": "deleted", "R": "renamed", "??": "untracked"}
+    status_map = {"A": "added", "M": "modified", "D": "deleted", "R": "renamed"}
 
     for marker, status in status_map.items():
         if marker in code:

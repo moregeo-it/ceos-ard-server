@@ -133,11 +133,6 @@ class FileListResponse(BaseModel):
 class FileContextResponse(FileListResponse):
     usage: list[str]
 
-
-class FileDeleteResponse(FileListResponse):
-    tracked: bool | None
-
-
 class FileSearchResponse(BaseModel):
     name: str
     type: str

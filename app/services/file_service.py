@@ -278,6 +278,7 @@ class FileService:
 
         relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         return {
+            # Tracked means the file is and was under version control, so the delete can be reverted if needed.
             "tracked": is_committed,
             "file_details": {
                 "name": target_path.name,
