@@ -176,10 +176,10 @@ class GitService:
                 repo.git.checkout("HEAD", "--", relative_file_str)
 
                 return {
-                    "path": relative_file_str,
                     "name": str(target_file_path.name),
                     "is_directory": target_file_path.is_dir(),
                     "status": get_file_status(repo, relative_file_str),
+                    "path": normalize_workspace_path(target_file_path, workspace_path),
                 }
             except git.GitCommandError:
                 # File not in HEAD - check if it's part of a rename
@@ -203,10 +203,10 @@ class GitService:
                     old_file_path = workspace_path / old_path
                     relative_old_path = normalize_workspace_path(old_file_path, workspace_path, absolute=False)
                     return {
-                        "path": relative_old_path,
                         "name": str(old_file_path.name),
                         "is_directory": old_file_path.is_dir(),
                         "status": get_file_status(repo, relative_old_path),
+                        "path": normalize_workspace_path(old_file_path, workspace_path),
                     }
 
             # File has no git history - cannot revert

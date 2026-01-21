@@ -175,8 +175,8 @@ class FileService:
         return {
             "name": name,
             "is_directory": False,
-            "path": relative_path,
             "status": get_file_status(repo, relative_path),
+            "path": normalize_workspace_path(target_path, workspace_path),
         }
 
     def _create_folder(self, workspace_path: Path, name: str, target_path: Path):
@@ -190,8 +190,8 @@ class FileService:
         return {
             "name": name,
             "is_directory": True,
-            "path": relative_path,
             "status": get_file_status(repo, relative_path),
+            "path": normalize_workspace_path(target_path, workspace_path),
         }
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
@@ -221,10 +221,10 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
             relative_path = normalize_workspace_path(file_path, workspace.abs_path, absolute=False)
             return {
-                "path": relative_path,
                 "name": file_path.name,
                 "is_directory": file_path.is_dir(),
                 "status": get_file_status(repo, relative_path),
+                "path": normalize_workspace_path(file_path, workspace.abs_path),
             }
         except HTTPException:
             raise
@@ -278,11 +278,11 @@ class FileService:
 
         relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         return {
-            "path": relative_path,
             "tracked": is_committed,
             "name": target_path.name,
             "is_directory": target_path.is_dir(),
             "status": get_file_status(repo, relative_path),
+            "path": normalize_workspace_path(target_path, workspace.abs_path),
         }
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
@@ -322,9 +322,9 @@ class FileService:
 
         return {
             "name": new_name,
-            "path": relative_new,
             "is_directory": new_path.is_dir(),
             "status": get_file_status(repo, relative_new),
+            "path": normalize_workspace_path(new_path, workspace_path),
         }
 
     async def _revert_file_changes(self, workspace_path: Path, file_path: str):
@@ -489,9 +489,9 @@ class FileService:
 
             return {
                 "name": target_path.name,
-                "path": relative_file_str,
                 "is_directory": target_path.is_dir(),
                 "status": get_file_status(repo, relative_file_str),
+                "path": normalize_workspace_path(target_path, workspace.abs_path),
                 "usage": [],
             }
         except HTTPException:
