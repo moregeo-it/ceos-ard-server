@@ -279,10 +279,12 @@ class FileService:
         relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         return {
             "tracked": is_committed,
-            "name": target_path.name,
-            "is_directory": target_path.is_dir(),
-            "status": get_file_status(repo, relative_path),
-            "path": normalize_workspace_path(target_path, workspace.abs_path),
+            "file_details": {
+                "name": target_path.name,
+                "is_directory": target_path.is_dir(),
+                "status": get_file_status(repo, relative_path),
+                "path": normalize_workspace_path(target_path, workspace.abs_path),
+            },
         }
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):

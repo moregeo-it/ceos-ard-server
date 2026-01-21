@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -12,7 +12,6 @@ from app.schemas.workspace import (
     ChangedFilesResponse,
     CreateFileRequest,
     FileContextResponse,
-    FileDeleteResponse,
     FileListResponse,
     FilePatchRequest,
     FileSearchResponse,
@@ -128,8 +127,6 @@ async def store_file_content(
     "/{workspace_id}/files/{file_path:path}",
     summary="Delete a file or folder in a workspace",
     description="Delete a file or folder in a workspace",
-    response_model=FileDeleteResponse,
-    status_code=status.HTTP_200_OK,
 )
 async def delete(
     file_path: str,
@@ -139,7 +136,12 @@ async def delete(
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        return await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+        deleted_file = await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+
+        if deleted_file["tracked"]:
+            return JSONResponse(content=deleted_file["file_details"], status_code=status.HTTP_200_OK)
+        else:
+            return Response(content=None, status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
     except Exception as e:
