@@ -10,6 +10,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
+from app.utils.git_utils import get_file_status
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -20,22 +21,6 @@ class FileService:
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
-
-    def _get_file_status(self, repo: git.Repo, path: Path):
-        try:
-            git_status = repo.git.status(path, porcelain=True)
-            if "A" in git_status:
-                dir_status = "added"
-            elif "M" in git_status:
-                dir_status = "modified"
-            elif "R" in git_status:
-                dir_status = "renamed"
-            else:
-                dir_status = None
-        except git.exc.GitCommandError:
-            dir_status = "deleted"
-
-        return dir_status
 
     def _get_all_file_statuses(self, repo: git.Repo, target_path: Path, workspace_path: Path):
         """Get all file statuses using GitPython API."""
@@ -186,11 +171,28 @@ class FileService:
             repo.git.add(str(target_path))
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
-        return {"name": name, "path": normalize_workspace_path(target_path, workspace_path), "directory": False}
+        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
+        return {
+            "name": name,
+            "is_directory": False,
+            "status": get_file_status(repo, relative_path),
+            "path": normalize_workspace_path(target_path, workspace_path),
+        }
 
     def _create_folder(self, workspace_path: Path, name: str, target_path: Path):
-        target_path.mkdir(parents=True, exist_ok=True)
-        return {"name": name, "path": normalize_workspace_path(target_path, workspace_path), "directory": True}
+        try:
+            target_path.mkdir(parents=True, exist_ok=True)
+            repo = git.Repo(workspace_path, search_parent_directories=True)
+        except git.exc.GitCommandError as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
+
+        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
+        return {
+            "name": name,
+            "is_directory": True,
+            "status": get_file_status(repo, relative_path),
+            "path": normalize_workspace_path(target_path, workspace_path),
+        }
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         try:
@@ -217,11 +219,12 @@ class FileService:
                 repo.git.add(str(file_path))
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
+            relative_path = normalize_workspace_path(file_path, workspace.abs_path, absolute=False)
             return {
                 "name": file_path.name,
-                "path": normalize_workspace_path(file_path, workspace.abs_path),
                 "is_directory": file_path.is_dir(),
-                "status": self._get_file_status(repo, file_path),
+                "status": get_file_status(repo, relative_path),
+                "path": normalize_workspace_path(file_path, workspace.abs_path),
             }
         except HTTPException:
             raise
@@ -272,7 +275,18 @@ class FileService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="File or folder deleted successfully, but failed to make the changes in the repository",
             ) from e
-        return {"message": "File or folder deleted successfully."}
+
+        relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+        return {
+            # Tracked means the file is and was under version control, so the delete can be reverted if needed.
+            "tracked": is_committed,
+            "file_details": {
+                "name": target_path.name,
+                "is_directory": target_path.is_dir(),
+                "status": get_file_status(repo, relative_path),
+                "path": normalize_workspace_path(target_path, workspace.abs_path),
+            },
+        }
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         try:
@@ -309,7 +323,12 @@ class FileService:
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file/folder to repository") from e
 
-        return {"name": new_name, "path": normalize_workspace_path(new_path, workspace_path), "directory": new_path.is_dir()}
+        return {
+            "name": new_name,
+            "is_directory": new_path.is_dir(),
+            "status": get_file_status(repo, relative_new),
+            "path": normalize_workspace_path(new_path, workspace_path),
+        }
 
     async def _revert_file_changes(self, workspace_path: Path, file_path: str):
         try:
@@ -464,15 +483,18 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
 
-            repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+            try:
+                repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+            except git.exc.GitCommandError as e:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
 
-            status = self._get_file_status(repo, target_path)
+            relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
             return {
                 "name": target_path.name,
-                "path": normalize_workspace_path(target_path, workspace.abs_path),
                 "is_directory": target_path.is_dir(),
-                "status": status,
+                "status": get_file_status(repo, relative_file_str),
+                "path": normalize_workspace_path(target_path, workspace.abs_path),
                 "usage": [],
             }
         except HTTPException:

@@ -143,12 +143,6 @@ class FileSearchResponse(BaseModel):
     excerpt: str | None = None
 
 
-class FileOperationResponse(BaseModel):
-    path: str
-    name: str
-    directory: bool
-
-
 class ChangedFilesResponse(BaseModel):
     path: str
     status: str | None = None

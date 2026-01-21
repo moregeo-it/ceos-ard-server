@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 from app.schemas.workspace import GitStatusFile
+from app.utils.git_utils import get_file_status
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,13 @@ class GitService:
                 repo.git.cat_file("-e", f"HEAD:{relative_file_str}")
                 # File exists in HEAD - restore it directly
                 repo.git.checkout("HEAD", "--", relative_file_str)
-                return {"path": str(target_file_path), "name": str(target_file_path.name), "directory": False}
+
+                return {
+                    "name": str(target_file_path.name),
+                    "is_directory": target_file_path.is_dir(),
+                    "status": get_file_status(repo, relative_file_str),
+                    "path": normalize_workspace_path(target_file_path, workspace_path),
+                }
             except git.GitCommandError:
                 # File not in HEAD - check if it's part of a rename
                 pass
@@ -194,7 +201,13 @@ class GitService:
                         target_file_path.unlink()
 
                     old_file_path = workspace_path / old_path
-                    return {"path": str(old_file_path), "name": str(old_file_path.name), "directory": False}
+                    relative_old_path = normalize_workspace_path(old_file_path, workspace_path, absolute=False)
+                    return {
+                        "name": str(old_file_path.name),
+                        "is_directory": old_file_path.is_dir(),
+                        "status": get_file_status(repo, relative_old_path),
+                        "path": normalize_workspace_path(old_file_path, workspace_path),
+                    }
 
             # File has no git history - cannot revert
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert file with no git history. File was never committed.")
