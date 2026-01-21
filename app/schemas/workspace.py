@@ -134,6 +134,10 @@ class FileContextResponse(FileListResponse):
     usage: list[str]
 
 
+class FileDeleteResponse(FileListResponse):
+    tracked: bool | None
+
+
 class FileSearchResponse(BaseModel):
     name: str
     type: str
@@ -141,12 +145,6 @@ class FileSearchResponse(BaseModel):
     line: int | None = None
     column: int | None = None
     excerpt: str | None = None
-
-
-class FileOperationResponse(BaseModel):
-    path: str
-    name: str
-    directory: bool
 
 
 class ChangedFilesResponse(BaseModel):

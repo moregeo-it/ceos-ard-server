@@ -12,8 +12,8 @@ from app.schemas.workspace import (
     ChangedFilesResponse,
     CreateFileRequest,
     FileContextResponse,
+    FileDeleteResponse,
     FileListResponse,
-    FileOperationResponse,
     FilePatchRequest,
     FileSearchResponse,
 )
@@ -53,7 +53,7 @@ async def list_workspace_files(
     "/{workspace_id}/files",
     summary="Create a file or folder in a workspace",
     description="Create a file or folder in a workspace",
-    response_model=FileOperationResponse,
+    response_model=FileListResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create(
@@ -128,7 +128,8 @@ async def store_file_content(
     "/{workspace_id}/files/{file_path:path}",
     summary="Delete a file or folder in a workspace",
     description="Delete a file or folder in a workspace",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=FileDeleteResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def delete(
     file_path: str,
@@ -150,7 +151,7 @@ async def delete(
     "/{workspace_id}/files/{file_path:path}",
     summary="Update file metadata or operations",
     description="Perform file operations such rename or revert changes",
-    response_model=FileOperationResponse,
+    response_model=FileListResponse,
     status_code=status.HTTP_200_OK,
 )
 async def patch_file(
