@@ -120,12 +120,6 @@ def validate_workspace_path(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path '{path}' is a directory, expected a file",
             )
-        elif exists is True and not abs_path.is_file():
-            # exists=True explicitly set, but path is not a file
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path '{path}' is not a file",
-            )
         elif not path_exists:
             # File doesn't exist yet - ensure parent directory exists and is valid
             parent_path = abs_path.parent
@@ -151,12 +145,6 @@ def validate_workspace_path(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path '{path}' is a file, expected a directory",
-            )
-        elif exists is True and not abs_path.is_dir():
-            # exists=True explicitly set, but path is not a directory
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path '{path}' is not a directory",
             )
 
     return abs_path
