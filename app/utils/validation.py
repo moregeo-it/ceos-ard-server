@@ -133,12 +133,6 @@ def validate_workspace_path(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Parent of '{path}' is not a directory",
                 )
-            # Ensure parent is within workspace bounds (it should be, but verify)
-            if not parent_path.is_relative_to(base_path):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Parent directory of '{path}' is outside the workspace",
-                )
     elif type == "folder":
         if path_exists and abs_path.is_file():
             # Path exists but is a file, not a directory
