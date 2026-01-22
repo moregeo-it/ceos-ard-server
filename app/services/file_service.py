@@ -206,11 +206,9 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
-        if not content:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Content is required")
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+            file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
 
             file_path.write_bytes(content)
             # Add changes to the repository

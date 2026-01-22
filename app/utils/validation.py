@@ -47,6 +47,12 @@ def validate_pathname(filename: str) -> str:
 def validate_workspace_path(
     path: str | Path, workspace_path: Path, exists: bool | None = None, type: str | None = None, is_preview: bool = False
 ) -> Path:
+    if type not in (None, "file", "folder"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Type must be either 'file', 'folder' or None",
+        )
+
     if not workspace_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -86,17 +92,6 @@ def validate_workspace_path(
             detail="Path length exceeds the maximum allowed length of 255 characters",
         )
 
-    if exists and not abs_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path '{path}' not found in workspace",
-        )
-    elif exists is False and abs_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path '{path}' already exists in workspace",
-        )
-
     if is_preview:
         ignored_paths = IGNORE_ROOT_PATHS.copy()
         ignored_paths.discard("build")
@@ -109,12 +104,23 @@ def validate_workspace_path(
             detail=f"Path '{path}' is not accessible",
         )
 
-    if type == "file" and not abs_path.is_file():
+    path_exists = abs_path.exists()
+    if exists and not path_exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Path '{path}' not found in workspace",
+        )
+    elif exists is False and path_exists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Path '{path}' already exists in workspace",
+        )
+    elif type == "file" and exists is not False and path_exists and not abs_path.is_file():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path '{path}' is not a file",
         )
-    elif type == "folder" and not abs_path.is_dir():
+    elif type == "folder" and exists is not False and path_exists and not abs_path.is_dir():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path '{path}' is not a directory",
