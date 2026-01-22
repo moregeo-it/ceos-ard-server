@@ -86,12 +86,15 @@ def validate_workspace_path(
             detail="Path length exceeds the maximum allowed length of 255 characters",
         )
 
-    if exists and not abs_path.exists():
+    # Handle existence checks
+    path_exists = abs_path.exists()
+    
+    if exists and not path_exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path '{path}' not found in workspace",
         )
-    elif exists is False and abs_path.exists():
+    elif exists is False and path_exists:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path '{path}' already exists in workspace",
@@ -109,16 +112,34 @@ def validate_workspace_path(
             detail=f"Path '{path}' is not accessible",
         )
 
-    if type == "file" and not abs_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path '{path}' is not a file",
-        )
-    elif type == "folder" and not abs_path.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path '{path}' is not a directory",
-        )
+    # Handle type checks with smart existence handling
+    if type == "file":
+        if path_exists and abs_path.is_dir():
+            # Path exists but is a directory, not a file
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Path '{path}' is a directory, expected a file",
+            )
+        elif not path_exists:
+            # File doesn't exist yet - ensure parent directory exists and is valid
+            parent_path = abs_path.parent
+            if not parent_path.exists():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Parent directory of '{path}' does not exist",
+                )
+            elif not parent_path.is_dir():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Parent of '{path}' is not a directory",
+                )
+    elif type == "folder":
+        if path_exists and abs_path.is_file():
+            # Path exists but is a file, not a directory
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Path '{path}' is a file, expected a directory",
+            )
 
     return abs_path
 
