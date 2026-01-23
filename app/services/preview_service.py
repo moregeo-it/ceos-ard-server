@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.services.build_service import BuildService
 from app.services.workspace_service import WorkspaceService
-from app.utils.extraction import get_file_media_type
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,7 @@ class PreviewService:
                 return await self._get_preview_files(workspace.abs_path, file_prefix=build_info.get("output_file"))
 
             else:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
 
         except Exception as e:
             logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
@@ -103,13 +102,12 @@ class PreviewService:
                     return {
                         "path": document_file,
                         "name": document_file.name,
-                        "media_type": get_file_media_type(str(document_file)),
                     }
                 else:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested document file not found")
 
             else:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
 
         except Exception as e:
             logger.error(f"Error downloading preview document for workspace {workspace_id}: {e}")

@@ -84,6 +84,11 @@ async def download_preview_document(
     format: str = Query(..., enum=["pdf", "docx"]),
     pfs: list[str] = Query(min_items=1, max_items=50),
 ):
+    media_types = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    media_type = media_types.get(format, "application/octet-stream")
     try:
         document_file = await preview_service.download_preview_document(
             db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
@@ -92,7 +97,7 @@ async def download_preview_document(
         return FileResponse(
             path=document_file["path"],
             filename=document_file["name"],
-            media_type=document_file["media_type"],
+            media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={document_file['name']}"},
         )
     except HTTPException:

@@ -1331,10 +1331,7 @@ components:
       name: format
       in: query
       required: true
-      description: |-
-        Format of the downloaded preview document.
-
-        Supported formats depend on the selected PFS type.
+      description: Format of the downloaded preview document.
       schema:
         type: string
         enum:
