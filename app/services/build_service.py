@@ -14,9 +14,7 @@ class BuildService:
     def __init__(self):
         self.prereqs_ok = CEOS_ARD_AVAILABLE  # Use the global check result
 
-    async def start_build(
-        self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_format: str | None = None
-    ) -> dict[str, Any]:
+    async def start_build(self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_format: str | None = None) -> dict[str, Any]:
         if not workspace_path or not workspace_id:
             raise ValueError("Workspace path and ID must be provided")
         if not self.prereqs_ok:

@@ -83,9 +83,7 @@ class PreviewService:
                 detail="An error occurred while retrieving the preview static file. Please try again later." + str(e),
             ) from e
 
-    async def download_preview_document(
-        self, db: Session, pfs: list[str] | None, format: str, workspace_id: str, user_id: str
-    ) -> dict[str, Any]:
+    async def download_preview_document(self, db: Session, pfs: list[str] | None, format: str, workspace_id: str, user_id: str) -> dict[str, Any]:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
