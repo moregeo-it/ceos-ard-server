@@ -81,23 +81,12 @@ class WorkspaceService:
                 db.refresh(workspace)
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
-
-                if workspace.pfs is not None and len(workspace.pfs) > 0:
-                    await self._trigger_build(workspace)
             else:
                 raise Exception("Failed to setup workspace")
 
         except Exception as e:
             logger.error(f"Error setting up workspace {workspace.id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to setup workspace: {str(e)}") from e
-
-    async def _trigger_build(self, workspace: GitWorkspace):
-        try:
-            logger.info(f"Triggering build for workspace {workspace.id}")
-
-            await self.build_service.start_build(workspace_id=workspace.id, workspace_path=workspace.abs_path, pfs=workspace.pfs)
-        except Exception as e:
-            logger.error(f"Error triggering build for workspace {workspace.id}: {e}")
 
     def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
         try:

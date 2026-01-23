@@ -81,12 +81,13 @@ async def download_preview_document(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
-    document_type: str = Query(default="pdf", regex="^(pdf|docx)$"),
+    format: str = Query(..., enum=["pdf", "docx"]),
     pfs: list[str] = Query(min_items=1, max_items=50),
 ):
+    print(type)
     try:
         document_file = await preview_service.download_preview_document(
-            db=db, pfs=pfs, document_type=document_type, workspace_id=workspace_id, user_id=current_user["user"].id
+            db=db, pfs=pfs, document_type=format, workspace_id=workspace_id, user_id=current_user["user"].id
         )
 
         return FileResponse(
