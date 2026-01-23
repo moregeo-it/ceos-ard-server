@@ -6,7 +6,6 @@ import git
 from fastapi import HTTPException, status
 
 from app.config import settings
-from app.schemas.workspace import GitStatusFile
 from app.utils.git_utils import get_file_status
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
