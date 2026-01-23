@@ -131,7 +131,7 @@ class FileListResponse(BaseModel):
 
 
 class FileContextResponse(FileListResponse):
-    usage: list[str]
+    usage: list[str] | None
 
 
 class FileSearchResponse(BaseModel):
