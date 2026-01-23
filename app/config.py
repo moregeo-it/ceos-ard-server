@@ -23,6 +23,9 @@ DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,di
 
 
 class Settings:
+    CLIENT_URL: str = CLIENT_URL
+    SERVER_URL: str = SERVER_URL
+
     GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID")
     GITHUB_CLIENT_SECRET: str = os.getenv("GITHUB_CLIENT_SECRET")
 
