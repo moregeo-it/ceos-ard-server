@@ -83,6 +83,9 @@ curl -fsSL https://pixi.sh/install.sh | bash
 
 # Install project dependencies
 pixi install
+
+# Install Chromium for PDF rendering
+pixi run install-browser
 ```
 
 ### 3. Environment Configuration
