@@ -337,6 +337,8 @@ class FileService:
     async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
         if not search_query:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query is required")
+        if len(search_query.strip()) < 3:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query must be at least 3 characters long")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
