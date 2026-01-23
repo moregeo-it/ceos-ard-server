@@ -1038,6 +1038,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/download:
+    get:
+      summary: Download preview document
+      description: Downloads the preview document for the current workspace state
+      operationId: downloadPreviewDocument
+      tags:
+        - Previews
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/PfsType'
+        - $ref: '#/components/parameters/DocumentFormat'
+      responses:
+        '200':
+          description: Preview document content downloaded successfully
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # todo
   /workspaces/{workspaceId}/proposals:
     post:
@@ -1290,6 +1326,20 @@ components:
         type: array
         items:
           type: string
+
+    DocumentFormat:
+      name: format
+      in: query
+      required: true
+      description: |-
+        Format of the downloaded preview document.
+
+        Supported formats depend on the selected PFS type.
+      schema:
+        type: string
+        enum:
+          - pdf
+          - docx
 
   schemas:
     Error:
