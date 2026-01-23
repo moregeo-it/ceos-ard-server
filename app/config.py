@@ -10,7 +10,7 @@ load_dotenv()
 #   --- / openid: Standard scope for OpenID Connect to get user identity.
 #   --- / profile: to be confirmed, maybe needed for basic user information.
 # Editor:
-#   public_repo / ---:  Allows to fork repositories for the editor under the org/user account so that PRs can be submitted.
+#   public_repo / ---: Allows to fork repositories for the editor under the org/user account so that PRs can be submitted.
 #   repo:status / ---: Get the status of GitHub PRs and checks to update the status of the editor workspaces.
 # Assessor:
 #   user:email / email: Stored for the assessor to notify about new assessments and results.
