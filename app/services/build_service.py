@@ -15,7 +15,7 @@ class BuildService:
         self.prereqs_ok = CEOS_ARD_AVAILABLE  # Use the global check result
 
     async def start_build(
-        self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_document_type: str | None = None
+        self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_format: str | None = None
     ) -> dict[str, Any]:
         if not workspace_path or not workspace_id:
             raise ValueError("Workspace path and ID must be provided")
@@ -25,18 +25,18 @@ class BuildService:
         if not workspace_path.exists():
             raise FileNotFoundError(f"Workspace path {workspace_path} does not exist")
 
-        return await self._execute_build(workspace_path, workspace_id, pfs, include_document_type)
+        return await self._execute_build(workspace_path, workspace_id, pfs, include_format)
 
     async def _execute_build(
-        self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_document_type: str | None = None
+        self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_format: str | None = None
     ) -> dict[str, Any]:
         output_file = workspace_path / "build" / ("-".join(pfs) if pfs else "")
 
         cmd_args = ["ceos-ard", "generate", *pfs, "-o", str(output_file), "-i", str(workspace_path), "--pdf", "--docx"]
 
-        if include_document_type == "pdf":
+        if include_format == "pdf":
             cmd_args.remove("--pdf")
-        elif include_document_type == "docx":
+        elif include_format == "docx":
             cmd_args.remove("--docx")
 
         logger.info(f"Building workspace {workspace_id} {'with PFS ' + ' '.join(pfs) if pfs else '(all files)'}")

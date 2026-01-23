@@ -87,7 +87,7 @@ async def download_preview_document(
     print(type)
     try:
         document_file = await preview_service.download_preview_document(
-            db=db, pfs=pfs, document_type=format, workspace_id=workspace_id, user_id=current_user["user"].id
+            db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
         )
 
         return FileResponse(

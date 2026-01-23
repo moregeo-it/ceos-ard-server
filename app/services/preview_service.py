@@ -84,7 +84,7 @@ class PreviewService:
             ) from e
 
     async def download_preview_document(
-        self, db: Session, pfs: list[str] | None, document_type: str, workspace_id: str, user_id: str
+        self, db: Session, pfs: list[str] | None, format: str, workspace_id: str, user_id: str
     ) -> dict[str, Any]:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
@@ -96,11 +96,11 @@ class PreviewService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             build_info = await self.build_service.start_build(
-                workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs, include_document_type=document_type
+                workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs, include_format=format
             )
 
             if build_info.get("status") == "success":
-                document_file = Path(build_info.get("output_file") + f".{document_type}")
+                document_file = Path(build_info.get("output_file") + f".{format}")
                 if document_file.exists():
                     return {
                         "path": document_file,
