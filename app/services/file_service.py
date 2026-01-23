@@ -12,7 +12,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.git_utils import get_file_status
+from app.utils.git_utils import get_file_status, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -400,17 +400,8 @@ class FileService:
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            git_status = await self.git_service.get_git_status(workspace.abs_path)
 
-            changed_files = []
-
-            for file in git_status["modified_files"]:
-                changed_files.append({"path": normalize_workspace_path(file, workspace.abs_path), "status": file.status})
-
-            for file in git_status["untracked_files"]:
-                changed_files.append({"path": normalize_workspace_path(file, workspace.abs_path), "status": "untracked"})
-
-            return changed_files
+            return get_repo_changes(workspace.abs_path)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get changed files: {str(e)}") from e
 
@@ -423,35 +414,6 @@ class FileService:
 
             repo = git.Repo(workspace.abs_path)
 
-            # Check if file is tracked by Git
-            is_tracked = False
-            try:
-                repo.git.cat_file("-e", f"HEAD:{relative_file_str}")
-                is_tracked = True
-            except git.GitCommandError:
-                is_tracked = False
-            # If not tracked, read the file content
-            if not is_tracked:
-                try:
-                    # Read the file content
-                    with open(target_path, encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                    # Get the lines of the file and create a diff output
-                    lines = content.splitlines()
-                    diff_out = f"--- /dev/null\n+++ {relative_file_str}\n@@ -0,0 +1,{len(lines)} @@\n"
-
-                    for line in lines:
-                        diff_out += f"+{line}\n"
-
-                    return diff_out
-
-                except UnicodeDecodeError:
-                    return f"Binary file b/{relative_file_str} differs"
-
-                except Exception as e:
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
-
-            # If tracked, get the diff from Git
             try:
                 diff_out = repo.git.diff(relative_file_str)
 
@@ -461,20 +423,13 @@ class FileService:
 
                     # If still no changes, return a message
                     if not diff_out:
-                        return f"No changes found for {relative_file_str}"
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No differences found for the specified file.")
 
                 return diff_out
 
             except git.GitCommandError as e:
                 logger.error(f"Git command failed for {relative_file_str}: {str(e)}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
-
-        except git.InvalidGitRepositoryError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
-
-        except ValueError as e:
-            logger.error(f"Invalid file path: {file_path}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid file path: {file_path}") from e
 
         except Exception as e:
             logger.error(f"Failed to get file diff: {str(e)}")

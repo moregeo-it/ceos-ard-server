@@ -16,6 +16,7 @@ from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 
+from app.utils.git_utils import get_repo_changes
 from ..utils.validation import normalize_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -408,9 +409,9 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already closed")
 
         try:
-            git_status = await self.git_service.get_git_status(workspace.abs_path)
+            changed_files = get_repo_changes(workspace.abs_path)
 
-            if git_status["is_clean"]:
+            if not changed_files:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")
 
             repo = git.Repo(workspace.abs_path)
