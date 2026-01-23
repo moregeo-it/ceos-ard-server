@@ -1,6 +1,7 @@
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -30,10 +31,10 @@ class PreviewService:
             build_info = await self.build_service.start_build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs)
 
             if build_info.get("status") == "success":
-                return await self._get_preview_files(workspace.abs_path, pfs=pfs or workspace.pfs, file_prefix=build_info.get("output_file"))
+                return await self._get_preview_files(workspace.abs_path, file_prefix=build_info.get("output_file"))
 
             else:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Build failed with status")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
 
         except Exception as e:
             logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
@@ -42,7 +43,7 @@ class PreviewService:
                 detail="An error occurred while generating the preview files. Please try again later." + str(e),
             ) from e
 
-    async def _get_preview_files(self, workspace_path: Path, pfs: list[str] | None = None, file_prefix: str | None = None):
+    async def _get_preview_files(self, workspace_path: Path, file_prefix: str | None = None):
         build_dir = workspace_path / "build"
 
         if not build_dir.exists():
@@ -79,6 +80,40 @@ class PreviewService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An error occurred while retrieving the preview static file. Please try again later." + str(e),
+            ) from e
+
+    async def download_preview_document(self, db: Session, pfs: list[str] | None, format: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        if not workspace_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
+
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
+
+        try:
+            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+
+            build_info = await self.build_service.start_build(
+                workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs, include_format=format
+            )
+
+            if build_info.get("status") == "success":
+                document_file = Path(build_info.get("output_file") + f".{format}")
+                if document_file.exists():
+                    return {
+                        "path": document_file,
+                        "name": document_file.name,
+                    }
+                else:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested document file not found")
+
+            else:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
+
+        except Exception as e:
+            logger.error(f"Error downloading preview document for workspace {workspace_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An error occurred while downloading the preview document. Please try again later." + str(e),
             ) from e
 
 
