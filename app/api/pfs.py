@@ -27,9 +27,9 @@ async def list_pfs_folders(
     try:
         access_token = current_user["user"].access_token
 
-        final_owner = settings.CEOS_ARD_OWNER
+        final_owner = settings.CEOS_ARD_ORG
         final_repo = settings.CEOS_ARD_REPO
-        final_branch = settings.CEOS_ARD_MAIN_BRANCH
+        final_branch = settings.CEOS_ARD_BRANCH
 
         logger.info(f"Fetching PFS folders for {final_owner}/{final_repo} on {final_branch} branch")
 

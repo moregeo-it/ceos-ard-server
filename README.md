@@ -356,17 +356,17 @@ Users authenticated with Google **cannot access workspace features**:
 ### Environment Variables for Production
 
 ```bash
-# Use a strong secret key
-SECRET_KEY=your-production-secret-key
+# Set production URL of the server / API
+SERVER_URL=https://api.yourdomain.com
 
-# Set production URLs
-CALLBACK_BASE_URI=https://yourdomain.com/auth/callback
-AUTH_SUCCESS_CLIENT_REDIRECT=https://yourdomain.com/auth/callback
-LOGOUT_REDIRECT=https://yourdomain.com
-CORS_ORIGIN_CLIENT=https://yourdomain.com
+# Set production URLs of the client
+CLIENT_URL=https://yourdomain.com
 
 # Set environment
 ENVIRONMENT=production
+
+# Use a strong secret key
+SECRET_KEY=your-production-secret-key
 
 # Use absolute path for database in production
 DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
