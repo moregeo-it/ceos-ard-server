@@ -949,7 +949,14 @@ paths:
                       - usage
                     properties:
                       usage:
-                        type: array
+                        description: |-
+                          List of PFS IDs that use the specified file.
+
+                          Returns an empty array if the file is not used by any PFS.
+                          Returns `null` if the information is not available / unknown.
+                        type:
+                          - array
+                          - 'null'
                         items:
                           type: string
                           description: PFS ID that uses the specified file

@@ -1,10 +1,12 @@
 import logging
+import re
 import shutil
 from pathlib import Path
 
 import git
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from yaml import safe_load as yaml_load
 
 from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
@@ -478,6 +480,59 @@ class FileService:
             logger.error(f"Failed to get file diff: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
+    async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
+        """
+        Get the list of PFS documents that use a specific requirement file.
+
+        Args:
+            workspace_path: The absolute path to the workspace
+            file_path: The relative file path (e.g., '/requirements/metadata/traceability-sar.yaml')
+
+        Returns:
+            List of PFS folder names that use this requirement
+        """
+        match = re.match(r"^/?requirements/(.+)\.ya?ml$", file_path)
+        if not match:
+            # TODO: implement for glossary, sections, references as well
+            return None
+
+        requirement_name = match.group(1)
+
+        # Find all PFS folders
+        pfs_dir = workspace_path / "pfs"
+        if not pfs_dir.exists() or not pfs_dir.is_dir():
+            return None
+
+        pfs_documents = []
+        # Check each PFS folder's requirements.yaml file
+        for pfs_folder in pfs_dir.iterdir():
+            if not pfs_folder.is_dir():
+                continue
+
+            requirements_file = pfs_folder / "requirements.yaml"
+            if not requirements_file.exists():
+                continue
+
+            try:
+                content = requirements_file.read_text(encoding="utf-8")
+                categories = yaml_load(content)
+            except Exception as e:
+                logger.warning(f"Could not read or parse requirements file for {pfs_folder.name}: {e}")
+                continue
+
+            # Check if this is a properly structured YAML array with categories
+            if not isinstance(categories, list):
+                continue
+
+            for category in categories:
+                if isinstance(category, dict) and "requirements" in category:
+                    requirements = category.get("requirements", [])
+                    if isinstance(requirements, list) and requirement_name in requirements:
+                        pfs_documents.append(pfs_folder.name)
+                        break
+
+        return pfs_documents
+
     async def get_file_context(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -489,13 +544,13 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
 
             relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
-
+            rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
             return {
                 "name": target_path.name,
                 "is_directory": target_path.is_dir(),
                 "status": get_file_status(repo, relative_file_str),
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
-                "usage": [],
+                "usage": await self._get_file_usage(workspace.abs_path, rel_file_path),
             }
         except HTTPException:
             raise
