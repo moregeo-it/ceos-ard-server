@@ -128,6 +128,7 @@ async def delete_workspace(
         logger.error(f"Error deleting workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace", e)) from e
 
+
 @router.post(
     "/{workspace_id}/propose",
     response_model=ProposeChangesResponse,
