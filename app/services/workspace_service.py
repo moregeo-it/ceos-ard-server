@@ -34,7 +34,7 @@ class WorkspaceService:
         try:
             logger.info(f"Checking fork for user {username}")
             fork_repo, was_created = await self.github_service.get_or_create_fork(
-                username=username, access_token=access_token, upstream_owner=settings.CEOS_ARD_OWNER, upstream_repo=settings.CEOS_ARD_REPO
+                username=username, access_token=access_token, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO
             )
 
             if was_created:
@@ -71,8 +71,8 @@ class WorkspaceService:
                 workspace_path=workspace.abs_path,
                 branch_name=workspace.branch_name,
                 upstream_repo=settings.CEOS_ARD_REPO,
-                upstream_owner=settings.CEOS_ARD_OWNER,
-                upstream_branch=settings.CEOS_ARD_MAIN_BRANCH,
+                upstream_owner=settings.CEOS_ARD_ORG,
+                upstream_branch=settings.CEOS_ARD_BRANCH,
             )
 
             if success:
@@ -475,11 +475,11 @@ class WorkspaceService:
                 "title": pr_title,
                 "body": pr_description,
                 "head": f"{workspace.fork_repo_owner}:{workspace.branch_name}",
-                "base": settings.CEOS_ARD_MAIN_BRANCH,
+                "base": settings.CEOS_ARD_BRANCH,
             }
 
             pr_response = await self.github_service.create_pull_request(
-                access_token=access_token, upstream_owner=settings.CEOS_ARD_OWNER, upstream_repo=settings.CEOS_ARD_REPO, pr_data=pr_data
+                access_token=access_token, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO, pr_data=pr_data
             )
 
             workspace.pull_request_number = pr_response["number"]
