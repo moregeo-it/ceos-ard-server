@@ -17,8 +17,10 @@ class BuildService:
     async def start_build(
         self, workspace_path: Path, workspace_id: str, pfs: list[str] | None, include_document_type: str | None = None
     ) -> dict[str, Any]:
-        if not self.prereqs_ok or not workspace_path or not workspace_id:
-            raise ValueError("Workspace path and ID must be provided and prerequisites must be met")
+        if not workspace_path or not workspace_id:
+            raise ValueError("Workspace path and ID must be provided")
+        if not self.prereqs_ok:
+            raise ValueError("Prerequisites must be met (ceos-ard-cli must be installed and accessible)")
 
         if not workspace_path.exists():
             raise FileNotFoundError(f"Workspace path {workspace_path} does not exist")
