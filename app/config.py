@@ -65,7 +65,7 @@ class Settings:
     PFS_DEFAULT_INTRODUCTION: list[str] = [item.strip() for item in os.getenv("PFS_DEFAULT_INTRODUCTION", DEFAULT_INTRODUCTION).split(",")]
 
     # One or more CORS origins separated by commas
-    CORS_ORIGINS: list = [os.getenv("CORS_ORIGINS", CLIENT_URL).split(",")]
+    CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", CLIENT_URL).split(",")
 
 
 settings = Settings()
