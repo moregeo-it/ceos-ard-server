@@ -68,3 +68,38 @@ async def get_preview_static_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=create_error_detail("get preview static file", e),
         ) from e
+
+
+@router.get(
+    "/{workspace_id}/download",
+    summary="Download Previews PDF Document or DOCX",
+    description="Download Previews PDF Document or DOCX for a workspace",
+    status_code=status.HTTP_200_OK,
+)
+async def download_preview_document(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    preview_service: PreviewService = Depends(get_preview_service),
+    document_type: str = Query(default="pdf", regex="^(pdf|docx)$"),
+    pfs: list[str] = Query(min_items=1, max_items=50),
+):
+    try:
+        document_file = await preview_service.download_preview_document(
+            db=db, pfs=pfs, document_type=document_type, workspace_id=workspace_id, user_id=current_user["user"].id
+        )
+
+        return FileResponse(
+            path=document_file["path"],
+            filename=document_file["name"],
+            media_type=document_file["media_type"],
+            headers={"Content-Disposition": f"attachment; filename={document_file['name']}"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading preview document for workspace {workspace_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_detail("download preview document", e),
+        ) from e
