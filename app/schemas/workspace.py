@@ -65,11 +65,6 @@ class WorkspaceResponse(BaseModel):
         from_attributes = True
 
 
-class WorkspaceStatusResponse(BaseModel):
-    workspace_status: str
-    git_status: GitStatus | None
-
-
 class ProposeChangesRequest(BaseModel):
     pr_title: str = Field(..., min_length=1, max_length=100, description="Pull request title")
     pr_description: str = Field(..., min_length=1, max_length=1000, description="Pull request description")

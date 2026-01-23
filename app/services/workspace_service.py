@@ -265,21 +265,6 @@ class WorkspaceService:
             logger.error(f"Error deleting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
-    async def get_workspace_status(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-        if workspace.status != WorkspaceStatus.ACTIVE:
-            return {"workspace_status": workspace.status.value, "git_status": None}
-
-        try:
-            git_status = await self.git_service.get_git_status(workspace.abs_path)
-
-            return {"workspace_status": workspace.status.value, "git_status": git_status}
-
-        except Exception as e:
-            logger.error(f"Error getting git status for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace status: {str(e)}") from e
-
     async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
