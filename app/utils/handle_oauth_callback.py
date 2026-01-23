@@ -63,7 +63,7 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
         logger.error(f"Unexpected error in {provider} callback: {e}")
         return RedirectResponse(
             status_code=status.HTTP_302_FOUND,
-            url=f"{settings.LOGOUT_REDIRECT}/auth/error?message=authentication_failed&provider={provider}",
+            url=f"{settings.CLIENT_URL}/auth/error?message=authentication_failed&provider={provider}",
         )
 
 
