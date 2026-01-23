@@ -13,7 +13,7 @@ from app.services.preview_service import PreviewService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/workspaces", tags=["Preview"])
+router = APIRouter(prefix="/workspaces", tags=["Previews"])
 
 
 @router.get(
@@ -84,7 +84,6 @@ async def download_preview_document(
     format: str = Query(..., enum=["pdf", "docx"]),
     pfs: list[str] = Query(min_items=1, max_items=50),
 ):
-    print(type)
     try:
         document_file = await preview_service.download_preview_document(
             db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
