@@ -173,11 +173,10 @@ class FileService:
             repo.git.add(str(target_path))
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
-        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
         return {
             "name": name,
             "is_directory": False,
-            "status": get_file_status(repo, relative_path),
+            "status": get_file_status(repo, target_path),
             "path": normalize_workspace_path(target_path, workspace_path),
         }
 
@@ -188,11 +187,10 @@ class FileService:
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
 
-        relative_path = normalize_workspace_path(target_path, workspace_path, absolute=False)
         return {
             "name": name,
             "is_directory": True,
-            "status": get_file_status(repo, relative_path),
+            "status": get_file_status(repo, target_path),
             "path": normalize_workspace_path(target_path, workspace_path),
         }
 
@@ -219,11 +217,10 @@ class FileService:
                 repo.git.add(str(file_path))
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
-            relative_path = normalize_workspace_path(file_path, workspace.abs_path, absolute=False)
             return {
                 "name": file_path.name,
                 "is_directory": file_path.is_dir(),
-                "status": get_file_status(repo, relative_path),
+                "status": get_file_status(repo, file_path),
                 "path": normalize_workspace_path(file_path, workspace.abs_path),
             }
         except HTTPException:
@@ -276,14 +273,13 @@ class FileService:
                 detail="File or folder deleted successfully, but failed to make the changes in the repository",
             ) from e
 
-        relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         return {
             # Tracked means the file is and was under version control, so the delete can be reverted if needed.
             "tracked": is_committed,
             "file_details": {
                 "name": target_path.name,
                 "is_directory": target_path.is_dir(),
-                "status": get_file_status(repo, relative_path),
+                "status": get_file_status(repo, target_path),
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
             },
         }
@@ -326,7 +322,7 @@ class FileService:
         return {
             "name": new_name,
             "is_directory": new_path.is_dir(),
-            "status": get_file_status(repo, relative_new),
+            "status": get_file_status(repo, new_path),
             "path": normalize_workspace_path(new_path, workspace_path),
         }
 
@@ -487,14 +483,12 @@ class FileService:
 
             rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
             usage = await self._get_file_usage(workspace.abs_path, rel_file_path)
-
-            relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
-            status = get_file_status(repo, relative_file_str)
+            file_status = get_file_status(repo, target_path)
 
             return {
                 "name": target_path.name,
                 "is_directory": target_path.exists() and target_path.is_dir(),
-                "status": status,
+                "status": file_status,
                 "path": rel_file_path,
                 "usage": usage,
             }

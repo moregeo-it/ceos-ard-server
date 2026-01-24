@@ -5,10 +5,12 @@ import git
 
 def get_file_info(repo: git.Repo, path: Path) -> dict[str, str] | None:
     try:
+        path = path.resolve()
+        workspace_path = Path(repo.working_dir)
         git_status = repo.git.status(path.parent, porcelain=True)
         for line in git_status.splitlines():
             info = extract_fileinfo(line)
-            line_path = Path(info["path"])
+            line_path = (workspace_path / info["path"]).resolve()
             if line_path == path:
                 return info
 
@@ -17,8 +19,8 @@ def get_file_info(repo: git.Repo, path: Path) -> dict[str, str] | None:
         return None
 
 
-def get_file_status(repo: git.Repo, path: Path | str) -> str | None:
-    file = get_file_info(repo, Path(path))
+def get_file_status(repo: git.Repo, path: Path) -> str | None:
+    file = get_file_info(repo, path)
     if file:
         return file.get("status")
     return None

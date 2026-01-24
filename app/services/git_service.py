@@ -75,7 +75,7 @@ class GitService:
                 return {
                     "name": str(target_file_path.name),
                     "is_directory": target_file_path.is_dir(),
-                    "status": get_file_status(repo, relative_file_str),
+                    "status": get_file_status(repo, target_file_path),
                     "path": normalize_workspace_path(target_file_path, workspace_path),
                 }
             except git.GitCommandError:
@@ -98,11 +98,10 @@ class GitService:
                         target_file_path.unlink()
 
                     old_file_path = workspace_path / old_path
-                    relative_old_path = normalize_workspace_path(old_file_path, workspace_path, absolute=False)
                     return {
                         "name": str(old_file_path.name),
                         "is_directory": old_file_path.is_dir(),
-                        "status": get_file_status(repo, relative_old_path),
+                        "status": get_file_status(repo, old_file_path),
                         "path": normalize_workspace_path(old_file_path, workspace_path),
                     }
 
