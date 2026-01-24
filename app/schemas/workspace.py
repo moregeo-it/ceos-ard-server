@@ -138,6 +138,16 @@ class FileSearchResponse(BaseModel):
     excerpt: str | None = None
 
 
-class ChangedFilesResponse(BaseModel):
+class DiffFile(BaseModel):
     path: str
-    status: str | None = None
+    status: str
+
+
+class RenamedFile(BaseModel):
+    path: str
+    source: str
+    status: str
+
+
+class ListDiffsResponse(BaseModel):
+    files: list[DiffFile | RenamedFile]

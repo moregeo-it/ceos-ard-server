@@ -9,12 +9,12 @@ from app.db.database import get_db
 from app.dependencies import get_file_service
 from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
-    ChangedFilesResponse,
     CreateFileRequest,
     FileContextResponse,
     FileListResponse,
     FilePatchRequest,
     FileSearchResponse,
+    ListDiffsResponse,
 )
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
@@ -206,7 +206,7 @@ async def search_files(
     "/{workspace_id}/diffs",
     summary="Get list of changed files",
     description="Retrieve a list of changed files in a workspace - includes untracked files",
-    response_model=list[ChangedFilesResponse],
+    response_model=ListDiffsResponse,
     status_code=status.HTTP_200_OK,
 )
 async def get_changed_files(
@@ -216,7 +216,7 @@ async def get_changed_files(
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        return await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return {"files": await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)}
     except HTTPException:
         raise
     except Exception as e:
@@ -236,13 +236,11 @@ async def get_file_diff(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
-        file_diff = await file_service.get_file_diff(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+    diff = await file_service.get_file_diff(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+    if not diff:
+        diff = ""
 
-        return Response(content=file_diff, media_type="text/plain; charset=utf-8", status_code=status.HTTP_200_OK)
-    except Exception as e:
-        logger.error(f"Error getting file diff: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file diff", e)) from e
+    return Response(content=diff, media_type="text/plain; charset=utf-8", status_code=status.HTTP_200_OK)
 
 
 @router.get(

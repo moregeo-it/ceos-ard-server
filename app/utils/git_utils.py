@@ -27,26 +27,34 @@ def extract_status(line: str) -> str:
     return None
 
 
+def extract_fileinfo(line: str) -> str:
+    file_path = line[3:].strip()
+    file_status = extract_status(line)
+
+    if file_status == "renamed":
+        parts = file_path.split("->", maxsplit=1)
+        if len(parts) == 2:
+            old_path = parts[0].strip()
+            new_path = parts[1].strip()
+            return {"path": new_path, "status": file_status, "source": old_path}
+
+    elif file_status:
+        return {"path": file_path, "status": file_status}
+
+    return None
+
+
 def get_repo_changes(workspace_path: str) -> list[dict[str, str]]:
     changed_files = []
     try:
-        repo = git.Repo(workspace_path, search_parent_directories=True)
+        repo = git.Repo(workspace_path)
 
         git_status = repo.git.status(porcelain=True)
 
         for line in git_status.splitlines():
-            file_path = line[3:].strip()
-            file_status = extract_status(line)
-
-            if file_status:
-                if file_status == "renamed":
-                    parts = file_path.split("->")
-                    if len(parts) == 2:
-                        old_path = parts[0].strip()
-                        new_path = parts[1].strip()
-                        changed_files.append({"path": old_path, "status": file_status, "target": new_path})
-                else:
-                    changed_files.append({"path": file_path, "status": file_status})
+            file_info = extract_fileinfo(line)
+            if file_info:
+                changed_files.append(file_info)
 
         return changed_files
     except git.exc.GitCommandError:

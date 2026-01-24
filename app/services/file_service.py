@@ -12,7 +12,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.git_utils import get_file_status, get_repo_changes
+from app.utils.git_utils import extract_fileinfo, get_file_status, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -89,17 +89,17 @@ class FileService:
             target_path = validate_workspace_path(path, workspace.abs_path, exists=True)
 
             # Get the status of all files (e.g. to include deleted files)
-            repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+            repo = git.Repo(workspace.abs_path)
             status_map = self._get_all_file_statuses(repo, target_path, workspace.abs_path)
 
             # Get all files (without deleted files)
             files = self.walk_files(target_path, workspace.abs_path, repo, recurse, status_map)
 
             # Add deleted files
-            for filepath, status in status_map.items():
+            for filepath, file_status in status_map.items():
                 file = Path(filepath)
-                if status == "deleted" and (recurse or file.parent == target_path):
-                    files.append(self.get_file_dict(file, workspace.abs_path, status=status))
+                if file_status == "deleted" and (recurse or file.parent == target_path):
+                    files.append(self.get_file_dict(file, workspace.abs_path, status=file_status))
 
             # Sort directories first, then files, both alphabetically
             files.sort(key=lambda x: (not x["is_directory"], x["name"].lower()))
@@ -169,7 +169,7 @@ class FileService:
         else:
             target_path.touch()
         try:
-            repo = git.Repo(workspace_path, search_parent_directories=True)
+            repo = git.Repo(workspace_path)
             repo.git.add(str(target_path))
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
@@ -184,7 +184,7 @@ class FileService:
     def _create_folder(self, workspace_path: Path, name: str, target_path: Path):
         try:
             target_path.mkdir(parents=True, exist_ok=True)
-            repo = git.Repo(workspace_path, search_parent_directories=True)
+            repo = git.Repo(workspace_path)
         except git.exc.GitCommandError as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
 
@@ -215,7 +215,7 @@ class FileService:
             file_path.write_bytes(content)
             # Add changes to the repository
             try:
-                repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+                repo = git.Repo(workspace.abs_path)
                 repo.git.add(str(file_path))
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add file to repository") from e
@@ -252,7 +252,7 @@ class FileService:
         # Add changes to the repository
         try:
             relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
-            repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+            repo = git.Repo(workspace.abs_path)
             # Check if file exists in HEAD (has git history)
             is_committed = False
             try:
@@ -266,7 +266,7 @@ class FileService:
             else:
                 # File not in git history - remove from index if staged
                 try:
-                    repo.git.rm("--cached", "--force", relative_path)
+                    repo.git.rm("--staged", "--force", relative_path)
                 except git.GitCommandError:
                     # File wasn't in index, nothing to do
                     pass
@@ -315,7 +315,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename file/folder. Please try again.")
 
         try:
-            repo = git.Repo(workspace_path, search_parent_directories=True)
+            repo = git.Repo(workspace_path)
             relative_old = normalize_workspace_path(target_path, workspace_path, absolute=False)
             relative_new = normalize_workspace_path(new_path, workspace_path, absolute=False)
 
@@ -406,33 +406,27 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get changed files: {str(e)}") from e
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+        relative_path_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
-
-            relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
-
             repo = git.Repo(workspace.abs_path)
+            # Get general status for the file
+            git_status = repo.git.status(Path(target_path).parent, porcelain=True)
+            info = None
+            for line in git_status.splitlines():
+                info = extract_fileinfo(line)
+                if Path(info["path"]) == Path(relative_path_str):
+                    break
 
-            try:
-                diff_out = repo.git.diff(relative_file_str)
-
-                # If no unstaged changes, check for staged changes
-                if not diff_out:
-                    diff_out = repo.git.diff("--cached", relative_file_str)
-
-                    # If still no changes, return a message
-                    if not diff_out:
-                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No differences found for the specified file.")
-
-                return diff_out
-
-            except git.GitCommandError as e:
-                logger.error(f"Git command failed for {relative_file_str}: {str(e)}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
-
-        except Exception as e:
-            logger.error(f"Failed to get file diff: {str(e)}")
+            # Handle renamed files differently, otherwise they show as added
+            if info["status"] == "renamed":
+                return repo.git.diff("--staged", "-M", "--", info["source"], info["path"])
+            else:
+                return repo.git.diff("--staged", relative_path_str)
+        except git.GitCommandError as e:
+            logger.error(f"Git command failed for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
@@ -494,7 +488,7 @@ class FileService:
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
 
             try:
-                repo = git.Repo(workspace.abs_path, search_parent_directories=True)
+                repo = git.Repo(workspace.abs_path)
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
 
