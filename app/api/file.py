@@ -258,8 +258,7 @@ async def get_file_context(
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        file_context = await file_service.get_file_context(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return file_context
+        return await file_service.get_file_context(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
     except Exception as e:
         logger.error(f"Error getting file context: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file context", e)) from e

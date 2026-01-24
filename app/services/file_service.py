@@ -12,7 +12,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.git_utils import extract_fileinfo, get_file_status, get_repo_changes
+from app.utils.git_utils import get_file_info, get_file_status, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -163,9 +163,9 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file or folder: {str(e)}") from e
 
-    def _create_file(self, workspace_path: Path, name: str, target_path: Path, content: str = None):
+    def _create_file(self, workspace_path: Path, name: str, target_path: Path, content: bytes = None):
         if content is not None:
-            target_path.write_text(content, encoding="utf-8")
+            target_path.write_bytes(content)
         else:
             target_path.touch()
         try:
@@ -201,7 +201,7 @@ class FileService:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
 
-            return {"content": file_path.read_text(encoding="utf-8"), "media_type": get_file_media_type(file_path)}
+            return {"content": file_path.read_bytes(), "media_type": get_file_media_type(file_path)}
         except HTTPException:
             raise
         except Exception as e:
@@ -412,16 +412,9 @@ class FileService:
 
         try:
             repo = git.Repo(workspace.abs_path)
-            # Get general status for the file
-            git_status = repo.git.status(Path(target_path).parent, porcelain=True)
-            info = None
-            for line in git_status.splitlines():
-                info = extract_fileinfo(line)
-                if Path(info["path"]) == Path(relative_path_str):
-                    break
-
             # Handle renamed files differently, otherwise they show as added
-            if info["status"] == "renamed":
+            info = get_file_info(repo, target_path)
+            if info and info["status"] == "renamed":
                 return repo.git.diff("--staged", "-M", "--", info["source"], info["path"])
             else:
                 return repo.git.diff("--staged", relative_path_str)
@@ -485,26 +478,30 @@ class FileService:
     async def get_file_context(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+            target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
 
             try:
                 repo = git.Repo(workspace.abs_path)
             except git.exc.GitCommandError as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to access repository") from e
 
-            relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
             rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
+            usage = await self._get_file_usage(workspace.abs_path, rel_file_path)
+
+            relative_file_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+            status = get_file_status(repo, relative_file_str)
+
             return {
                 "name": target_path.name,
-                "is_directory": target_path.is_dir(),
-                "status": get_file_status(repo, relative_file_str),
-                "path": normalize_workspace_path(target_path, workspace.abs_path),
-                "usage": await self._get_file_usage(workspace.abs_path, rel_file_path),
+                "is_directory": target_path.exists() and target_path.is_dir(),
+                "status": status,
+                "path": rel_file_path,
+                "usage": usage,
             }
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file context: {str(e)}") from e
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 file_service = FileService()

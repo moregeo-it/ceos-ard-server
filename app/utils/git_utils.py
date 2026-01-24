@@ -3,17 +3,25 @@ from pathlib import Path
 import git
 
 
-def get_file_status(repo: git.Repo, path: Path) -> str | None:
+def get_file_info(repo: git.Repo, path: Path) -> dict[str, str] | None:
     try:
-        parent_dir = Path(path).parent
-        git_status = repo.git.status(parent_dir, porcelain=True)
-
+        git_status = repo.git.status(path.parent, porcelain=True)
         for line in git_status.splitlines():
-            if str(path) in line:
-                return extract_status(line)
+            info = extract_fileinfo(line)
+            line_path = Path(info["path"])
+            if line_path == path:
+                return info
+
         return None
     except git.exc.GitCommandError:
         return None
+
+
+def get_file_status(repo: git.Repo, path: Path | str) -> str | None:
+    file = get_file_info(repo, Path(path))
+    if file:
+        return file.get("status")
+    return None
 
 
 def extract_status(line: str) -> str:
