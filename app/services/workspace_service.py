@@ -168,7 +168,9 @@ class WorkspaceService:
                     if pull_request is not None:
                         workspace.pull_request_status = pull_request["state"]
                         workspace.pull_request_status_last_updated_at = datetime.now()
-                        workspace.status = WorkspaceStatus.ARCHIVED if pull_request["state"] == "closed" or pull_request["state"] == "merged" else workspace.status
+                        workspace.status = (
+                            WorkspaceStatus.ARCHIVED if pull_request["state"] == "closed" or pull_request["state"] == "merged" else workspace.status
+                        )
                         workspace.updated_at = datetime.now()
                         db.add(workspace)
                         db.commit()
