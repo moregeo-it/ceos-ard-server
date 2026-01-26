@@ -131,6 +131,7 @@ async def delete_workspace(
 
 @router.post(
     "/{workspace_id}/propose",
+    status_code=status.HTTP_201_CREATED,
     response_model=ProposeChangesResponse,
     summary="Propose changes to a workspace",
     description="Propose changes to a workspace by creating a pull request",
@@ -143,14 +144,14 @@ async def propose_changes(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        access_token = current_user.get("access_token")
+        access_token = current_user["user"].access_token
 
         return await workspace_service.propose_changes(
             db=db,
             workspace_id=workspace_id,
             user_id=current_user["user"].id,
-            pr_title=propose_data.pr_title,
-            pr_description=propose_data.pr_description,
+            title=propose_data.title,
+            description=propose_data.description,
             access_token=access_token,
         )
     except HTTPException:

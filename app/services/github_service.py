@@ -165,9 +165,7 @@ class GitHubService:
         url = f"{self.base_url}/repos/{upstream_owner}/{upstream_repo}/pulls"
 
         try:
-            pr_response = await self._make_github_request("POST", url, access_token, json_data=pr_data, timeout=60.0)
-            logger.info(f"Successfully created pull request for {upstream_owner}/{upstream_repo}")
-            return pr_response
+            return await self._make_github_request("POST", url, access_token, json_data=pr_data, timeout=60.0)
         except HTTPException as e:
             # Add more specific context for this endpoint
             if e.status_code == 404:

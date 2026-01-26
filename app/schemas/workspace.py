@@ -66,14 +66,20 @@ class WorkspaceResponse(BaseModel):
 
 
 class ProposeChangesRequest(BaseModel):
-    pr_title: str = Field(..., min_length=1, max_length=100, description="Pull request title")
-    pr_description: str = Field(..., min_length=1, max_length=1000, description="Pull request description")
+    title: str = Field(..., min_length=1, max_length=200, description="Pull request title")
+    description: str = Field(..., min_length=1, max_length=2000, description="Pull request description")
 
 
 class ProposeChangesResponse(BaseModel):
-    commit_sha: str | None
-    pull_request: dict
-
+    number: int
+    url: str
+    title: str
+    state: str
+    author: str
+    description: str
+    createdAt: datetime
+    updatedAt: datetime
+    mergeable: bool | None
 
 class CreateFileRequest(BaseModel):
     name: str

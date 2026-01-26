@@ -389,7 +389,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
     async def propose_changes(
-        self, db: Session, workspace_id: str, user_id: str, pr_title: str, pr_description: str, access_token: str
+        self, db: Session, workspace_id: str, user_id: str, title: str, description: str, access_token: str
     ) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
@@ -416,17 +416,9 @@ class WorkspaceService:
 
             repo = git.Repo(workspace.abs_path)
 
-            # Add changes to the repository
-            try:
-                repo.git.add(".")
-                logger.info(f"Staged changes for workspace {workspace_id}")
-            except git.GitCommandError as e:
-                logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
-
             # Commit changes to the repository
             try:
-                repo.index.commit(pr_description)
+                repo.index.commit(description)
                 logger.info(f"Committed changes for workspace {workspace_id}")
             except git.GitCommandError as e:
                 logger.error(f"Failed to commit changes for workspace {workspace_id}: {e}")
@@ -434,16 +426,12 @@ class WorkspaceService:
 
             # Push changes to the remote repository
             try:
-                origin = repo.remote("origin")
-                push_info = origin.push(workspace.branch_name)
+                origin = repo.remote(name="origin")
+                push_info = origin.push(refspec=f"{workspace.branch_name}:{workspace.branch_name}")
 
-                if push_info and push_info[0].flags & git.push_info.ERROR:
-                    error_msg = f"Push failed with flags: {push_info[0].flags}"
-                    if push_info[0].summary:
-                        error_msg += f", summary: {push_info[0].summary}"
-                    logger.error(f"Failed to push changes for workspace {workspace_id}: {error_msg}")
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {error_msg}")
-
+                for info in push_info:
+                    if info.flags & info.ERROR:
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {info.summary}")
                 logger.info(f"Pushed changes for workspace {workspace_id} to branch {workspace.branch_name}")
 
             except git.GitCommandError as e:
@@ -455,11 +443,9 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to push changes: {str(e)}") from e
 
             # Create a pull request
-            logger.info(f"Creating pull request for workspace {workspace_id}")
-
             pr_data = {
-                "title": pr_title,
-                "body": pr_description,
+                "title": title,
+                "body": description,
                 "head": f"{workspace.fork_repo_owner}:{workspace.branch_name}",
                 "base": settings.CEOS_ARD_BRANCH,
             }
@@ -469,19 +455,21 @@ class WorkspaceService:
             )
 
             workspace.pull_request_number = pr_response["number"]
-            workspace.pull_request_status = pr_response["state"]
+            workspace.pull_request_status = pr_response["state"].upper()
             workspace.pull_request_status_last_updated_at = datetime.now()
             db.commit()
+            db.refresh(workspace)
 
             return {
-                "title": pr_title,
-                "description": pr_description,
+                "title": pr_response["title"],
+                "state": pr_response["state"],
                 "url": pr_response["html_url"],
                 "number": pr_response["number"],
-                "state": pr_response["state"],
-                "created_at": pr_response["created_at"],
-                "updated_at": pr_response["updated_at"],
+                "description": pr_response["body"],
+                "createdAt": pr_response["created_at"],
+                "updatedAt": pr_response["updated_at"],
                 "author": pr_response["user"]["login"],
+                "mergeable": pr_response.get("mergeable"),
             }
 
         except HTTPException:
