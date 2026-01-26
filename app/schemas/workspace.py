@@ -65,11 +65,6 @@ class WorkspaceResponse(BaseModel):
         from_attributes = True
 
 
-class WorkspaceStatusResponse(BaseModel):
-    workspace_status: str
-    git_status: GitStatus | None
-
-
 class ProposeChangesRequest(BaseModel):
     pr_title: str = Field(..., min_length=1, max_length=100, description="Pull request title")
     pr_description: str = Field(..., min_length=1, max_length=1000, description="Pull request description")
@@ -143,6 +138,16 @@ class FileSearchResponse(BaseModel):
     excerpt: str | None = None
 
 
-class ChangedFilesResponse(BaseModel):
+class DiffFile(BaseModel):
     path: str
-    status: str | None = None
+    status: str
+
+
+class RenamedFile(BaseModel):
+    path: str
+    source: str
+    status: str
+
+
+class ListDiffsResponse(BaseModel):
+    files: list[DiffFile | RenamedFile]

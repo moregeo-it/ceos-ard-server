@@ -14,7 +14,6 @@ from app.schemas.workspace import (
     ProposeChangesResponse,
     WorkspaceCreate,
     WorkspaceResponse,
-    WorkspaceStatusResponse,
     WorkspaceUpdate,
 )
 from app.services.auth_service import require_github_user
@@ -128,27 +127,6 @@ async def delete_workspace(
     except Exception as e:
         logger.error(f"Error deleting workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace", e)) from e
-
-
-@router.get(
-    "/{workspace_id}/status",
-    response_model=WorkspaceStatusResponse,
-    summary="Get the status of a workspace",
-    description="Get the status of a workspace",
-)
-async def get_workspace_status(
-    workspace_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(require_github_user),
-    workspace_service: WorkspaceService = Depends(get_workspace_service),
-):
-    try:
-        return await workspace_service.get_workspace_status(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting workspace status: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace status", e)) from e
 
 
 @router.post(

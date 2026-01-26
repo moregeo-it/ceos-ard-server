@@ -15,6 +15,7 @@ from app.schemas.workspace import CreatePFSRequest, WorkspaceCreate, WorkspaceUp
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
+from app.utils.git_utils import get_repo_changes
 
 from ..utils.validation import normalize_workspace_path
 
@@ -254,21 +255,6 @@ class WorkspaceService:
             logger.error(f"Error deleting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
-    async def get_workspace_status(self, db: Session, workspace_id: str, user_id: str) -> dict[str, Any]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-        if workspace.status != WorkspaceStatus.ACTIVE:
-            return {"workspace_status": workspace.status.value, "git_status": None}
-
-        try:
-            git_status = await self.git_service.get_git_status(workspace.abs_path)
-
-            return {"workspace_status": workspace.status.value, "git_status": git_status}
-
-        except Exception as e:
-            logger.error(f"Error getting git status for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace status: {str(e)}") from e
-
     async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
@@ -423,9 +409,9 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already closed")
 
         try:
-            git_status = await self.git_service.get_git_status(workspace.abs_path)
+            changed_files = get_repo_changes(workspace.abs_path)
 
-            if git_status["is_clean"]:
+            if not changed_files:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")
 
             repo = git.Repo(workspace.abs_path)
