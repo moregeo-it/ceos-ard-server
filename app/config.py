@@ -43,8 +43,8 @@ class Settings:
     GOOGLE_API_BASE_URL: str = "https://www.googleapis.com"
     GOOGLE_DISCOVERY_URL: str = "https://accounts.google.com/.well-known/openid-configuration"
 
-    CEOS_ARD_ORG: str = os.getenv("CEOS_ARD_ORG", "moregeo-it")
-    CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard-testing")
+    CEOS_ARD_ORG: str = os.getenv("CEOS_ARD_ORG", "ceos-org")
+    CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
     CEOS_ARD_BRANCH: str = os.getenv("CEOS_ARD_BRANCH", "main")
 
     SECRET_KEY: str = os.getenv("SECRET_KEY")
