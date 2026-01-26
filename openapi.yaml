@@ -57,8 +57,8 @@ paths:
                       $ref: '#/components/schemas/pfsId'
               example:
                 pfsTypes:
-                  - SAR-NRB
-                  - SAR-POL
+                  - NRB
+                  - POL
         '401':
           description: Unauthorized
           content:
@@ -1523,8 +1523,8 @@ components:
       items:
         $ref: '#/components/schemas/pfsId'
       example:
-        - SAR-NRB
-        - SAR-POL
+        - NRB
+        - POL
 
     pfsType:
       type: object
@@ -1538,11 +1538,11 @@ components:
         - id
         - name
       example:
-        id: SAR-NRB
+        id: NRB
         name: SAR Normalised Radar Backscatter
 
     pfsId:
       type: string
       description: PFS type identifier
       pattern: ^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$
-      example: SAR-NRB
+      example: NRB
