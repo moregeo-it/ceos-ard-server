@@ -388,9 +388,7 @@ class WorkspaceService:
             logger.error(f"Error creating PFS for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
-    async def propose_changes(
-        self, db: Session, workspace_id: str, user_id: str, title: str, description: str, access_token: str
-    ) -> dict[str, Any]:
+    async def propose_changes(self, db: Session, workspace_id: str, user_id: str, title: str, description: str, access_token: str) -> dict[str, Any]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
         if not workspace.abs_path.exists():

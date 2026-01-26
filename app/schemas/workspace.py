@@ -81,6 +81,7 @@ class ProposeChangesResponse(BaseModel):
     updatedAt: datetime
     mergeable: bool | None
 
+
 class CreateFileRequest(BaseModel):
     name: str
     path: str
