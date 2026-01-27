@@ -443,6 +443,15 @@ class WorkspaceService:
     async def propose_changes(self, db: Session, workspace_id: str, user_id: str, access_token: str, propose_data: ProposalRequest) -> dict[str, Any]:
         workspace = await self.get_workspace_by_id(db, workspace_id, user_id)
 
+        if not propose_data.title:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required for proposing changes")
+
+        if not propose_data.description:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Description is required for proposing changes")
+
+        if not propose_data.draft:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Draft status is required for proposing changes")
+
         if not workspace.abs_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
@@ -469,10 +478,10 @@ class WorkspaceService:
             # Create or update pull request
             pr_response = await self._handle_pull_request(
                 access_token=access_token,
-                pull_request_number=workspace.pull_request_number,
-                head_repo_owner=workspace.fork_repo_owner,
-                head_branch_name=workspace.branch_name,
                 propose_data=propose_data,
+                head_branch_name=workspace.branch_name,
+                head_repo_owner=workspace.fork_repo_owner,
+                pull_request_number=workspace.pull_request_number,
             )
 
             workspace.pull_request_number = pr_response["number"]
@@ -483,12 +492,12 @@ class WorkspaceService:
             # Get commits for the pull request
             commits = await self.github_service.get_pull_request_commits(
                 access_token=access_token,
-                owner=workspace.fork_repo_owner,
-                repo=workspace.fork_repo_name,
-                pr_number=workspace.pull_request_number,
+                repo=settings.CEOS_ARD_REPO,
+                owner=settings.CEOS_ARD_ORG,
+                number=workspace.pull_request_number,
             )
 
-            return self.github_service.format_pr_response(pr_response, commits)
+            return format_pr_response(pr_response, commits)
 
         except HTTPException:
             raise
@@ -522,9 +531,9 @@ class WorkspaceService:
                 pr_data["state"] = propose_data.state
                 return await self.github_service.update_pull_request(
                     access_token=access_token,
-                    upstream_owner=settings.CEOS_ARD_ORG,
-                    upstream_repo=settings.CEOS_ARD_REPO,
-                    pr_number=pull_request_number,
+                    owner=settings.CEOS_ARD_ORG,
+                    repo=settings.CEOS_ARD_REPO,
+                    number=pull_request_number,
                     pr_data=pr_data,
                 )
             else:
@@ -534,8 +543,8 @@ class WorkspaceService:
                 return await self.github_service.create_pull_request(
                     pr_data=pr_data,
                     access_token=access_token,
-                    upstream_owner=settings.CEOS_ARD_ORG,
-                    upstream_repo=settings.CEOS_ARD_REPO,
+                    owner=settings.CEOS_ARD_ORG,
+                    repo=settings.CEOS_ARD_REPO,
                 )
         except Exception as e:
             logger.error(f"Error handling pull request: {e}")

@@ -53,6 +53,8 @@ class GitHubService:
                     response = await client.get(url, headers=headers, params=params)
                 elif method.upper() == "POST":
                     response = await client.post(url, headers=headers, params=params, json=json_data)
+                elif method.upper() == "PATCH":
+                    response = await client.patch(url, headers=headers, params=params, json=json_data)
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
 
@@ -161,15 +163,15 @@ class GitHubService:
 
         return new_fork, True
 
-    async def create_pull_request(self, access_token: str, upstream_owner: str, upstream_repo: str, pr_data: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/repos/{upstream_owner}/{upstream_repo}/pulls"
+    async def create_pull_request(self, access_token: str, owner: str, repo: str, pr_data: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
 
         try:
             return await self._make_github_request("POST", url, access_token, json_data=pr_data, timeout=60.0)
         except HTTPException as e:
             # Add more specific context for this endpoint
             if e.status_code == 404:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {upstream_owner}/{upstream_repo} not found") from e
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found") from e
             raise
 
     async def get_pull_request(self, owner: str, repo: str, number: int, access_token: str) -> dict[str, Any]:

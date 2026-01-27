@@ -207,7 +207,7 @@ class FileService:
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
 
             file_path.write_bytes(content)

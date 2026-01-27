@@ -85,6 +85,7 @@ class ProposalResponse(BaseModel):
 
 class ProposalCommits(BaseModel):
     sha: str
+    url: str
     message: str
     timestamp: datetime
 

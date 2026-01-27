@@ -163,7 +163,7 @@ async def get_proposal_changes(
 @router.put(
     "/{workspace_id}/proposal",
     response_model=ProposalResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     summary="Create or update a pull request to propose changes",
     description="Create or update a pull request in the original repository to propose changes made in the workspace",
 )
