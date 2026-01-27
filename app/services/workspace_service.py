@@ -443,15 +443,6 @@ class WorkspaceService:
     async def propose_changes(self, db: Session, workspace_id: str, user_id: str, access_token: str, propose_data: ProposalRequest) -> dict[str, Any]:
         workspace = await self.get_workspace_by_id(db, workspace_id, user_id)
 
-        if not propose_data.title:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required for proposing changes")
-
-        if not propose_data.description:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Description is required for proposing changes")
-
-        if not propose_data.draft:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Draft status is required for proposing changes")
-
         if not workspace.abs_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
@@ -466,14 +457,13 @@ class WorkspaceService:
         try:
             changed_files = get_repo_changes(workspace.abs_path)
 
-            if not changed_files:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")
+            if changed_files:
 
-            repo = git.Repo(workspace.abs_path)
-            commit_message = propose_data.commit_message or propose_data.title
+                repo = git.Repo(workspace.abs_path)
+                commit_message = propose_data.commit_message or propose_data.title
 
-            # Commit and push changes to the repository
-            await self.git_service.commit_and_push_changes(repo, workspace.branch_name, commit_message)
+                # Commit and push changes to the repository
+                await self.git_service.commit_and_push_changes(repo, workspace.branch_name, commit_message)
 
             # Create or update pull request
             pr_response = await self._handle_pull_request(
