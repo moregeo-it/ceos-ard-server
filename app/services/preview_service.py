@@ -26,7 +26,7 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
         try:
-            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             build_info = await self.build_service.start_build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs)
 
@@ -71,7 +71,7 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
         try:
-            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             return validate_workspace_path(("build/" + file_path), workspace.abs_path, exists=True, type="file", is_preview=True)
         except HTTPException:
             raise
@@ -90,7 +90,7 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
         try:
-            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             build_info = await self.build_service.start_build(
                 workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs, include_format=format
