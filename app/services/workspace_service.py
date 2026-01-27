@@ -1,6 +1,6 @@
 import logging
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import git
@@ -104,10 +104,7 @@ class WorkspaceService:
 
             # Update pull request status if needed
             for workspace in workspaces:
-                if (
-                    workspace.pull_request_status == PullRequestStatus.OPEN
-                    and workspace.pull_request_number
-                ):
+                if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number:
                     pull_request = await self.github_service.get_pull_request(
                         access_token=access_token,
                         repo=settings.CEOS_ARD_REPO,
@@ -161,7 +158,7 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
 
             # Update pull request status if needed
-            if (workspace.pull_request_number and workspace.pull_request_status == PullRequestStatus.OPEN):
+            if workspace.pull_request_number and workspace.pull_request_status == PullRequestStatus.OPEN:
                 pull_request = await self.github_service.get_pull_request(
                     access_token=access_token,
                     repo=settings.CEOS_ARD_REPO,
