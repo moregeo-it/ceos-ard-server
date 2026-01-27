@@ -1426,6 +1426,7 @@ components:
         - string
         - "null"
       description: Description/body of the proposal (GitHub Pull Request) (supports Markdown)
+      minLength: 1
       maxLength: 10000
     CommitMessage:
       type: string
