@@ -458,7 +458,6 @@ class WorkspaceService:
             changed_files = get_repo_changes(workspace.abs_path)
 
             if changed_files:
-
                 repo = git.Repo(workspace.abs_path)
                 commit_message = propose_data.commit_message or propose_data.title
 
