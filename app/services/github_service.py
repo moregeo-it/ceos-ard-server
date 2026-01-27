@@ -182,24 +182,26 @@ class GitHubService:
                 return None
             raise
 
-    async def get_repo_pull_requests(
-        self, owner: str, repo: str, access_token: str, state: str = "all", per_page: int = 100, page: int = 1, since: str = None
-    ) -> list[dict[str, Any]]:
-        url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
-
-        params = {
-            "page": page,
-            "state": state,
-            "per_page": per_page,
-        }
-
-        if since:
-            params["since"] = since
-
+    async def update_pull_request(
+        self, owner: str, repo: str, number: int, access_token: str, pr_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}"
         try:
-            return await self._make_github_request("GET", url, access_token, params=params, timeout=60.0)
+            return await self._make_github_request("PATCH", url, access_token, json_data=pr_data, timeout=60.0)
         except HTTPException as e:
             if e.status_code == 404:
-                logger.info(f"Pull requests not found for {owner}/{repo}")
+                logger.info(f"Pull request {number} not found for {owner}/{repo}")
+                return None
+            raise
+
+    async def get_pull_request_commits(
+        self, owner: str, repo: str, number: int, access_token: str
+    ) -> list[dict[str, Any]]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}/commits"
+        try:
+            return await self._make_github_request("GET", url, access_token, timeout=60.0)
+        except HTTPException as e:
+            if e.status_code == 404:
+                logger.info(f"Pull request {number} not found for {owner}/{repo}")
                 return []
             raise

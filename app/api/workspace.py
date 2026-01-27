@@ -10,8 +10,8 @@ from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     CreatePFSRequest,
     PFSResponse,
-    ProposeChangesRequest,
-    ProposeChangesResponse,
+    ProposalRequest,
+    ProposalResponse,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
@@ -128,31 +128,51 @@ async def delete_workspace(
         logger.error(f"Error deleting workspace: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace", e)) from e
 
-
-@router.post(
-    "/{workspace_id}/propose",
-    status_code=status.HTTP_201_CREATED,
-    response_model=ProposeChangesResponse,
-    summary="Propose changes to a workspace",
-    description="Propose changes to a workspace by creating a pull request",
+@router.get(
+    "/{workspace_id}/proposal",
+    summary="Get existing pull request proposal",
+    description="Retrieve the existing pull request in the original repository that proposes changes made in the workspace",
 )
-async def propose_changes(
+async def get_proposal_changes(
     workspace_id: str,
-    propose_data: ProposeChangesRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        access_token = current_user["user"].access_token
-
-        return await workspace_service.propose_changes(
+        return await workspace_service.get_proposal_changes(
             db=db,
             workspace_id=workspace_id,
             user_id=current_user["user"].id,
-            title=propose_data.title,
-            description=propose_data.description,
-            access_token=access_token,
+            access_token=current_user["user"].access_token,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting proposal changes: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get proposal changes", e)) from e
+
+@router.put(
+    "/{workspace_id}/proposal",
+    response_model=ProposalResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or update a pull request to propose changes",
+    description="Create or update a pull request in the original repository to propose changes made in the workspace",
+)
+async def propose_changes(
+    workspace_id: str,
+    propose_data: ProposalRequest,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+):
+    try:
+        return await workspace_service.propose_changes(
+            db=db,
+            workspace_id=workspace_id,
+            propose_data=propose_data,
+            user_id=current_user["user"].id,
+            access_token=current_user["user"].access_token,
         )
     except HTTPException:
         raise

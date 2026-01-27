@@ -65,22 +65,27 @@ class WorkspaceResponse(BaseModel):
         from_attributes = True
 
 
-class ProposeChangesRequest(BaseModel):
+class ProposalRequest(BaseModel):
+    draft: bool | None = Field(True, description="Whether the pull request is a draft")
+    state: str | None = Field(None, description="State of the pull request (open, closed)")
     title: str = Field(..., min_length=1, max_length=200, description="Pull request title")
     description: str = Field(..., min_length=1, max_length=2000, description="Pull request description")
+    commit_message: str | None = Field(None, min_length=1, max_length=500, description="Commit message for the changes")
 
 
-class ProposeChangesResponse(BaseModel):
+class ProposalResponse(BaseModel):
     number: int
     url: str
     title: str
     state: str
-    author: str
+    draft: bool
     description: str
-    createdAt: datetime
-    updatedAt: datetime
-    mergeable: bool | None
+    commits: list["ProposalCommits"] | None
 
+class ProposalCommits(BaseModel):
+    sha: str
+    message: str
+    timestamp: datetime
 
 class CreateFileRequest(BaseModel):
     name: str

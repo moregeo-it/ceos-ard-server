@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import shutil
 from pathlib import Path
@@ -120,3 +121,25 @@ class GitService:
         except Exception as e:
             logger.error(f"Error reverting file changes: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revert file changes") from e
+
+    async def commit_and_push_changes(self, repo: git.Repo, branch_name: str, commit_message: str):
+        try:
+            # Commit changes to the repository
+            repo.index.commit(commit_message)
+            logger.info(f"Committed changes on branch {branch_name} with message: {commit_message}")
+
+            # Push changes to the remote repository
+            origin = repo.remote(name="origin")
+            push_info = origin.push(refspec=f"{branch_name}:{branch_name}")
+
+            for info in push_info:
+                if info.flags & info.ERROR:
+                    raise git.GitCommandError(f"Push failed: {info.summary}", 1)
+
+            logger.info(f"Pushed changes to remote branch {branch_name}")
+        except git.GitCommandError as e:
+            logger.error(f"Git command error during commit/push: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to commit or push changes: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Error during commit/push: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to commit or push changes") from e

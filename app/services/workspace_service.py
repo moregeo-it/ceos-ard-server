@@ -3,6 +3,8 @@ import shutil
 from datetime import datetime, timedelta
 from typing import Any
 
+from requests import Response
+
 import git
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
@@ -11,7 +13,7 @@ from strictyaml import YAMLValidationError, as_document, load
 
 from app.config import settings
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.schemas.workspace import CreatePFSRequest, WorkspaceCreate, WorkspaceUpdate
+from app.schemas.workspace import CreatePFSRequest, ProposalRequest, ProposalResponse, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
@@ -395,24 +397,61 @@ class WorkspaceService:
             logger.error(f"Error creating PFS for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
-    async def propose_changes(self, db: Session, workspace_id: str, user_id: str, title: str, description: str, access_token: str) -> dict[str, Any]:
+    async def get_proposal_changes(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        try:
+            workspace = await self.get_workspace_by_id(db, workspace_id, user_id, access_token=access_token, check_pr=True)
+
+            if not workspace.abs_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+            if not workspace.pull_request_number:
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+            pull_request = await self.github_service.get_pull_request(
+                access_token=access_token,
+                owner=workspace.fork_repo_owner,
+                repo=workspace.fork_repo_name,
+                number=workspace.pull_request_number,
+            )
+
+            if not pull_request:
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+            commits = await self.github_service.get_pull_request_commits(
+                access_token=access_token,
+                owner=workspace.fork_repo_owner,
+                repo=workspace.fork_repo_name,
+                pr_number=workspace.pull_request_number,
+            )
+
+            workspace.pull_request_status = pull_request["state"]
+            workspace.pull_request_status_last_updated_at = datetime.now()
+            workspace.status = (
+                WorkspaceStatus.ARCHIVED if pull_request["state"] == "closed" or pull_request["state"] == "merged" else workspace.status
+            )
+
+            db.commit()
+
+            pr_response = self.github_service.format_pr_response(pull_request, commits)
+
+            return Response(content=pr_response, status_code=status.HTTP_200_OK, response_model=ProposalResponse)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting proposal changes for workspace {workspace_id}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get proposal changes: {str(e)}") from e
+
+    async def propose_changes(self, db: Session, workspace_id: str, user_id: str, access_token: str, propose_data: ProposalRequest) -> dict[str, Any]:
         workspace = await self.get_workspace_by_id(db, workspace_id, user_id)
 
         if not workspace.abs_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-        if workspace.status != WorkspaceStatus.ACTIVE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not active")
+        if workspace.status == WorkspaceStatus.ARCHIVED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot propose changes for an archived workspace")
 
-        if workspace.pull_request_status == PullRequestStatus.OPEN:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already open")
-
-        if workspace.pull_request_status == PullRequestStatus.MERGED:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already merged")
-
-        if workspace.pull_request_status == PullRequestStatus.CLOSED:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request is already closed")
-
+        if workspace.pull_request_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Pull request is already {workspace.pull_request_status.value}; cannot propose changes")
         try:
             changed_files = get_repo_changes(workspace.abs_path)
 
@@ -420,62 +459,34 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes to commit")
 
             repo = git.Repo(workspace.abs_path)
+            commit_message = propose_data.commit_message or propose_data.title
 
-            # Commit changes to the repository
-            try:
-                repo.index.commit(description)
-                logger.info(f"Committed changes for workspace {workspace_id}")
-            except git.GitCommandError as e:
-                logger.error(f"Failed to commit changes for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to commit changes: {str(e)}") from e
+            # Commit and push changes to the repository
+            await self.git_service.commit_and_push_changes(repo, workspace.branch_name, commit_message)
 
-            # Push changes to the remote repository
-            try:
-                origin = repo.remote(name="origin")
-                push_info = origin.push(refspec=f"{workspace.branch_name}:{workspace.branch_name}")
-
-                for info in push_info:
-                    if info.flags & info.ERROR:
-                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {info.summary}")
-                logger.info(f"Pushed changes for workspace {workspace_id} to branch {workspace.branch_name}")
-
-            except git.GitCommandError as e:
-                logger.error(f"Failed to push changes for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to push changes: {str(e)}") from e
-
-            except git.InvalidGitRepositoryError as e:
-                logger.error(f"Failed to push changes for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to push changes: {str(e)}") from e
-
-            # Create a pull request
-            pr_data = {
-                "title": title,
-                "body": description,
-                "head": f"{workspace.fork_repo_owner}:{workspace.branch_name}",
-                "base": settings.CEOS_ARD_BRANCH,
-            }
-
-            pr_response = await self.github_service.create_pull_request(
-                access_token=access_token, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO, pr_data=pr_data
+            # Create or update pull request
+            pr_response = await self._handle_pull_request(
+                access_token=access_token,
+                pull_request_number=workspace.pull_request_number,
+                head_repo_owner=workspace.fork_repo_owner,
+                head_branch_name=workspace.branch_name,
+                propose_data=propose_data,
             )
 
             workspace.pull_request_number = pr_response["number"]
             workspace.pull_request_status = pr_response["state"].upper()
             workspace.pull_request_status_last_updated_at = datetime.now()
             db.commit()
-            db.refresh(workspace)
 
-            return {
-                "title": pr_response["title"],
-                "state": pr_response["state"],
-                "url": pr_response["html_url"],
-                "number": pr_response["number"],
-                "description": pr_response["body"],
-                "createdAt": pr_response["created_at"],
-                "updatedAt": pr_response["updated_at"],
-                "author": pr_response["user"]["login"],
-                "mergeable": pr_response.get("mergeable"),
-            }
+            # Get commits for the pull request
+            commits = await self.github_service.get_pull_request_commits(
+                access_token=access_token,
+                owner=workspace.fork_repo_owner,
+                repo=workspace.fork_repo_name,
+                pr_number=workspace.pull_request_number,
+            )
+
+            return self.github_service.format_pr_response(pr_response, commits)
 
         except HTTPException:
             raise
@@ -487,3 +498,37 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
+
+    async def _handle_pull_request(self, access_token: str, pull_request_number: int | None, head_repo_owner: str, head_branch_name: str, propose_data,):
+        try:
+            pr_data = {
+                "title": propose_data.title,
+                "draft": propose_data.draft,
+                "body": propose_data.description,
+                "base": settings.CEOS_ARD_BRANCH,
+            }
+
+            if pull_request_number is not None:
+                # Update existing PR
+                pr_data["state"] = propose_data.state
+                return await self.github_service.update_pull_request(
+                    access_token=access_token,
+                    upstream_owner=settings.CEOS_ARD_ORG,
+                    upstream_repo=settings.CEOS_ARD_REPO,
+                    pr_number=pull_request_number,
+                    pr_data=pr_data,
+                )
+            else:
+                # Create new PR
+                pr_data["head"] = f"{head_repo_owner}:{head_branch_name}"
+
+                return await self.github_service.create_pull_request(
+                    pr_data=pr_data,
+                    access_token=access_token,
+                    upstream_owner=settings.CEOS_ARD_ORG,
+                    upstream_repo=settings.CEOS_ARD_REPO,
+                )
+        except Exception as e:
+            logger.error(f"Error handling pull request: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to handle pull request") from e
+
