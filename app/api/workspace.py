@@ -59,7 +59,7 @@ async def get_user_workspaces(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["user"].access_token)
+        return await workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["user"].access_token)
     except HTTPException:
         raise
     except Exception as e:
@@ -80,7 +80,7 @@ async def get_user_workspace(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return workspace_service.get_workspace_by_id(
+        return await workspace_service.get_workspace_by_id(
             db=db, check_pr=True, workspace_id=workspace_id, user_id=current_user["user"].id, access_token=current_user["user"].access_token
         )
     except HTTPException:

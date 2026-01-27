@@ -85,7 +85,7 @@ class FileService:
 
     async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str, recurse: bool = False):
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(path, workspace.abs_path, exists=True)
 
             # Get the status of all files (e.g. to include deleted files)
@@ -142,7 +142,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             name = validate_pathname(request_data.name)
             folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
@@ -196,7 +196,7 @@ class FileService:
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
 
             return {"content": file_path.read_bytes(), "media_type": get_file_media_type(file_path)}
@@ -229,7 +229,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file content: {str(e)}") from e
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
         target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
@@ -286,7 +286,7 @@ class FileService:
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             if operation_request.operation == "rename":
                 return await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
             elif operation_request.operation == "revert":
@@ -338,7 +338,7 @@ class FileService:
         if len(search_query.strip()) < 3:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query must be at least 3 characters long")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
         try:
             if not workspace.abs_path.exists():
@@ -395,14 +395,14 @@ class FileService:
 
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
             return get_repo_changes(workspace.abs_path)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get changed files: {str(e)}") from e
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         relative_path_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
@@ -473,7 +473,7 @@ class FileService:
 
     async def get_file_context(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = await self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
             target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
 
             try:
