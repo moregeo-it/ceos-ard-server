@@ -3,8 +3,6 @@ import shutil
 from datetime import datetime, timedelta
 from typing import Any
 
-from requests import Response
-
 import git
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
@@ -13,11 +11,11 @@ from strictyaml import YAMLValidationError, as_document, load
 
 from app.config import settings
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.schemas.workspace import CreatePFSRequest, ProposalRequest, ProposalResponse, WorkspaceCreate, WorkspaceUpdate
+from app.schemas.workspace import CreatePFSRequest, ProposalRequest, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
-from app.utils.git_utils import get_repo_changes
+from app.utils.git_utils import format_pr_response, get_repo_changes
 
 from ..utils.validation import normalize_workspace_path
 
@@ -397,7 +395,7 @@ class WorkspaceService:
             logger.error(f"Error creating PFS for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
-    async def get_proposal_changes(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+    async def get_proposal_changes(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> dict[str, Any] | None:
         try:
             workspace = await self.get_workspace_by_id(db, workspace_id, user_id, access_token=access_token, check_pr=True)
 
@@ -405,36 +403,37 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if not workspace.pull_request_number:
-                return Response(status_code=status.HTTP_204_NO_CONTENT)
+                return None
 
             pull_request = await self.github_service.get_pull_request(
                 access_token=access_token,
-                owner=workspace.fork_repo_owner,
-                repo=workspace.fork_repo_name,
+                owner=settings.CEOS_ARD_ORG,
+                repo=settings.CEOS_ARD_REPO,
                 number=workspace.pull_request_number,
             )
 
             if not pull_request:
-                return Response(status_code=status.HTTP_204_NO_CONTENT)
+                return None
 
             commits = await self.github_service.get_pull_request_commits(
                 access_token=access_token,
-                owner=workspace.fork_repo_owner,
-                repo=workspace.fork_repo_name,
-                pr_number=workspace.pull_request_number,
+                owner=settings.CEOS_ARD_ORG,
+                repo=settings.CEOS_ARD_REPO,
+                number=workspace.pull_request_number,
             )
 
-            workspace.pull_request_status = pull_request["state"]
+            pull_request_status = pull_request["state"]
+            workspace.pull_request_status = pull_request_status.upper()
             workspace.pull_request_status_last_updated_at = datetime.now()
             workspace.status = (
-                WorkspaceStatus.ARCHIVED if pull_request["state"] == "closed" or pull_request["state"] == "merged" else workspace.status
+                WorkspaceStatus.ARCHIVED
+                if pull_request_status in [PullRequestStatus.CLOSED.value, PullRequestStatus.MERGED.value]
+                else workspace.status
             )
 
             db.commit()
 
-            pr_response = self.github_service.format_pr_response(pull_request, commits)
-
-            return Response(content=pr_response, status_code=status.HTTP_200_OK, response_model=ProposalResponse)
+            return format_pr_response(pull_request, commits)
         except HTTPException:
             raise
         except Exception as e:
@@ -451,7 +450,10 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot propose changes for an archived workspace")
 
         if workspace.pull_request_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Pull request is already {workspace.pull_request_status.value}; cannot propose changes")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Pull request is already {workspace.pull_request_status.value}; cannot propose changes",
+            )
         try:
             changed_files = get_repo_changes(workspace.abs_path)
 
@@ -499,7 +501,14 @@ class WorkspaceService:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
 
-    async def _handle_pull_request(self, access_token: str, pull_request_number: int | None, head_repo_owner: str, head_branch_name: str, propose_data,):
+    async def _handle_pull_request(
+        self,
+        access_token: str,
+        pull_request_number: int | None,
+        head_repo_owner: str,
+        head_branch_name: str,
+        propose_data,
+    ):
         try:
             pr_data = {
                 "title": propose_data.title,
@@ -531,4 +540,3 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error handling pull request: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to handle pull request") from e
-

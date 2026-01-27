@@ -82,10 +82,12 @@ class ProposalResponse(BaseModel):
     description: str
     commits: list["ProposalCommits"] | None
 
+
 class ProposalCommits(BaseModel):
     sha: str
     message: str
     timestamp: datetime
+
 
 class CreateFileRequest(BaseModel):
     name: str

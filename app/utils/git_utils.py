@@ -71,8 +71,8 @@ def get_repo_changes(workspace_path: str) -> list[dict[str, str]]:
     except git.exc.GitCommandError:
         return changed_files
 
-def format_pr_response(pr_response: dict[str, Any],
-    commits: list[dict[str, Any]]) -> dict[str, Any]:
+
+def format_pr_response(pr_response: dict[str, Any], commits: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "title": pr_response["title"],
         "state": pr_response["state"],
@@ -80,10 +80,13 @@ def format_pr_response(pr_response: dict[str, Any],
         "url": pr_response["html_url"],
         "number": pr_response["number"],
         "description": pr_response["body"],
-        "commits": [{
-            "sha": commit["sha"],
-            "url": commit["html_url"],
-            "message": commit["commit"]["message"],
-            "timestamp": commit["commit"]["committer"]["date"],
-        } for commit in commits],
+        "commits": [
+            {
+                "sha": commit["sha"],
+                "url": commit["html_url"],
+                "message": commit["commit"]["message"],
+                "timestamp": commit["commit"]["committer"]["date"],
+            }
+            for commit in commits
+        ],
     }

@@ -182,9 +182,7 @@ class GitHubService:
                 return None
             raise
 
-    async def update_pull_request(
-        self, owner: str, repo: str, number: int, access_token: str, pr_data: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update_pull_request(self, owner: str, repo: str, number: int, access_token: str, pr_data: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}"
         try:
             return await self._make_github_request("PATCH", url, access_token, json_data=pr_data, timeout=60.0)
@@ -194,9 +192,7 @@ class GitHubService:
                 return None
             raise
 
-    async def get_pull_request_commits(
-        self, owner: str, repo: str, number: int, access_token: str
-    ) -> list[dict[str, Any]]:
+    async def get_pull_request_commits(self, owner: str, repo: str, number: int, access_token: str) -> list[dict[str, Any]]:
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}/commits"
         try:
             return await self._make_github_request("GET", url, access_token, timeout=60.0)
