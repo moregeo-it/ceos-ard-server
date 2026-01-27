@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from requests import Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -133,6 +133,8 @@ async def delete_workspace(
 @router.get(
     "/{workspace_id}/proposal",
     summary="Get existing pull request proposal",
+    response_model=ProposalResponse,
+    status_code=status.HTTP_200_OK,
     description="Retrieve the existing pull request in the original repository that proposes changes made in the workspace",
 )
 async def get_proposal_changes(
@@ -149,9 +151,8 @@ async def get_proposal_changes(
             access_token=current_user["user"].access_token,
         )
 
-        if pull_request is None:
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-        return pull_request
+        return Response(status_code=status.HTTP_204_NO_CONTENT) if pull_request is None else pull_request
+
     except HTTPException:
         raise
     except Exception as e:
