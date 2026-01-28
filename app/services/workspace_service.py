@@ -214,7 +214,7 @@ class WorkspaceService:
             logger.error(f"Error updating workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from e
 
-    async def delete_workspace(self, db: Session, workspace_id: str, user_id: str, access_token: str) -> str:
+    async def delete_workspace(self, db: Session, workspace_id: str, user_id: str) -> str:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -229,16 +229,6 @@ class WorkspaceService:
                 logger.info(f"Deleted workspace files at {workspace.abs_path}")
             else:
                 logger.warning(f"Workspace path does not exist: {workspace.abs_path}")
-
-            if workspace.pull_request_number and workspace.pull_request_status == PullRequestStatus.OPEN.value:
-                await self.github_service.update_pull_request(
-                    access_token=access_token,
-                    owner=settings.CEOS_ARD_ORG,
-                    repo=settings.CEOS_ARD_REPO,
-                    number=workspace.pull_request_number,
-                    pr_data={"state": PullRequestStatus.CLOSED.value},
-                )
-                logger.info(f"Closed pull request #{workspace.pull_request_number} for workspace {workspace_id}")
 
             db.delete(workspace)
             db.commit()
