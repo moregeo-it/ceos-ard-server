@@ -89,7 +89,7 @@ class WorkspaceService:
             logger.error(f"Error setting up workspace {workspace.id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to setup workspace: {str(e)}") from e
 
-    async def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
+    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
         try:
             if not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
