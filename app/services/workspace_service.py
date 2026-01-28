@@ -102,27 +102,6 @@ class WorkspaceService:
                 .all()
             )
 
-            # Update pull request status if needed
-            for workspace in workspaces:
-                if workspace.pull_request_status == PullRequestStatus.OPEN and workspace.pull_request_number:
-                    pull_request = await self.github_service.get_pull_request(
-                        access_token=access_token,
-                        repo=settings.CEOS_ARD_REPO,
-                        owner=settings.CEOS_ARD_ORG,
-                        number=workspace.pull_request_number,
-                    )
-
-                    if pull_request is not None:
-                        workspace.pull_request_status = pull_request["state"].upper()
-                        workspace.pull_request_status_last_updated_at = datetime.now()
-                        workspace.status = (
-                            WorkspaceStatus.ARCHIVED if pull_request["state"] == "closed" or pull_request["state"] == "merged" else workspace.status
-                        )
-                        workspace.updated_at = datetime.now()
-                        db.add(workspace)
-
-            db.commit()
-
             return workspaces
 
         except Exception as e:
@@ -150,7 +129,7 @@ class WorkspaceService:
             logger.error(f"Error getting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
 
-    async def get_workspace(self, db: Session, user_id: str, workspace_id: str, access_token: str) -> GitWorkspace | None:
+    async def sync_workspace(self, db: Session, user_id: str, workspace_id: str, access_token: str) -> GitWorkspace | None:
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
@@ -394,7 +373,7 @@ class WorkspaceService:
 
     async def get_proposal_changes(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> dict[str, Any] | None:
         try:
-            workspace = await self.get_workspace(db, user_id, workspace_id, access_token=access_token)
+            workspace = await self.sync_workspace(db, user_id, workspace_id, access_token=access_token)
 
             if not workspace.abs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
@@ -438,7 +417,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get proposal changes: {str(e)}") from e
 
     async def propose_changes(self, db: Session, workspace_id: str, user_id: str, access_token: str, propose_data: ProposalRequest) -> dict[str, Any]:
-        workspace = await self.get_workspace(db, user_id, workspace_id, access_token)
+        workspace = await self.sync_workspace(db, user_id, workspace_id, access_token)
 
         if not workspace.abs_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
