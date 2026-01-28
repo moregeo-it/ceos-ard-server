@@ -89,7 +89,7 @@ class WorkspaceService:
             logger.error(f"Error setting up workspace {workspace.id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to setup workspace: {str(e)}") from e
 
-    async def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
+    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
         try:
             if not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
@@ -137,7 +137,7 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
 
             # Update pull request status if needed
-            if workspace.pull_request_number and workspace.pull_request_status == PullRequestStatus.OPEN:
+            if workspace.pull_request_number:
                 pull_request = await self.github_service.get_pull_request(
                     access_token=access_token,
                     repo=settings.CEOS_ARD_REPO,
@@ -146,17 +146,17 @@ class WorkspaceService:
                 )
 
                 if pull_request is not None:
-                    pr_state = pull_request["state"].upper()
-                    workspace.pull_request_status = pr_state
+                    pr_state = pull_request["state"]
+                    workspace.pull_request_status = pr_state.upper()
                     workspace.pull_request_status_last_updated_at = datetime.now()
 
-                    if pr_state in [PullRequestStatus.CLOSED, PullRequestStatus.MERGED]:
+                    if pr_state in [PullRequestStatus.CLOSED.value, PullRequestStatus.MERGED.value]:
                         workspace.archived_at = datetime.now()
                         workspace.status = WorkspaceStatus.ARCHIVED
 
-                    db.add(workspace)
-                    db.commit()
-                    db.refresh(workspace)
+                db.add(workspace)
+                db.commit()
+                db.refresh(workspace)
 
             return workspace
 
@@ -214,7 +214,7 @@ class WorkspaceService:
             logger.error(f"Error updating workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from e
 
-    async def delete_workspace(self, db: Session, workspace_id: str, user_id: str) -> str:
+    async def delete_workspace(self, db: Session, workspace_id: str, user_id: str, access_token: str) -> str:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -229,6 +229,17 @@ class WorkspaceService:
                 logger.info(f"Deleted workspace files at {workspace.abs_path}")
             else:
                 logger.warning(f"Workspace path does not exist: {workspace.abs_path}")
+
+            if workspace.pull_request_number and workspace.pull_request_status == PullRequestStatus.OPEN.value:
+                await self.github_service.update_pull_request(
+                    access_token=access_token,
+                    owner=settings.CEOS_ARD_ORG,
+                    repo=settings.CEOS_ARD_REPO,
+                    number=workspace.pull_request_number,
+                    pr_data={"state": PullRequestStatus.CLOSED.value},
+                )
+                logger.info(f"Closed pull request #{workspace.pull_request_number} for workspace {workspace_id}")
+
             db.delete(workspace)
             db.commit()
 
@@ -375,7 +386,7 @@ class WorkspaceService:
 
     async def get_proposal_changes(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> dict[str, Any] | None:
         try:
-            workspace = await self.sync_workspace(db, user_id, workspace_id, access_token=access_token)
+            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
 
             if not workspace.abs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
@@ -400,11 +411,11 @@ class WorkspaceService:
                 number=workspace.pull_request_number,
             )
 
-            pull_request_status = pull_request["state"].upper()
-            workspace.pull_request_status = pull_request_status
+            pull_request_status = pull_request["state"]
+            workspace.pull_request_status = pull_request_status.upper()
             workspace.pull_request_status_last_updated_at = datetime.now()
 
-            if pull_request_status in [PullRequestStatus.CLOSED, PullRequestStatus.MERGED]:
+            if pull_request_status in [PullRequestStatus.CLOSED.value, PullRequestStatus.MERGED.value]:
                 workspace.archived_at = datetime.now()
                 workspace.status = WorkspaceStatus.ARCHIVED
 
