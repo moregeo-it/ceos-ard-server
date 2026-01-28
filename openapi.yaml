@@ -1083,12 +1083,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  # todo
-  /workspaces/{workspaceId}/proposals:
-    post:
-      summary: Create proposal
-      description: Creates a new proposal for the workspace changes
-      operationId: createProposal
+  /workspaces/{workspaceId}/proposal:
+    get:
+      summary: Get proposal information
+      description: |
+        Retrieves information about the proposal (GitHub Pull Request) for the workspace changes.
+
+        This endpoint returns the current state of the PR including title, description, draft status,
+        and whether the PR has been closed or merged.
+      operationId: getProposal
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Proposal information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+        '204':
+          description: No proposal exists for the workspace
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: Create or update proposal
+      description: |
+        Creates a new proposal (GitHub Pull Request) or updates an existing one for the workspace changes.
+
+        **Creating a new proposal:**
+
+        - Creates a commit with all current workspace changes
+        - Opens a new GitHub PR with the provided title and description
+        - The PR can be marked as draft or ready for review
+        - If no commit message is provided, the title will be used as the commit message
+
+        **Updating an existing proposal:**
+
+        - Updates the PR title and/or description
+        - Can change the draft/ready status of the PR
+        - Could potentially close or reopen the PR
+        - Commits:
+          - If a commit message is provided:
+            Creates a new commit with all current workspace changes and adds it to the existing PR.
+          - If no commit message is provided, it does not add a commit to the PR.
+            Only the PR status is updated.
+      operationId: createOrUpdateProposal
       tags:
         - Workspaces
       parameters:
@@ -1099,69 +1151,39 @@ paths:
           application/json:
             schema:
               type: object
+              description: Input for creating or updating a proposal
               required:
                 - title
                 - description
               properties:
                 title:
-                  type: string
-                  description: PR title
-                  minLength: 1
-                  maxLength: 200
+                  $ref: '#/components/schemas/ProposalTitle'
                 description:
+                  $ref: '#/components/schemas/ProposalDescription'
+                commit_message:
+                  $ref: '#/components/schemas/CommitMessage'
+                draft:
+                  $ref: '#/components/schemas/ProposalDraft'
+                state:
                   type: string
-                  description: PR description
-                  maxLength: 2000
+                  enum:
+                    - open
+                    - closed
+                  description: |
+                    Desired state of the PR.
+
+                    - "open": PR should be open and can receive commits/updates
+                    - "closed": PR should be closed without merging (withdrawn)
+
+                    If a PR can't be opened or closed (e.g. because missing permissions or being merged),
+                    a 409 Conflict error will be returned.
       responses:
-        '201':
-          description: Pull request created successfully
+        '200':
+          description: Proposal created/updated successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  number:
-                    type: integer
-                    description: GitHub PR number
-                  title:
-                    type: string
-                    description: PR title
-                  description:
-                    type: string
-                    description: PR description
-                  url:
-                    type: string
-                    format: uri
-                    description: URL to the GitHub PR
-                  state:
-                    type: string
-                    enum: [open, closed, merged]
-                    description: PR state
-                  createdAt:
-                    type: string
-                    format: date-time
-                    description: PR creation timestamp
-                  updatedAt:
-                    type: string
-                    format: date-time
-                    description: PR last update timestamp
-                  author:
-                    $ref: '#/components/schemas/User'
-                  mergeable:
-                    type: boolean
-                    description: Whether the PR can be merged
-                  checksStatus:
-                    type: string
-                    enum: [pending, success, failure]
-                    description: Status of CI checks
-                required:
-                  - number
-                  - title
-                  - url
-                  - state
-                  - createdAt
-                  - updatedAt
-                  - author
+                $ref: '#/components/schemas/Proposal'
         '400':
           description: Invalid request data
           content:
@@ -1170,6 +1192,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict with existing state
           content:
             application/json:
               schema:
@@ -1387,6 +1415,94 @@ components:
           type: string
           format: uri
           description: URL to user's avatar image
+
+    ProposalTitle:
+      type: string
+      description: Title of the proposal (GitHub Pull Request)
+      minLength: 1
+      maxLength: 200
+    ProposalDescription:
+      type:
+        - string
+        - "null"
+      description: Description/body of the proposal (GitHub Pull Request) (supports Markdown)
+      minLength: 1
+      maxLength: 10000
+    CommitMessage:
+      type: string
+      description: Commit message
+      minLength: 1
+      maxLength: 500
+    ProposalDraft:
+      type: boolean
+      description: |
+        Whether the proposal (GitHub Pull Request) is marked as a draft.
+
+        - true: PR is a draft and not ready for review
+        - false: PR is ready for review
+
+        If a proposal exists, the default is taken from the existing PR state.
+        If no proposal exists, the default is `true` (draft).
+      default: true
+
+    Proposal:
+      type: object
+      description: |
+        Represents a proposal (GitHub Pull Request) for workspace changes.
+        Users should poll this resource to stay informed about changes to the PR status.
+      required:
+        - number
+        - url
+        - title
+        - description
+        - state
+        - draft
+        - commits
+      properties:
+        number:
+          type: integer
+          description: GitHub PR number
+        url:
+          type: string
+          format: uri
+          description: URL to the GitHub PR
+        title:
+          $ref: '#/components/schemas/ProposalTitle'
+        description:
+          $ref: '#/components/schemas/ProposalDescription'
+        state:
+          type: string
+          enum:
+            - open
+            - closed
+            - merged
+          description: |
+            Current state of the PR.
+
+            - "open": PR is open and can receive commits/updates
+            - "closed": PR was closed without merging (withdrawn)
+            - "merged": PR was merged into the main branch
+        draft:
+          $ref: '#/components/schemas/ProposalDraft'
+        commits:
+          type: array
+          description: List of commits in the PR.
+          items:
+            type: object
+            required:
+              - sha
+              - message
+              - timestamp
+            properties:
+              sha:
+                type: string
+                description: Commit SHA
+              message:
+                $ref: '#/components/schemas/CommitMessage'
+              timestamp:
+                type: string
+                format: date-time
+                description: Commit timestamp
 
     Workspace:
       type: object

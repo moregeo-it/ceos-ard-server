@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -10,8 +11,8 @@ from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     CreatePFSRequest,
     PFSResponse,
-    ProposeChangesRequest,
-    ProposeChangesResponse,
+    ProposalRequest,
+    ProposalResponse,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
@@ -80,8 +81,8 @@ async def get_user_workspace(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return workspace_service.get_workspace_by_id(
-            db=db, check_pr=True, workspace_id=workspace_id, user_id=current_user["user"].id, access_token=current_user["user"].access_token
+        return await workspace_service.sync_workspace(
+            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, access_token=current_user["user"].access_token
         )
     except HTTPException:
         raise
@@ -129,29 +130,57 @@ async def delete_workspace(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace", e)) from e
 
 
-@router.post(
-    "/{workspace_id}/propose",
-    response_model=ProposeChangesResponse,
-    summary="Propose changes to a workspace",
-    description="Propose changes to a workspace by creating a pull request",
+@router.get(
+    "/{workspace_id}/proposal",
+    summary="Get existing pull request proposal",
+    response_model=ProposalResponse,
+    status_code=status.HTTP_200_OK,
+    description="Retrieve the existing pull request in the original repository that proposes changes made in the workspace",
 )
-async def propose_changes(
+async def get_proposal_changes(
     workspace_id: str,
-    propose_data: ProposeChangesRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        access_token = current_user.get("access_token")
-
-        return await workspace_service.propose_changes(
+        pull_request = await workspace_service.get_proposal_changes(
             db=db,
             workspace_id=workspace_id,
             user_id=current_user["user"].id,
-            pr_title=propose_data.pr_title,
-            pr_description=propose_data.pr_description,
-            access_token=access_token,
+            access_token=current_user["user"].access_token,
+        )
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT) if pull_request is None else pull_request
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting proposal changes: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get proposal changes", e)) from e
+
+
+@router.put(
+    "/{workspace_id}/proposal",
+    response_model=ProposalResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Create or update a pull request to propose changes",
+    description="Create or update a pull request in the original repository to propose changes made in the workspace",
+)
+async def propose_changes(
+    workspace_id: str,
+    propose_data: ProposalRequest,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+):
+    try:
+        return await workspace_service.propose_changes(
+            db=db,
+            workspace_id=workspace_id,
+            propose_data=propose_data,
+            user_id=current_user["user"].id,
+            access_token=current_user["user"].access_token,
         )
     except HTTPException:
         raise
