@@ -872,6 +872,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+    put:
+      summary: Create a commit of the changes
+      description: Creates a new git commit for all current workspace changes.
+      operationId: commitChanges
+      tags:
+        - Files
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Create a git commit
+              required:
+                - message
+              properties:
+                message:
+                  $ref: '#/components/schemas/CommitMessage'
+      responses:
+        '200':
+          description: |-
+            Commit created successfully.
+
+            Returns an updated list of commits, including the new commit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Commits'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+
   /workspaces/{workspaceId}/diffs/{filePath}:
     get:
       summary: Get diff for specific file
@@ -1125,21 +1176,14 @@ paths:
 
         **Creating a new proposal:**
 
-        - Creates a commit with all current workspace changes
         - Opens a new GitHub PR with the provided title and description
-        - The PR can be marked as draft or ready for review
-        - If no commit message is provided, the title will be used as the commit message
+        - The PR is marked as draft by default
 
         **Updating an existing proposal:**
 
         - Updates the PR title and/or description
-        - Can change the draft/ready status of the PR
+        - The draft/ready status can be changed (due to current limitations in the GitHub REST API)
         - Could potentially close or reopen the PR
-        - Commits:
-          - If a commit message is provided:
-            Creates a new commit with all current workspace changes and adds it to the existing PR.
-          - If no commit message is provided, it does not add a commit to the PR.
-            Only the PR status is updated.
       operationId: createOrUpdateProposal
       tags:
         - Workspaces
@@ -1160,10 +1204,6 @@ paths:
                   $ref: '#/components/schemas/ProposalTitle'
                 description:
                   $ref: '#/components/schemas/ProposalDescription'
-                commit_message:
-                  $ref: '#/components/schemas/CommitMessage'
-                draft:
-                  $ref: '#/components/schemas/ProposalDraft'
                 state:
                   type: string
                   enum:
@@ -1485,24 +1525,27 @@ components:
         draft:
           $ref: '#/components/schemas/ProposalDraft'
         commits:
-          type: array
-          description: List of commits in the PR.
-          items:
-            type: object
-            required:
-              - sha
-              - message
-              - timestamp
-            properties:
-              sha:
-                type: string
-                description: Commit SHA
-              message:
-                $ref: '#/components/schemas/CommitMessage'
-              timestamp:
-                type: string
-                format: date-time
-                description: Commit timestamp
+          $ref: '#/components/schemas/Commits'
+
+    Commits:
+      type: array
+      description: List of commits in the PR.
+      items:
+        type: object
+        required:
+          - sha
+          - message
+          - timestamp
+        properties:
+          sha:
+            type: string
+            description: Commit SHA
+          message:
+            $ref: '#/components/schemas/CommitMessage'
+          timestamp:
+            type: string
+            format: date-time
+            description: Commit timestamp
 
     Workspace:
       type: object
