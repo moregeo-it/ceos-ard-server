@@ -70,12 +70,15 @@ class ProposalRequest(BaseModel):
     state: str | None = Field(None, description="State of the pull request (open, closed)")
     title: str = Field(..., min_length=1, max_length=200, description="Pull request title")
     description: str = Field(..., min_length=1, max_length=10000, description="Pull request description")
-    commit_message: str | None = Field(None, min_length=1, max_length=500, description="Commit message for the changes")
 
 
-class ProposalCommits(BaseModel):
+class CommitRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500, description="Commit message for the changes")
+
+
+class Commit(BaseModel):
     sha: str
-    url: str
+    url: str | None = None
     message: str
     timestamp: datetime
 
@@ -87,7 +90,7 @@ class ProposalResponse(BaseModel):
     state: str
     draft: bool
     description: str
-    commits: list[ProposalCommits] | None
+    commits: list[Commit] | None
 
 
 class CreateFileRequest(BaseModel):

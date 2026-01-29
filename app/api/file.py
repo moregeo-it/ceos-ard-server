@@ -9,6 +9,8 @@ from app.db.database import get_db
 from app.dependencies import get_file_service
 from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
+    Commit,
+    CommitRequest,
     CreateFileRequest,
     FileContextResponse,
     FileListResponse,
@@ -222,6 +224,34 @@ async def get_changed_files(
     except Exception as e:
         logger.error(f"Error getting changed files: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get changed files", e)) from e
+
+
+@router.put(
+    "/{workspace_id}/diffs",
+    response_model=Commit,
+    status_code=status.HTTP_200_OK,
+    summary="Create a commit of the changes",
+    description="Creates a new git commit for all current workspace changes.",
+)
+async def commit_changes(
+    workspace_id: str,
+    commit: CommitRequest,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    file_service: FileService = Depends(get_file_service),
+):
+    try:
+        return await file_service.persist_changes(
+            db=db,
+            workspace_id=workspace_id,
+            message=commit.message,
+            user=current_user["user"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error committing changes: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("commit changes", e)) from e
 
 
 @router.get(

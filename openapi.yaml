@@ -895,14 +895,11 @@ paths:
                   $ref: '#/components/schemas/CommitMessage'
       responses:
         '200':
-          description: |-
-            Commit created successfully.
-
-            Returns an updated list of commits, including the new commit.
+          description: Commit created successfully.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Commits'
+                $ref: '#/components/schemas/Commit'
         '400':
           description: Invalid request data
           content:
@@ -1527,25 +1524,33 @@ components:
         commits:
           $ref: '#/components/schemas/Commits'
 
+    Commit:
+      type: object
+      required:
+        - sha
+        - message
+        - timestamp
+      properties:
+        sha:
+          type: string
+          description: Commit SHA
+        url:
+          type: string
+          format: uri
+          description: URL to the commit on GitHub
+          default: null
+        message:
+          $ref: '#/components/schemas/CommitMessage'
+        timestamp:
+          type: string
+          format: date-time
+          description: Commit timestamp
+
     Commits:
       type: array
       description: List of commits in the PR.
       items:
-        type: object
-        required:
-          - sha
-          - message
-          - timestamp
-        properties:
-          sha:
-            type: string
-            description: Commit SHA
-          message:
-            $ref: '#/components/schemas/CommitMessage'
-          timestamp:
-            type: string
-            format: date-time
-            description: Commit timestamp
+        $ref: '#/components/schemas/Commit'
 
     Workspace:
       type: object

@@ -10,12 +10,13 @@ from sqlalchemy.orm import Session
 from strictyaml import YAMLValidationError, as_document, load
 
 from app.config import settings
+from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.schemas.workspace import CreatePFSRequest, ProposalRequest, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
-from app.utils.git_utils import format_pr_response, get_repo_changes
+from app.utils.git_utils import format_pr_response, get_repo, get_repo_changes
 
 from ..utils.validation import normalize_workspace_path
 
@@ -28,22 +29,16 @@ class WorkspaceService:
         self.build_service = BuildService()
         self.github_service = GitHubService()
 
-    async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user_id: str, username: str, access_token: str) -> GitWorkspace:
+    async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user: User) -> GitWorkspace:
         if not workspace_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
 
         try:
-            logger.info(f"Checking fork for user {username}")
-            fork_repo, was_created = await self.github_service.get_or_create_fork(
-                username=username, access_token=access_token, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO
-            )
-
-            if was_created:
-                logger.info(f"Created new fork for user {username}")
+            fork_repo = await self.github_service.fork(user=user, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO)
 
             # Create workspace record in database
             workspace = GitWorkspace(
-                user_id=user_id,
+                user_id=user.id,
                 pfs=workspace_data.pfs,
                 title=workspace_data.title,
                 description=workspace_data.description,
@@ -51,24 +46,14 @@ class WorkspaceService:
                 fork_repo_name=fork_repo["name"],
                 status=WorkspaceStatus.ACTIVE,
             )
-
             db.add(workspace)
             db.commit()
             db.refresh(workspace)
 
-            await self._setup_workspace(db, workspace, clone_url=fork_repo["clone_url"])
-
-            return workspace
-
-        except Exception as e:
-            logger.error(f"Error creating workspace: {e}")
-            db.rollback()
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
-
-    async def _setup_workspace(self, db: Session, workspace: GitWorkspace, clone_url: str):
-        try:
+            # Clone the forked repository into the workspace directory
             success = await self.git_service.clone_repository(
-                clone_url=clone_url,
+                user=user,
+                clone_url=fork_repo["clone_url"],
                 workspace_path=workspace.abs_path,
                 branch_name=workspace.branch_name,
                 upstream_repo=settings.CEOS_ARD_REPO,
@@ -77,17 +62,21 @@ class WorkspaceService:
             )
 
             if success:
-                workspace.status = WorkspaceStatus.ACTIVE
                 db.commit()
                 db.refresh(workspace)
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
             else:
+                db.rollback()
                 raise Exception("Failed to setup workspace")
 
+            return workspace
+
         except Exception as e:
-            logger.error(f"Error setting up workspace {workspace.id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to setup workspace: {str(e)}") from e
+            logger.error(f"Error creating workspace: {e}")
+            if workspace:
+                db.rollback()
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
 
     def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
         try:
@@ -108,12 +97,11 @@ class WorkspaceService:
             logger.error(f"Error getting user workspaces: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
-    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str) -> GitWorkspace:
+    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True) -> GitWorkspace:
         try:
             if not workspace_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
-
-            if not user_id:
+            elif not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
             query = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id)
@@ -121,6 +109,10 @@ class WorkspaceService:
             workspace = query.first()
             if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+            elif exists and not workspace.abs_path.exists():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found on filesystem")
+            elif exists and not workspace.abs_path.is_dir():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not a directory")
 
             return workspace
         except HTTPException:
@@ -218,7 +210,7 @@ class WorkspaceService:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, exists=False)
 
         if workspace.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
@@ -250,9 +242,6 @@ class WorkspaceService:
 
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-            if not workspace.abs_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             pfs_path = workspace.abs_path / "pfs"
 
@@ -300,86 +289,80 @@ class WorkspaceService:
     async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, create_pfs_request: CreatePFSRequest):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
+        if not create_pfs_request.id or not create_pfs_request.title:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
+
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        repo = get_repo(workspace.abs_path)
+        new_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.id
+        if new_pfs_path.exists():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
 
         try:
-            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-            if not workspace.abs_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-
-            if not create_pfs_request.id or not create_pfs_request.title:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
-
-            new_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.id
-
-            if new_pfs_path.exists():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
-
             new_pfs_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Error creating PFS directory {new_pfs_path}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS directory: {str(e)}") from e
 
-            try:
-                if create_pfs_request.base_pfs:
-                    base_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.base_pfs
-                    if not base_pfs_path.exists():
-                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
-                    shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
+        try:
+            if create_pfs_request.base_pfs:
+                base_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.base_pfs
+                if not base_pfs_path.exists():
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
 
-                    documents_path = new_pfs_path / "document.yaml"
-                    if documents_path.exists():
-                        yaml_content = documents_path.read_text()
-                        validated_document = load(yaml_content)
-                        documents_data = validated_document.data
-                    else:
-                        documents_data = {
-                            "id": create_pfs_request.id,
-                            "title": create_pfs_request.title,
-                            "version": create_pfs_request.version or "1.0-draft",
-                        }
+                shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
+
+                documents_path = new_pfs_path / "document.yaml"
+                if documents_path.exists():
+                    yaml_content = documents_path.read_text()
+                    validated_document = load(yaml_content)
+                    documents_data = validated_document.data
                 else:
-                    # Handle case when no base_pfs is provided
-                    documents_path = new_pfs_path / "document.yaml"
                     documents_data = {
                         "id": create_pfs_request.id,
                         "title": create_pfs_request.title,
                         "version": create_pfs_request.version or "1.0-draft",
                     }
+            else:
+                # Handle case when no base_pfs is provided
+                documents_path = new_pfs_path / "document.yaml"
+                documents_data = {
+                    "id": create_pfs_request.id,
+                    "title": create_pfs_request.title,
+                    "version": create_pfs_request.version or "1.0-draft",
+                }
 
-                update_data = create_pfs_request.model_dump(
-                    include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True
-                )
+            update_data = create_pfs_request.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
 
-                documents_data.update(update_data)
-                yaml_document = as_document(documents_data)
-                documents_path.write_text(yaml_document.as_yaml(), encoding="utf-8")
+            documents_data.update(update_data)
+            yaml_document = as_document(documents_data)
+            documents_path.write_text(yaml_document.as_yaml(), encoding="utf-8")
 
-                logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
+            logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
 
-                repo = git.Repo(workspace.abs_path)
+            # Add changes to the repository
+            try:
+                repo.git.add(normalize_workspace_path(new_pfs_path, workspace.abs_path, absolute=False))
+            except git.GitCommandError as e:
+                logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
 
-                # Add changes to the repository
-                try:
-                    repo.git.add(normalize_workspace_path(new_pfs_path, workspace.abs_path, absolute=False))
-                except git.GitCommandError as e:
-                    logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
-
-                return {"id": create_pfs_request.id, "name": create_pfs_request.title}
-            except YAMLValidationError as e:
-                shutil.rmtree(new_pfs_path, ignore_errors=True)
-                logger.error(f"Invalid YAML content for PFS {create_pfs_request.id}: {e}")
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid YAML content: {str(e)}") from e
+            return {"id": create_pfs_request.id, "name": create_pfs_request.title}
+        except YAMLValidationError as e:
+            shutil.rmtree(new_pfs_path, ignore_errors=True)
+            logger.error(f"Invalid YAML content for PFS {create_pfs_request.id}: {e}")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid YAML content: {str(e)}") from e
         except HTTPException:
+            shutil.rmtree(new_pfs_path, ignore_errors=True)
             raise
         except Exception as e:
-            logger.error(f"Error creating PFS for workspace {workspace_id}: {e}")
+            shutil.rmtree(new_pfs_path, ignore_errors=True)
+            logger.error(f"Error creating PFS {create_pfs_request.id} for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
     async def get_proposal_changes(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> dict[str, Any] | None:
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-
-            if not workspace.abs_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
             if not workspace.pull_request_number:
                 return None
@@ -418,11 +401,10 @@ class WorkspaceService:
             logger.error(f"Error getting proposal changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get proposal changes: {str(e)}") from e
 
-    async def propose_changes(self, db: Session, workspace_id: str, user_id: str, access_token: str, propose_data: ProposalRequest) -> dict[str, Any]:
+    async def propose_changes(
+        self, db: Session, workspace_id: str, user_id: str, username: str, access_token: str, propose_data: ProposalRequest
+    ) -> dict[str, Any]:
         workspace = await self.sync_workspace(db, user_id, workspace_id, access_token)
-
-        if not workspace.abs_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot propose changes for an archived workspace")
@@ -432,15 +414,18 @@ class WorkspaceService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Pull request is already {workspace.pull_request_status.value}; cannot propose changes",
             )
+
+        repo = get_repo(workspace.abs_path)
         try:
-            changed_files = get_repo_changes(workspace.abs_path)
-
-            if changed_files:
-                repo = git.Repo(workspace.abs_path)
-                commit_message = propose_data.commit_message or propose_data.title
-
+            changed_files = get_repo_changes(repo)
+            if len(changed_files) > 0:
                 # Commit and push changes to the repository
-                await self.git_service.commit_and_push_changes(repo, workspace.branch_name, commit_message)
+                await self.git_service.push_changes(
+                    repo=repo,
+                    branch_name=workspace.branch_name,
+                    username=username,
+                    access_token=access_token,
+                )
 
             # Create or update pull request
             pr_response = await self._handle_pull_request(
@@ -468,11 +453,6 @@ class WorkspaceService:
 
         except HTTPException:
             raise
-        except git.InvalidGitRepositoryError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Git repository") from e
-        except git.GitCommandError as e:
-            logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
         except Exception as e:
             logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e

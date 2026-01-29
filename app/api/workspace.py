@@ -32,13 +32,11 @@ async def create_workspace(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    user_id = current_user["user"].id
-    username = current_user["user"].username
-    access_token = current_user["user"].access_token
-
     try:
         return await workspace_service.create_workspace(
-            db=db, user_id=user_id, username=username, workspace_data=workspace_data, access_token=access_token
+            db=db,
+            user=current_user["user"],
+            workspace_data=workspace_data,
         )
     except HTTPException:
         raise
@@ -180,6 +178,7 @@ async def propose_changes(
             workspace_id=workspace_id,
             propose_data=propose_data,
             user_id=current_user["user"].id,
+            username=current_user["user"].username,
             access_token=current_user["user"].access_token,
         )
     except HTTPException:
