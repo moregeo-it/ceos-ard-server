@@ -166,13 +166,3 @@ class GitHubService:
                 logger.info(f"Pull request {number} not found for {owner}/{repo}")
                 return None
             raise
-
-    async def get_pull_request_commits(self, owner: str, repo: str, number: int, access_token: str) -> list[dict[str, Any]]:
-        url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}/commits"
-        try:
-            return await self._make_github_request("GET", url, access_token, timeout=60.0)
-        except HTTPException as e:
-            if e.status_code == 404:
-                logger.info(f"Pull request {number} not found for {owner}/{repo}")
-                return []
-            raise

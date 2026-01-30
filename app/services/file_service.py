@@ -14,7 +14,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
-from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.git_utils import get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,9 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
-    def walk_files(self, target_path: Path, workspace_path: Path, repo: pygit2.Repository, recurse: bool = False, status: dict | None = None) -> list[dict]:
+    def walk_files(
+        self, target_path: Path, workspace_path: Path, repo: pygit2.Repository, recurse: bool = False, status: dict | None = None
+    ) -> list[dict]:
         if status is None:
             status = {}
         all_files = []
@@ -448,7 +450,7 @@ class FileService:
             logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
-    async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> dict[str, str]:
+    async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> pygit2.Commit:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
@@ -477,7 +479,7 @@ class FileService:
             logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
             raise
 
-        return format_commit(commit)
+        return commit
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
         """

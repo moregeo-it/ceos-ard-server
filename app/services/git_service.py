@@ -31,15 +31,15 @@ class GitService:
         try:
             workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Clone with depth=1 (shallow clone)
+            # Clone with full history (no depth limit) to preserve upstream history
             callbacks = UserPassCredentials(user.username, user.access_token)
-            repo = pygit2.clone_repository(clone_url, str(workspace_path), callbacks=callbacks, depth=1)
+            repo = pygit2.clone_repository(clone_url, str(workspace_path), callbacks=callbacks)
 
             # Add upstream remote
             upstream_url = f"https://github.com/{upstream_owner}/{upstream_repo}"
             repo.remotes.create("upstream", upstream_url)
 
-            # Fetch from upstream
+            # Fetch from upstream with full history
             upstream_remote = repo.remotes["upstream"]
             upstream_remote.fetch([upstream_branch])
 
@@ -107,6 +107,7 @@ class GitService:
         try:
             if not repo.head_is_unborn:
                 diff = repo.index.diff_to_tree(repo.head.peel().tree)
+                diff.find_similar()  # Enable rename detection
                 for delta in diff.deltas:
                     if delta.status == pygit2.GIT_DELTA_RENAMED and delta.new_file.path == relative_file_str:
                         old_path = delta.old_file.path
@@ -138,7 +139,7 @@ class GitService:
         # File has no git history - cannot revert
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert file with no git history. File was never committed.")
 
-    async def commit_changes(self, repo: pygit2.Repository, message: str):
+    async def commit_changes(self, repo: pygit2.Repository, message: str) -> pygit2.Commit:
         """
         Commit changes to the current branch in the repository.
 
@@ -210,3 +211,52 @@ class GitService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to send changes to GitHub, please try again. Error: {error_msg}"
             ) from None  # don't raise e to avoid leaking sensitive information
+
+    def get_commits(
+        self,
+        workspace_path: Path,
+        upstream_branch: str = None,
+    ) -> list[pygit2.Commit]:
+        """
+        Get all commits that have been added to the current branch compared to the upstream branch.
+
+        Args:
+            workspace_path: Path to the workspace/repository
+            upstream_branch: The upstream branch to compare against (defaults to settings.CEOS_ARD_BRANCH)
+
+        Returns:
+            List of commit dictionaries with sha, message, and timestamp
+        """
+        if upstream_branch is None:
+            upstream_branch = settings.CEOS_ARD_BRANCH
+
+        repo = get_repo(workspace_path)
+        commits = []
+        try:
+            if repo.head_is_unborn:
+                return commits
+
+            # Get the current HEAD commit
+            head_commit = repo.head.peel()
+
+            # Get the upstream branch reference
+            upstream_ref = repo.references.get(f"refs/remotes/upstream/{upstream_branch}")
+            if upstream_ref is None:
+                logger.warning(f"Upstream branch refs/remotes/upstream/{upstream_branch} not found")
+                return commits
+
+            upstream_commit = upstream_ref.peel()
+
+            # Walk from HEAD and collect commits until we reach the upstream commit
+            # This gives us all commits that are in HEAD but not in upstream
+            walker = repo.walk(head_commit.id, pygit2.GIT_SORT_TOPOLOGICAL | pygit2.GIT_SORT_TIME)
+
+            # Hide all commits reachable from upstream (i.e., only show commits ahead of upstream)
+            walker.hide(upstream_commit.id)
+
+            for commit in walker:
+                commits.append(commit)
+        except pygit2.GitError as e:
+            logger.error(f"Error getting commits ahead of upstream: {e}")
+
+        return commits

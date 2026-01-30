@@ -1,5 +1,5 @@
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import pygit2
@@ -36,25 +36,24 @@ def get_file_info(repo: pygit2.Repository, path: Path) -> dict[str, str] | None:
         workspace_path = Path(repo.workdir)
         relative_path = str(path.relative_to(workspace_path)).replace("\\", "/")
 
-        status_dict = repo.status()
+        # First, check for renames using diff with rename detection
+        # This must be done before checking status flags, because a renamed file
+        # shows as "added" in the status flags
+        if not repo.head_is_unborn:
+            diff = repo.index.diff_to_tree(repo.head.peel().tree)
+            diff.find_similar()  # Enable rename detection
+            for delta in diff.deltas:
+                if delta.status == pygit2.GIT_DELTA_RENAMED:
+                    if delta.new_file.path == relative_path:
+                        return {"path": relative_path, "status": "renamed", "source": delta.old_file.path}
 
         # Check for the file in status
+        status_dict = repo.status()
         if relative_path in status_dict:
             flags = status_dict[relative_path]
             file_status = get_file_status_from_flags(flags)
             if file_status:
                 return {"path": relative_path, "status": file_status}
-
-        # Check for renames by looking at the diff
-        if repo.head_is_unborn:
-            return None
-
-        diff = repo.index.diff_to_tree(repo.head.peel().tree)
-        diff.find_similar()  # Enable rename detection
-        for delta in diff.deltas:
-            if delta.status == pygit2.GIT_DELTA_RENAMED:
-                if delta.new_file.path == relative_path:
-                    return {"path": relative_path, "status": "renamed", "source": delta.old_file.path}
 
         return None
     except (pygit2.GitError, ValueError):
@@ -82,11 +81,13 @@ def get_repo_changes(repo: pygit2.Repository) -> list[dict[str, str]]:
             diff.find_similar()  # Enable rename detection
             for delta in diff.deltas:
                 if delta.status == pygit2.GIT_DELTA_RENAMED:
-                    changed_files.append({
-                        "path": delta.new_file.path,
-                        "status": "renamed",
-                        "source": delta.old_file.path,
-                    })
+                    changed_files.append(
+                        {
+                            "path": delta.new_file.path,
+                            "status": "renamed",
+                            "source": delta.old_file.path,
+                        }
+                    )
                     renamed_new_paths.add(delta.new_file.path)
                     renamed_old_paths.add(delta.old_file.path)
 
@@ -105,35 +106,26 @@ def get_repo_changes(repo: pygit2.Repository) -> list[dict[str, str]]:
         return changed_files
 
 
-def format_commit(commit: list[dict[str, str]] | pygit2.Commit) -> Commit:
+def format_commit(commit: pygit2.Commit) -> Commit:
     """Format a commit object into a standardized dictionary."""
-    if isinstance(commit, pygit2.Commit):
-        from datetime import datetime, timezone
-
-        commit_time = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc)
+    if isinstance(commit, dict):
+        # Already formatted or from GitHub API
+        if "sha" in commit and "message" in commit and "timestamp" in commit and "author" in commit:
+            return commit
+        # GitHub API format
         return {
-            "sha": str(commit.id),
-            "message": commit.message,
-            "timestamp": commit_time.isoformat(),
+            "sha": commit.get("sha", ""),
+            "message": commit.get("commit", {}).get("message", "") if "commit" in commit else commit.get("message", ""),
+            "timestamp": commit.get("commit", {}).get("committer", {}).get("date", "") if "commit" in commit else commit.get("timestamp", ""),
+            "author": commit.get("commit", {}).get("author", {}).get("name", "") if "commit" in commit else commit.get("author", ""),
         }
-    else:
-        return {
-            "sha": commit["sha"],
-            "url": commit["html_url"],
-            "message": commit["commit"]["message"],
-            "timestamp": commit["commit"]["committer"]["date"],
-        }
-
-
-def format_pr_response(pr_response: dict[str, Any], commits: list[dict[str, Any]]) -> dict[str, Any]:
+    # pygit2.Commit object
+    commit_time = datetime.fromtimestamp(commit.commit_time, tz=UTC)
     return {
-        "title": pr_response["title"],
-        "state": pr_response["state"],
-        "draft": pr_response["draft"],
-        "url": pr_response["html_url"],
-        "number": pr_response["number"],
-        "description": pr_response["body"],
-        "commits": [format_commit(commit) for commit in commits],
+        "sha": str(commit.id),
+        "message": commit.message,
+        "timestamp": commit_time.isoformat(),
+        "author": commit.author.name,
     }
 
 

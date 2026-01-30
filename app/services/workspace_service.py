@@ -16,7 +16,7 @@ from app.schemas.workspace import CreatePFSRequest, ProposalRequest, WorkspaceCr
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
-from app.utils.git_utils import format_pr_response, get_repo, get_repo_changes
+from app.utils.git_utils import get_repo, get_repo_changes
 
 from ..utils.validation import normalize_workspace_path
 
@@ -233,6 +233,10 @@ class WorkspaceService:
             logger.error(f"Error deleting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
+    def get_workspace_commits(self, db: Session, workspace_id: str, user_id: str) -> list[pygit2.Commit]:
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        return self.git_service.get_commits(workspace.abs_path)
+
     async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
@@ -382,14 +386,6 @@ class WorkspaceService:
 
             if not pull_request:
                 return None
-
-            commits = await self.github_service.get_pull_request_commits(
-                access_token=access_token,
-                owner=settings.CEOS_ARD_ORG,
-                repo=settings.CEOS_ARD_REPO,
-                number=workspace.pull_request_number,
-            )
-
             pull_request_status = pull_request["state"]
             workspace.pull_request_status = pull_request_status.upper()
             workspace.pull_request_status_last_updated_at = datetime.now()
@@ -400,7 +396,7 @@ class WorkspaceService:
 
             db.commit()
 
-            return format_pr_response(pull_request, commits)
+            return pull_request
         except HTTPException:
             raise
         except Exception as e:
@@ -447,15 +443,7 @@ class WorkspaceService:
             workspace.pull_request_status_last_updated_at = datetime.now()
             db.commit()
 
-            # Get commits for the pull request
-            commits = await self.github_service.get_pull_request_commits(
-                access_token=access_token,
-                repo=settings.CEOS_ARD_REPO,
-                owner=settings.CEOS_ARD_ORG,
-                number=workspace.pull_request_number,
-            )
-
-            return format_pr_response(pr_response, commits)
+            return pr_response
 
         except HTTPException:
             raise

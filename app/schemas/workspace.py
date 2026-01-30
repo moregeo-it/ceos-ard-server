@@ -78,9 +78,9 @@ class CommitRequest(BaseModel):
 
 class Commit(BaseModel):
     sha: str
-    url: str | None = None
     message: str
     timestamp: datetime
+    author: str
 
 
 class ProposalResponse(BaseModel):
@@ -90,7 +90,6 @@ class ProposalResponse(BaseModel):
     state: str
     draft: bool
     description: str
-    commits: list[Commit] | None
 
 
 class CreateFileRequest(BaseModel):

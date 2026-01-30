@@ -20,6 +20,7 @@ from app.schemas.workspace import (
 )
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
+from app.utils.git_utils import format_commit
 
 logger = logging.getLogger(__name__)
 
@@ -241,12 +242,13 @@ async def commit_changes(
     file_service: FileService = Depends(get_file_service),
 ):
     try:
-        return await file_service.persist_changes(
+        commit = await file_service.persist_changes(
             db=db,
             workspace_id=workspace_id,
             message=commit.message,
             user=current_user["user"],
         )
+        return format_commit(commit)
     except HTTPException:
         raise
     except Exception as e:
