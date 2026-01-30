@@ -3,7 +3,7 @@ import shutil
 from datetime import datetime
 from typing import Any
 
-import git
+import pygit2
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -342,8 +342,14 @@ class WorkspaceService:
 
             # Add changes to the repository
             try:
-                repo.git.add(normalize_workspace_path(new_pfs_path, workspace.abs_path, absolute=False))
-            except git.GitCommandError as e:
+                relative_path = normalize_workspace_path(new_pfs_path, workspace.abs_path, absolute=False)
+                # Add all files in the new PFS directory
+                for file_path in new_pfs_path.rglob("*"):
+                    if file_path.is_file():
+                        rel_file = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
+                        repo.index.add(rel_file)
+                repo.index.write()
+            except pygit2.GitError as e:
                 logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
 

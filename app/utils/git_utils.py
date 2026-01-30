@@ -2,91 +2,119 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-import git
+import pygit2
 from fastapi import HTTPException, status
 
 from app.schemas.workspace import Commit
 
 
-def get_repo(path: Path | str) -> git.Repo:
+def get_repo(path: Path | str) -> pygit2.Repository:
+    """Open a git repository at the given path."""
     try:
-        return git.Repo(path)
-    except git.InvalidGitRepositoryError as e:
+        return pygit2.Repository(str(path))
+    except pygit2.GitError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Git repository is corrupted") from e
 
 
-def get_file_info(repo: git.Repo, path: Path) -> dict[str, str] | None:
+def get_file_status_from_flags(flags: int) -> str | None:
+    """Convert pygit2 status flags to a status string."""
+    if flags & (pygit2.GIT_STATUS_INDEX_NEW | pygit2.GIT_STATUS_WT_NEW):
+        return "added"
+    if flags & (pygit2.GIT_STATUS_INDEX_DELETED | pygit2.GIT_STATUS_WT_DELETED):
+        return "deleted"
+    if flags & (pygit2.GIT_STATUS_INDEX_RENAMED | pygit2.GIT_STATUS_WT_RENAMED):
+        return "renamed"
+    if flags & (pygit2.GIT_STATUS_INDEX_MODIFIED | pygit2.GIT_STATUS_WT_MODIFIED):
+        return "modified"
+    return None
+
+
+def get_file_info(repo: pygit2.Repository, path: Path) -> dict[str, str] | None:
+    """Get status info for a specific file in the repository."""
     try:
         path = path.resolve()
-        workspace_path = Path(repo.working_dir)
-        git_status = repo.git.status(path.parent, porcelain=True)
-        for line in git_status.splitlines():
-            info = extract_fileinfo(line)
-            line_path = (workspace_path / info["path"]).resolve()
-            if line_path == path:
-                return info
+        workspace_path = Path(repo.workdir)
+        relative_path = str(path.relative_to(workspace_path)).replace("\\", "/")
+
+        status_dict = repo.status()
+
+        # Check for the file in status
+        if relative_path in status_dict:
+            flags = status_dict[relative_path]
+            file_status = get_file_status_from_flags(flags)
+            if file_status:
+                return {"path": relative_path, "status": file_status}
+
+        # Check for renames by looking at the diff
+        if repo.head_is_unborn:
+            return None
+
+        diff = repo.index.diff_to_tree(repo.head.peel().tree)
+        diff.find_similar()  # Enable rename detection
+        for delta in diff.deltas:
+            if delta.status == pygit2.GIT_DELTA_RENAMED:
+                if delta.new_file.path == relative_path:
+                    return {"path": relative_path, "status": "renamed", "source": delta.old_file.path}
 
         return None
-    except git.GitCommandError:
+    except (pygit2.GitError, ValueError):
         return None
 
 
-def get_file_status(repo: git.Repo, path: Path) -> str | None:
+def get_file_status(repo: pygit2.Repository, path: Path) -> str | None:
+    """Get the git status of a specific file."""
     file = get_file_info(repo, path)
     if file:
         return file.get("status")
     return None
 
 
-def extract_status(line: str) -> str:
-    code = line[:2].strip()
-
-    status_map = {"A": "added", "M": "modified", "D": "deleted", "R": "renamed"}
-
-    for marker, value in status_map.items():
-        if marker in code:
-            return value
-    return None
-
-
-def extract_fileinfo(line: str) -> str:
-    file_path = line[3:].strip()
-    file_status = extract_status(line)
-
-    if file_status == "renamed":
-        parts = file_path.split("->", maxsplit=1)
-        if len(parts) == 2:
-            old_path = parts[0].strip()
-            new_path = parts[1].strip()
-            return {"path": new_path, "status": file_status, "source": old_path}
-
-    elif file_status:
-        return {"path": file_path, "status": file_status}
-
-    return None
-
-
-def get_repo_changes(repo: git.Repo) -> list[dict[str, str]]:
+def get_repo_changes(repo: pygit2.Repository) -> list[dict[str, str]]:
+    """Get all changed files in the repository."""
     changed_files = []
+    renamed_new_paths = set()
+    renamed_old_paths = set()
+
     try:
-        git_status = repo.git.status(porcelain=True)
+        # First, detect renames using diff with rename detection
+        if not repo.head_is_unborn:
+            diff = repo.index.diff_to_tree(repo.head.peel().tree)
+            diff.find_similar()  # Enable rename detection
+            for delta in diff.deltas:
+                if delta.status == pygit2.GIT_DELTA_RENAMED:
+                    changed_files.append({
+                        "path": delta.new_file.path,
+                        "status": "renamed",
+                        "source": delta.old_file.path,
+                    })
+                    renamed_new_paths.add(delta.new_file.path)
+                    renamed_old_paths.add(delta.old_file.path)
 
-        for line in git_status.splitlines():
-            file_info = extract_fileinfo(line)
-            if file_info:
-                changed_files.append(file_info)
+        # Then get other status changes, excluding files that are part of renames
+        status_dict = repo.status()
+        for filepath, flags in status_dict.items():
+            # Skip files that are part of a rename operation
+            if filepath in renamed_new_paths or filepath in renamed_old_paths:
+                continue
+            file_status = get_file_status_from_flags(flags)
+            if file_status:
+                changed_files.append({"path": filepath, "status": file_status})
 
         return changed_files
-    except git.GitCommandError:
+    except pygit2.GitError:
         return changed_files
 
 
-def format_commit(commit: list[dict[str, str]] | git.Commit) -> Commit:
-    if isinstance(commit, git.Commit):
+def format_commit(commit: list[dict[str, str]] | pygit2.Commit) -> Commit:
+    """Format a commit object into a standardized dictionary."""
+    if isinstance(commit, pygit2.Commit):
+        from datetime import datetime, timezone
+
+        commit_time = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc)
         return {
-            "sha": commit.hexsha,
+            "sha": str(commit.id),
             "message": commit.message,
-            "timestamp": commit.committed_datetime.isoformat(),
+            "timestamp": commit_time.isoformat(),
         }
     else:
         return {
@@ -143,3 +171,17 @@ def sanitize_git_error(error: Exception, username: str, token: str) -> str:
     if username:
         error_msg = error_msg.replace(username, "<USERNAME>")
     return error_msg
+
+
+class UserPassCredentials(pygit2.RemoteCallbacks):
+    """Callbacks for pygit2 that provide username/password authentication."""
+
+    def __init__(self, username: str, password: str):
+        super().__init__()
+        self._username = username
+        self._password = password
+
+    def credentials(self, url, username_from_url, allowed_types):
+        if allowed_types & pygit2.GIT_CREDENTIAL_USERPASS_PLAINTEXT:
+            return pygit2.UserPass(self._username, self._password)
+        return None

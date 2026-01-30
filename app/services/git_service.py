@@ -2,12 +2,12 @@ import logging
 import shutil
 from pathlib import Path
 
-import git
+import pygit2
 from fastapi import HTTPException, status
 
 from app.config import settings
 from app.models.user import User
-from app.utils.git_utils import build_authenticated_url, get_file_status, get_repo, sanitize_git_error
+from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, sanitize_git_error
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -31,20 +31,36 @@ class GitService:
         try:
             workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
-            repo = git.Repo.clone_from(clone_url, workspace_path, depth=1)
-            repo.create_remote("upstream", f"https://github.com/{upstream_owner}/{upstream_repo}")
-            repo.remotes.upstream.fetch(upstream_branch)
-            # Check out from the upstream branch so that the data is up-to-date
-            # Use --no-track to avoid tracking upstream, we'll set origin tracking after push
-            repo.git.checkout("-b", branch_name, "--no-track", f"upstream/{upstream_branch}")
-            # Push to the repo and set upstream tracking branch in one operation
-            # This also verifies we have the proper permissions to push
+            # Clone with depth=1 (shallow clone)
+            callbacks = UserPassCredentials(user.username, user.access_token)
+            repo = pygit2.clone_repository(clone_url, str(workspace_path), callbacks=callbacks, depth=1)
+
+            # Add upstream remote
+            upstream_url = f"https://github.com/{upstream_owner}/{upstream_repo}"
+            repo.remotes.create("upstream", upstream_url)
+
+            # Fetch from upstream
+            upstream_remote = repo.remotes["upstream"]
+            upstream_remote.fetch([upstream_branch])
+
+            # Get the upstream branch commit
+            upstream_ref = repo.references.get(f"refs/remotes/upstream/{upstream_branch}")
+            if upstream_ref is None:
+                raise Exception(f"Could not find upstream branch: {upstream_branch}")
+
+            upstream_commit = upstream_ref.peel()
+
+            # Create and checkout new branch from upstream
+            repo.create_branch(branch_name, upstream_commit)
+            repo.checkout(f"refs/heads/{branch_name}")
+
+            # Push to origin and set upstream tracking
             await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
 
             logger.info(f"Successfully cloned repository to {workspace_path}")
 
             return True
-        except git.InvalidGitRepositoryError as e:
+        except pygit2.GitError as e:
             logger.error(f"Invalid git repository: {clone_url}")
 
             if workspace_path.exists():
@@ -67,45 +83,53 @@ class GitService:
 
         # Check if file exists in HEAD commit
         try:
-            repo.git.cat_file("-e", f"HEAD:{relative_file_str}")
-            # File exists in HEAD - restore it directly
-            repo.git.checkout("HEAD", "--", relative_file_str)
+            if not repo.head_is_unborn:
+                head_commit = repo.head.peel()
+                try:
+                    # Try to get the file from HEAD
+                    head_commit.tree[relative_file_str]
+                    # File exists in HEAD - restore it
+                    repo.checkout_head(paths=[relative_file_str], strategy=pygit2.GIT_CHECKOUT_FORCE)
 
-            return {
-                "name": str(target_file_path.name),
-                "is_directory": target_file_path.is_dir(),
-                "status": get_file_status(repo, target_file_path),
-                "path": normalize_workspace_path(target_file_path, workspace_path),
-            }
-        except git.GitCommandError:
-            # File not in HEAD - check if it's part of a rename
+                    return {
+                        "name": str(target_file_path.name),
+                        "is_directory": target_file_path.is_dir(),
+                        "status": get_file_status(repo, target_file_path),
+                        "path": normalize_workspace_path(target_file_path, workspace_path),
+                    }
+                except KeyError:
+                    # File not in HEAD
+                    pass
+        except pygit2.GitError:
             pass
 
         # Check for renames in staged changes
         try:
-            for item in repo.index.diff("HEAD", R=True):
-                if item.change_type == "R" and item.b_path == relative_file_str:
-                    old_path = item.a_path
+            if not repo.head_is_unborn:
+                diff = repo.index.diff_to_tree(repo.head.peel().tree)
+                for delta in diff.deltas:
+                    if delta.status == pygit2.GIT_DELTA_RENAMED and delta.new_file.path == relative_file_str:
+                        old_path = delta.old_file.path
 
-                    # Unstage the rename
-                    repo.git.reset("HEAD", "--", old_path, relative_file_str)
+                        # Reset the index for both paths
+                        repo.index.remove(relative_file_str)
+                        repo.checkout_head(paths=[old_path], strategy=pygit2.GIT_CHECKOUT_FORCE)
+                        repo.index.add(old_path)
+                        repo.index.write()
 
-                    # Restore original file from HEAD
-                    repo.git.checkout("HEAD", "--", old_path)
+                        # Remove new file if it exists
+                        if target_file_path.exists():
+                            target_file_path.unlink()
 
-                    # Remove new file if it exists
-                    if target_file_path.exists():
-                        target_file_path.unlink()
-
-                    old_file_path = workspace_path / old_path
-                    return {
-                        "name": str(old_file_path.name),
-                        "is_directory": old_file_path.is_dir(),
-                        "status": get_file_status(repo, old_file_path),
-                        "path": normalize_workspace_path(old_file_path, workspace_path),
-                    }
-        except git.GitCommandError as e:
-            logger.error(f"Git command error reverting file: {e}")
+                        old_file_path = workspace_path / old_path
+                        return {
+                            "name": str(old_file_path.name),
+                            "is_directory": old_file_path.is_dir(),
+                            "status": get_file_status(repo, old_file_path),
+                            "path": normalize_workspace_path(old_file_path, workspace_path),
+                        }
+        except pygit2.GitError as e:
+            logger.error(f"Git error reverting file: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
         except Exception as e:
             logger.error(f"Error reverting file changes: {e}")
@@ -114,42 +138,70 @@ class GitService:
         # File has no git history - cannot revert
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert file with no git history. File was never committed.")
 
-    async def commit_changes(self, repo: git.Repo, message: str):
+    async def commit_changes(self, repo: pygit2.Repository, message: str):
         """
         Commit changes to the current branch in the repository.
 
         Args:
-            repo: GitPython Repo instance
+            repo: pygit2 Repository instance
             message: Commit message
         """
         try:
-            return repo.index.commit(message)
+            # Get the current user signature from config or use defaults
+            try:
+                signature = repo.default_signature
+            except pygit2.GitError:
+                signature = pygit2.Signature("CEOS-ARD Editor", "noreply@ceos.org")
+
+            # Get the tree from the index
+            tree_id = repo.index.write_tree()
+
+            # Get parent commit
+            if repo.head_is_unborn:
+                parents = []
+            else:
+                parents = [repo.head.peel().id]
+
+            # Create the commit
+            commit_id = repo.create_commit(
+                "HEAD",
+                signature,
+                signature,
+                message,
+                tree_id,
+                parents,
+            )
+
+            return repo.get(commit_id)
         except Exception as e:
             logger.error(f"Unable to commit changes: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to commit changes, please try again.") from e
 
-    async def push(self, repo: git.Repo, branch_name: str, user: User, set_upstream: bool = False):
+    async def push(self, repo: pygit2.Repository, branch_name: str, user: User, set_upstream: bool = False):
         """
         Push changes with user-specific credentials.
 
         Args:
-            repo: GitPython Repo instance
+            repo: pygit2 Repository instance
             branch_name: Branch to push to
             user: User object with username and access_token for authentication
         """
         try:
-            # Build authenticated URL (credentials are per-request, not stored)
-            origin = repo.remote(name="origin")
-            old_url = origin.url
-            temp_url = build_authenticated_url(origin.url, user.username, user.access_token)
-            origin.set_url(temp_url, old_url)
+            origin = repo.remotes["origin"]
+            callbacks = UserPassCredentials(user.username, user.access_token)
+            ref = f"refs/heads/{branch_name}"
+
             if set_upstream:
-                repo.git.push("-u", "origin", branch_name)
-                origin.fetch()
-                repo.heads[branch_name].set_tracking_branch(origin.refs[branch_name])
+                # Push with upstream tracking
+                origin.push([f"{ref}:{ref}"], callbacks=callbacks)
+                # Fetch to update remote refs
+                origin.fetch(callbacks=callbacks)
+                # Set tracking branch
+                branch = repo.branches.get(branch_name)
+                if branch:
+                    branch.upstream = repo.branches.remote.get(f"origin/{branch_name}")
             else:
-                origin.push()
-            origin.set_url(old_url, temp_url)
+                origin.push([ref], callbacks=callbacks)
 
             logger.info(f"Pushed changes to remote branch {branch_name}")
         except Exception as e:

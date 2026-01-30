@@ -3,7 +3,7 @@ import re
 import shutil
 from pathlib import Path
 
-import git
+import pygit2
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from yaml import safe_load as yaml_load
@@ -26,10 +26,12 @@ class FileService:
         self.workspace_service = WorkspaceService()
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
-    def _get_all_file_statuses(self, repo: git.Repo, target_path: Path, workspace_path: Path):
-        """Get all file statuses using GitPython API."""
+    def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
+        """Get all file statuses using pygit2 API."""
         status_map = {}
         relative_target = normalize_workspace_path(target_path, workspace_path, absolute=False)
+        renamed_new_paths = set()
+        renamed_old_paths = set()
 
         def get_map_key(file_path: str) -> str:
             path = workspace_path / file_path
@@ -38,39 +40,40 @@ class FileService:
         try:
             path_filter = relative_target if len(relative_target) > 0 else None
 
-            # Process untracked files (added)
-            for file_path in repo.untracked_files:
+            # First, detect renames using diff with rename detection
+            if not repo.head_is_unborn:
+                diff = repo.index.diff_to_tree(repo.head.peel().tree)
+                diff.find_similar()  # Enable rename detection
+                for delta in diff.deltas:
+                    if delta.status == pygit2.GIT_DELTA_RENAMED:
+                        new_path = delta.new_file.path
+                        old_path = delta.old_file.path
+                        # Apply path filter
+                        if path_filter and not new_path.startswith(path_filter) and not old_path.startswith(path_filter):
+                            continue
+                        status_map[get_map_key(new_path)] = "renamed"
+                        renamed_new_paths.add(new_path)
+                        renamed_old_paths.add(old_path)
+
+            # Get status from pygit2, excluding files that are part of renames
+            status_dict = repo.status()
+
+            for file_path, flags in status_dict.items():
+                # Skip files that are part of a rename operation
+                if file_path in renamed_new_paths or file_path in renamed_old_paths:
+                    continue
+
+                # Apply path filter if specified
                 if path_filter and not file_path.startswith(path_filter):
                     continue
-                status_map[get_map_key(file_path)] = "added"
 
-            # Process unstaged changes (working tree vs index)
-            for diff in repo.index.diff(None, paths=path_filter):
-                filename = get_map_key(diff.b_path or diff.a_path)
-
-                if diff.deleted_file:
-                    status_map[filename] = "deleted"
-                elif diff.renamed:
-                    status_map[filename] = "renamed"
-                else:
-                    status_map[filename] = "modified"
-
-            # Process staged changes (index vs HEAD)
-            for diff in repo.head.commit.diff(None, paths=path_filter):
-                filename = get_map_key(diff.b_path or diff.a_path)
-
-                # Skip if already marked (unstaged takes precedence for status display)
-                if filename in status_map:
-                    continue
-
-                if diff.new_file:
-                    status_map[filename] = "added"
-                elif diff.deleted_file:
-                    status_map[filename] = "deleted"
-                elif diff.renamed:
-                    status_map[filename] = "renamed"
-                else:
-                    status_map[filename] = "modified"
+                # Map pygit2 flags to status strings
+                if flags & (pygit2.GIT_STATUS_WT_NEW | pygit2.GIT_STATUS_INDEX_NEW):
+                    status_map[get_map_key(file_path)] = "added"
+                elif flags & (pygit2.GIT_STATUS_WT_DELETED | pygit2.GIT_STATUS_INDEX_DELETED):
+                    status_map[get_map_key(file_path)] = "deleted"
+                elif flags & (pygit2.GIT_STATUS_WT_MODIFIED | pygit2.GIT_STATUS_INDEX_MODIFIED):
+                    status_map[get_map_key(file_path)] = "modified"
 
         except Exception:
             pass
@@ -112,7 +115,7 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
-    def walk_files(self, target_path: Path, workspace_path: Path, repo: git.Repo, recurse: bool = False, status: dict | None = None) -> list[dict]:
+    def walk_files(self, target_path: Path, workspace_path: Path, repo: pygit2.Repository, recurse: bool = False, status: dict | None = None) -> list[dict]:
         if status is None:
             status = {}
         all_files = []
@@ -163,7 +166,10 @@ class FileService:
             else:
                 target_path.touch()
 
-            repo.git.add(str(target_path))
+            # Stage the file using pygit2
+            relative_path = str(target_path.relative_to(workspace_path)).replace("\\", "/")
+            repo.index.add(relative_path)
+            repo.index.write()
 
             return {
                 "name": name,
@@ -171,7 +177,7 @@ class FileService:
                 "status": get_file_status(repo, target_path),
                 "path": normalize_workspace_path(target_path, workspace_path),
             }
-        except git.GitCommandError as e:
+        except pygit2.GitError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been created, but it failed to be added to the repository"
             ) from e
@@ -205,14 +211,17 @@ class FileService:
         repo = get_repo(workspace.abs_path)
         try:
             file_path.write_bytes(content)
-            repo.git.add(str(file_path))
+            # Stage the file using pygit2
+            relative_path = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
+            repo.index.add(relative_path)
+            repo.index.write()
             return {
                 "name": file_path.name,
                 "is_directory": False,
                 "status": get_file_status(repo, file_path),
                 "path": normalize_workspace_path(file_path, workspace.abs_path),
             }
-        except git.GitCommandError as e:
+        except pygit2.GitError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been stored, but it failed to be added to the repository"
             ) from e
@@ -246,16 +255,22 @@ class FileService:
         # Check if file exists in HEAD (has git history)
         is_committed = False
         try:
-            repo.git.cat_file("-e", f"HEAD:{relative_path}")
-            is_committed = True
-        except git.GitCommandError:
+            if not repo.head_is_unborn:
+                head_commit = repo.head.peel()
+                try:
+                    head_commit.tree[relative_path]
+                    is_committed = True
+                except KeyError:
+                    is_committed = False
+        except pygit2.GitError:
             is_committed = False
 
         if is_committed:
             # File is in git history - stage the deletion
             try:
-                repo.git.add(relative_path)
-            except git.GitCommandError as e:
+                repo.index.remove(relative_path)
+                repo.index.write()
+            except pygit2.GitError as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"{ftype} deleted successfully, but failed to make the changes in the repository",
@@ -263,8 +278,9 @@ class FileService:
         else:
             # File not in git history - remove from index if staged
             try:
-                repo.git.rm("--staged", "--force", relative_path)
-            except git.GitCommandError:
+                repo.index.remove(relative_path)
+                repo.index.write()
+            except pygit2.GitError:
                 # File wasn't in index, nothing to do
                 pass
 
@@ -307,8 +323,14 @@ class FileService:
         relative_old = normalize_workspace_path(source_path, workspace_path, absolute=False)
         relative_new = normalize_workspace_path(target_path, workspace_path, absolute=False)
         try:
-            repo.git.add(relative_new, relative_old)
-        except git.GitCommandError as e:
+            # Stage the rename: remove old path, add new path
+            try:
+                repo.index.remove(relative_old)
+            except pygit2.GitError:
+                pass  # Old path might not be in index yet
+            repo.index.add(relative_new)
+            repo.index.write()
+        except pygit2.GitError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"The {ftype} was renamed, but failed to update the repository"
             ) from e
@@ -397,13 +419,33 @@ class FileService:
         repo = get_repo(workspace.abs_path)
         info = get_file_info(repo, target_path)
         try:
-            # Handle renamed files differently, otherwise they show as added
-            if info and info["status"] == "renamed":
-                return repo.git.diff("--staged", "-M", "--", info["source"], info["path"])
+            # Get the diff using pygit2
+            if repo.head_is_unborn:
+                # No commits yet - show all staged content as new
+                diff = repo.index.diff_to_tree()
             else:
-                return repo.git.diff("--staged", relative_path_str)
-        except git.GitCommandError as e:
-            logger.error(f"Git command failed for {relative_path_str}: {str(e)}")
+                head_tree = repo.head.peel().tree
+                diff = repo.index.diff_to_tree(head_tree)
+
+            # Find the specific file in the diff
+            for patch in diff:
+                patch_path = patch.delta.new_file.path
+                if patch_path == relative_path_str:
+                    return patch.text
+                # Handle renamed files
+                if info and info.get("status") == "renamed":
+                    if patch.delta.old_file.path == info.get("source") or patch.delta.new_file.path == relative_path_str:
+                        return patch.text
+
+            # If file not found in staged diff, check working directory changes
+            diff_workdir = repo.diff(repo.index, None)
+            for patch in diff_workdir:
+                if patch.delta.new_file.path == relative_path_str:
+                    return patch.text
+
+            return ""
+        except pygit2.GitError as e:
+            logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
     async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> dict[str, str]:
@@ -427,8 +469,11 @@ class FileService:
             await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
         except HTTPException:
             # Push failed - revert the commit but keep changes staged
-            # git reset --soft HEAD~1 undoes the commit but keeps files staged
-            repo.git.reset("--soft", "HEAD~1")
+            # Reset to parent commit (soft reset keeps files staged)
+            if not repo.head_is_unborn:
+                parent = repo.head.peel().parents[0] if repo.head.peel().parents else None
+                if parent:
+                    repo.reset(parent.id, pygit2.GIT_RESET_SOFT)
             logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
             raise
 
