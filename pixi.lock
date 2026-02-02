@@ -108,7 +108,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/yaml-0.2.5-h280c20c_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstandard-0.23.0-py312h66e93f0_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/08/33/858312628aa16a6de97839adc2ca28031ebc5391f96b6fb8fdf1fcb15d6c/playwright-1.55.0-py3-none-manylinux1_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -205,7 +205,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/yaml-0.2.5-h4132b18_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstandard-0.23.0-py312h01d7ebd_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/4a/64/48b2837ef396487807e5ab53c76465747e34c7143fac4a084ef349c293a8/playwright-1.55.0-py3-none-macosx_11_0_universal2.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -303,7 +303,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h925e9cb_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstandard-0.23.0-py313h90d716c_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/cf/f5/bdb61553b20e907196a38d864602a9b4a461660c3a111c67a35179b636fa/playwright-1.55.0-py3-none-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -399,7 +399,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/yaml-0.2.5-h6a83c73_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstandard-0.23.0-py313ha7868ed_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/46/4f/9ba607fa94bb9cee3d4beb1c7b32c16efbfc9d69d5037fa85d10cafc618b/playwright-1.55.0-py3-none-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -528,7 +528,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/yaml-0.2.5-h280c20c_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstandard-0.23.0-py312h66e93f0_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/08/33/858312628aa16a6de97839adc2ca28031ebc5391f96b6fb8fdf1fcb15d6c/playwright-1.55.0-py3-none-manylinux1_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -642,7 +642,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/yaml-0.2.5-h4132b18_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstandard-0.23.0-py312h01d7ebd_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/4a/64/48b2837ef396487807e5ab53c76465747e34c7143fac4a084ef349c293a8/playwright-1.55.0-py3-none-macosx_11_0_universal2.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -757,7 +757,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h925e9cb_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstandard-0.23.0-py313h90d716c_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/cf/f5/bdb61553b20e907196a38d864602a9b4a461660c3a111c67a35179b636fa/playwright-1.55.0-py3-none-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -869,7 +869,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/yaml-0.2.5-h6a83c73_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstandard-0.23.0-py313ha7868ed_2.conda
       - pypi: https://files.pythonhosted.org/packages/cb/4e/226cfbf6c61c38399fc19e5f46db755ffea32f77ef078982c953031c8a3c/bibtexparser-2.0.0b8-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/46/4f/9ba607fa94bb9cee3d4beb1c7b32c16efbfc9d69d5037fa85d10cafc618b/playwright-1.55.0-py3-none-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5d/ab/34ec41718af73c00119d0351b7a2531d2ebddb51833a36448fc7b862be60/pylatexenc-2.10.tar.gz
@@ -1078,10 +1078,10 @@ packages:
   purls: []
   size: 155658
   timestamp: 1752482350666
-- pypi: https://files.pythonhosted.org/packages/0e/f6/232bad766951bd19d973318b5068f477881557bc4bdf1f1d1e2af507084b/ceos_ard_cli-0.2.0-py3-none-any.whl
+- pypi: https://files.pythonhosted.org/packages/97/b2/7ebfcd18f58460cb6e9a625c8fbd498ff0d98ded9ddde0efe16cdcd15056/ceos_ard_cli-0.3.0-py3-none-any.whl
   name: ceos-ard-cli
-  version: 0.2.0
-  sha256: 2d8a644fd41eb5208073f495d0d123d758a03b4112e6003d8d0c68f695875745
+  version: 0.3.0
+  sha256: 7b795150911d844d1471f3c3f0956c21c9f90b81f4156f6de06304f09d28bb0e
   requires_dist:
   - bibtexparser==2.0.0b8
   - click>=8.0.0
