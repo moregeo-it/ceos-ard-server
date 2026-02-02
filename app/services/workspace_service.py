@@ -18,8 +18,6 @@ from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.utils.git_utils import get_repo, get_repo_changes
 
-from ..utils.validation import normalize_workspace_path
-
 logger = logging.getLogger(__name__)
 
 
@@ -346,7 +344,6 @@ class WorkspaceService:
 
             # Add changes to the repository
             try:
-                relative_path = normalize_workspace_path(new_pfs_path, workspace.abs_path, absolute=False)
                 # Add all files in the new PFS directory
                 for file_path in new_pfs_path.rglob("*"):
                     if file_path.is_file():

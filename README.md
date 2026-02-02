@@ -61,7 +61,6 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 ## 📋 Prerequisites
 
-- **Linux or MacOS operating system** (Windows currently not supported)
 - **Python 3.11+**
 - **Pixi** (for dependency management)
 - **Git** (for repository operations)

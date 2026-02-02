@@ -36,7 +36,7 @@ async def generate_preview(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting preview list for workspace {workspace_id}: {e}")
+        logger.error(f"Error getting preview for workspace {workspace_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=create_error_detail("generate preview", e),

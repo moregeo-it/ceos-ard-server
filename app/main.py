@@ -1,6 +1,4 @@
 import logging
-from multiprocessing import process
-import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,21 +7,16 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api import auth, file, pfs, preview, workspace
 from app.config import settings
 from app.db.database import Base, engine
+from app.utils.cli_utils import fastapi_run_checks, load_project_info
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-env = os.environ.get("ENVIRONMENT", "production")
-if env == "development":
-    logger.setLevel(logging.DEBUG)
+title, version = load_project_info()
 
-# Windows currently not supported
-if os.name == "nt":
-    logger.warning("\r\n!!!! Windows OS detected. The application may not function as expected on Windows !!!!")
-    if env != "development":
-        process.exit(1)
+logger.info(f"Starting {title} version {version} in {settings.ENVIRONMENT} environment")
 
-app = FastAPI(title="CEOS-ARD Server", version="0.1.0")
+app = FastAPI(title=title, version=version, lifespan=fastapi_run_checks)
 
 Base.metadata.create_all(bind=engine)
 
