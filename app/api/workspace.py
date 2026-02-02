@@ -12,8 +12,8 @@ from app.schemas.workspace import (
     Commit,
     CreatePFSRequest,
     PFSResponse,
+    Proposal,
     ProposalRequest,
-    ProposalResponse,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
@@ -133,18 +133,18 @@ async def delete_workspace(
 @router.get(
     "/{workspace_id}/proposal",
     summary="Get existing pull request proposal",
-    response_model=ProposalResponse,
+    response_model=Proposal,
     status_code=status.HTTP_200_OK,
     description="Retrieve the existing pull request in the original repository that proposes changes made in the workspace",
 )
-async def get_proposal_changes(
+async def get_proposal(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        pull_request = await workspace_service.get_proposal_changes(
+        pull_request = await workspace_service.get_proposal(
             db=db,
             workspace_id=workspace_id,
             user_id=current_user["user"].id,
@@ -152,7 +152,7 @@ async def get_proposal_changes(
         )
 
         if pull_request:
-            return pull_request # todo: format PR, see old commits
+            return pull_request  # todo: format PR, see old commits
         else:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -165,12 +165,12 @@ async def get_proposal_changes(
 
 @router.put(
     "/{workspace_id}/proposal",
-    response_model=ProposalResponse,
+    response_model=Proposal,
     status_code=status.HTTP_200_OK,
     summary="Create or update a pull request to propose changes",
     description="Create or update a pull request in the original repository to propose changes made in the workspace",
 )
-async def propose_changes(
+async def propose(
     workspace_id: str,
     propose_data: ProposalRequest,
     db: Session = Depends(get_db),
@@ -178,15 +178,14 @@ async def propose_changes(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        pr = await workspace_service.propose_changes(
+        return await workspace_service.propose(
             db=db,
             workspace_id=workspace_id,
-            propose_data=propose_data,
+            data=propose_data,
             user_id=current_user["user"].id,
             username=current_user["user"].username,
             access_token=current_user["user"].access_token,
         )
-        return pr
     except HTTPException:
         raise
     except Exception as e:

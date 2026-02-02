@@ -83,7 +83,7 @@ class Commit(BaseModel):
     author: str
 
 
-class ProposalResponse(BaseModel):
+class Proposal(BaseModel):
     number: int
     url: str
     title: str
