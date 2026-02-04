@@ -12,6 +12,7 @@ load_dotenv()
 # Editor:
 #   public_repo / ---: Allows to fork repositories for the editor under the org/user account so that PRs can be submitted.
 #   repo:status / ---: Get the status of GitHub PRs and checks to update the status of the editor workspaces.
+#   workflow / ---: To be able to push changes to branches that have GitHub Actions workflows defined.
 # Assessor:
 #   user:email / email: Stored for the assessor to notify about new assessments and results.
 #   read:org / ---: Read permissions of users in the ceos-org GitHub organization to verify membership for access control to the Assessor.
@@ -34,7 +35,7 @@ class Settings:
 
     GITHUB_CLIENT_RESPONSE_TYPE: str = "code"
     GITHUB_API_BASE_URL: str = "https://api.github.com"
-    GITHUB_CLIENT_SCOPE: str = "user:email read:org public_repo repo:status"
+    GITHUB_CLIENT_SCOPE: str = "user:email read:org public_repo repo:status workflow"
     GITHUB_TOKEN_URL: str = "https://github.com/login/oauth/access_token"
     GITHUB_AUTHORIZE_URL: str = "https://github.com/login/oauth/authorize"
 

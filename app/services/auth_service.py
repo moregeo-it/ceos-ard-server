@@ -145,8 +145,7 @@ async def require_github_user(
     Raises:
         HTTPException: 403 if user authenticated with non-GitHub provider
     """
-    user = current_user["user"]
-    if user.identity_provider != IdentityProvider.github:
+    if current_user["user"].identity_provider != IdentityProvider.github:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This action requires GitHub authentication. Please log in with your GitHub account.",

@@ -895,14 +895,11 @@ paths:
                   $ref: '#/components/schemas/CommitMessage'
       responses:
         '200':
-          description: |-
-            Commit created successfully.
-
-            Returns an updated list of commits, including the new commit.
+          description: Commit created successfully.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Commits'
+                $ref: '#/components/schemas/Commit'
         '400':
           description: Invalid request data
           content:
@@ -921,7 +918,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-
 
   /workspaces/{workspaceId}/diffs/{filePath}:
     get:
@@ -1249,6 +1245,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/commits:
+    get:
+      summary: List workspace commits
+      description: Retrieves the list of git commits in the workspace
+      operationId: listWorkspaceCommits
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: List of commits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commits:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Commit'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /workspaces/{workspaceId}/pfs:
     get:
       summary: List available PFS types
@@ -1497,7 +1527,6 @@ components:
         - description
         - state
         - draft
-        - commits
       properties:
         number:
           type: integer
@@ -1524,28 +1553,27 @@ components:
             - "merged": PR was merged into the main branch
         draft:
           $ref: '#/components/schemas/ProposalDraft'
-        commits:
-          $ref: '#/components/schemas/Commits'
 
-    Commits:
-      type: array
-      description: List of commits in the PR.
-      items:
-        type: object
-        required:
-          - sha
-          - message
-          - timestamp
-        properties:
-          sha:
-            type: string
-            description: Commit SHA
-          message:
-            $ref: '#/components/schemas/CommitMessage'
-          timestamp:
-            type: string
-            format: date-time
-            description: Commit timestamp
+    Commit:
+      type: object
+      required:
+        - sha
+        - message
+        - timestamp
+        - author
+      properties:
+        sha:
+          type: string
+          description: Commit SHA
+        message:
+          $ref: '#/components/schemas/CommitMessage'
+        timestamp:
+          type: string
+          format: date-time
+          description: Commit timestamp
+        author:
+          type: string
+          description: Name of the commit author
 
     Workspace:
       type: object

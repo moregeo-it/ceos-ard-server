@@ -9,16 +9,18 @@ from app.db.database import get_db
 from app.dependencies import get_workspace_service
 from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
+    Commit,
     CreatePFSRequest,
     PFSResponse,
+    Proposal,
     ProposalRequest,
-    ProposalResponse,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
 )
 from app.services.auth_service import require_github_user
 from app.services.workspace_service import WorkspaceService
+from app.utils.git_utils import format_commit
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +34,11 @@ async def create_workspace(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    user_id = current_user["user"].id
-    username = current_user["user"].username
-    access_token = current_user["user"].access_token
-
     try:
         return await workspace_service.create_workspace(
-            db=db, user_id=user_id, username=username, workspace_data=workspace_data, access_token=access_token
+            db=db,
+            user=current_user["user"],
+            workspace_data=workspace_data,
         )
     except HTTPException:
         raise
@@ -133,25 +133,28 @@ async def delete_workspace(
 @router.get(
     "/{workspace_id}/proposal",
     summary="Get existing pull request proposal",
-    response_model=ProposalResponse,
+    response_model=Proposal,
     status_code=status.HTTP_200_OK,
     description="Retrieve the existing pull request in the original repository that proposes changes made in the workspace",
 )
-async def get_proposal_changes(
+async def get_proposal(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        pull_request = await workspace_service.get_proposal_changes(
+        pull_request = await workspace_service.get_proposal(
             db=db,
             workspace_id=workspace_id,
             user_id=current_user["user"].id,
             access_token=current_user["user"].access_token,
         )
 
-        return Response(status_code=status.HTTP_204_NO_CONTENT) if pull_request is None else pull_request
+        if pull_request:
+            return pull_request  # todo: format PR, see old commits
+        else:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     except HTTPException:
         raise
@@ -162,12 +165,12 @@ async def get_proposal_changes(
 
 @router.put(
     "/{workspace_id}/proposal",
-    response_model=ProposalResponse,
+    response_model=Proposal,
     status_code=status.HTTP_200_OK,
     summary="Create or update a pull request to propose changes",
     description="Create or update a pull request in the original repository to propose changes made in the workspace",
 )
-async def propose_changes(
+async def propose(
     workspace_id: str,
     propose_data: ProposalRequest,
     db: Session = Depends(get_db),
@@ -175,11 +178,12 @@ async def propose_changes(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return await workspace_service.propose_changes(
+        return await workspace_service.propose(
             db=db,
             workspace_id=workspace_id,
-            propose_data=propose_data,
+            data=propose_data,
             user_id=current_user["user"].id,
+            username=current_user["user"].username,
             access_token=current_user["user"].access_token,
         )
     except HTTPException:
@@ -187,6 +191,33 @@ async def propose_changes(
     except Exception as e:
         logger.error(f"Error proposing changes: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("propose changes", e)) from e
+
+
+@router.get(
+    "/{workspace_id}/commits",
+    response_model=list[Commit],
+    status_code=status.HTTP_200_OK,
+    summary="List workspace commits",
+    description="Retrieves the list of git commits in the workspace that are ahead of the upstream branch",
+)
+def get_workspace_commits(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+):
+    try:
+        commits = workspace_service.get_workspace_commits(
+            db=db,
+            workspace_id=workspace_id,
+            user_id=current_user["user"].id,
+        )
+        return [format_commit(commit) for commit in commits]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workspace commits: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace commits", e)) from e
 
 
 @router.get(

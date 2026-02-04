@@ -21,7 +21,7 @@ pandoc-crossref = "=0.3.18.1"
 playwright = ">=1.54.2,<2"
 strictyaml = ">=1.7.3,<2"
 PyYAML = ">=6.0,<7" # todo: replace usage with strictyaml once the CLI is more library friendly
-gitpython = ">=3.1.45,<4"
+pygit2 = ">=1.17.0,<2"
 python-dateutil = ">=2.8.2,<3"
 
 [feature.dev.dependencies]
@@ -40,5 +40,5 @@ default = { solve-group = "default" }
 dev = { features = ["dev"], solve-group = "default" }
 
 [pypi-dependencies]
-ceos-ard-cli = ">= 0.2.0,<0.3.0"
+ceos-ard-cli = ">= 0.3.0,<0.4.0"
 bibtexparser = "==2.0.0b8"

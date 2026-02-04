@@ -7,11 +7,16 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api import auth, file, pfs, preview, workspace
 from app.config import settings
 from app.db.database import Base, engine
+from app.utils.cli_utils import fastapi_run_checks, load_project_info
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CEOS-ARD Server", version="0.1.0")
+title, version = load_project_info()
+
+logger.info(f"Starting {title} version {version} in {settings.ENVIRONMENT} environment")
+
+app = FastAPI(title=title, version=version, lifespan=fastapi_run_checks)
 
 Base.metadata.create_all(bind=engine)
 
