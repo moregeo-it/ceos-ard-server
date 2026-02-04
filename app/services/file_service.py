@@ -27,7 +27,10 @@ class FileService:
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
-        """Get all file statuses using pygit2 API."""
+        """Get all file statuses using pygit2 API.
+
+        Returns a dict mapping file paths to status info (added, deleted, deleted:folder, modified, renamed)
+        """
         status_map = {}
         relative_target = normalize_workspace_path(target_path, workspace_path, absolute=False)
         renamed_new_paths = set()
@@ -58,6 +61,9 @@ class FileService:
             # Get status from pygit2, excluding files that are part of renames
             status_dict = repo.status()
 
+            # Track deleted folders by collecting parent directories of deleted files
+            deleted_folders = set()
+
             for file_path, flags in status_dict.items():
                 # Skip files that are part of a rename operation
                 if file_path in renamed_new_paths or file_path in renamed_old_paths:
@@ -72,19 +78,30 @@ class FileService:
                     status_map[get_map_key(file_path)] = "added"
                 elif flags & (pygit2.GIT_STATUS_WT_DELETED | pygit2.GIT_STATUS_INDEX_DELETED):
                     status_map[get_map_key(file_path)] = "deleted"
+                    # Track all parent directories of deleted files that don't exist on disk
+                    file_full_path = workspace_path / file_path
+                    parent = file_full_path.parent
+                    while parent != workspace_path and not parent.exists():
+                        deleted_folders.add(str(parent.resolve()))
+                        parent = parent.parent
                 elif flags & (pygit2.GIT_STATUS_WT_MODIFIED | pygit2.GIT_STATUS_INDEX_MODIFIED):
                     status_map[get_map_key(file_path)] = "modified"
+
+            # Add deleted folders to the status map
+            for folder_path in deleted_folders:
+                if folder_path not in status_map:
+                    status_map[folder_path] = "deleted:folder"
 
         except Exception:
             pass
 
         return status_map
 
-    def get_file_dict(self, file: Path, workspace_path: Path, status: str | None = None) -> dict:
+    def get_file_dict(self, file: Path, workspace_path: Path, status: str | None = None, is_directory: bool | None = None) -> dict:
         return {
             "status": status,
             "name": file.name,
-            "is_directory": file.is_dir(),
+            "is_directory": is_directory if is_directory is not None else file.is_dir(),
             "path": normalize_workspace_path(file, workspace_path),
         }
 
@@ -100,11 +117,15 @@ class FileService:
             # Get all files (without deleted files)
             files = self.walk_files(target_path, workspace.abs_path, repo, recurse, status_map)
 
-            # Add deleted files
-            for filepath, file_status in status_map.items():
+            # Add deleted files and folders
+            for filepath, state in status_map.items():
                 file = Path(filepath)
-                if file_status == "deleted" and (recurse or file.parent == target_path):
-                    files.append(self.get_file_dict(file, workspace.abs_path, status=file_status))
+                is_directory = None
+                if state == "deleted:folder":
+                    state = "deleted"
+                    is_directory = True
+                if state == "deleted" and (recurse or file.parent == target_path):
+                    files.append(self.get_file_dict(file, workspace.abs_path, status=state, is_directory=is_directory))
 
             # Sort directories first, then files, both alphabetically
             files.sort(key=lambda x: (not x["is_directory"], x["name"].lower()))
@@ -268,9 +289,13 @@ class FileService:
             is_committed = False
 
         if is_committed:
-            # File is in git history - stage the deletion
+            # File/folder is in git history - stage the deletion
             try:
-                repo.index.remove(relative_path)
+                if ftype == "Folder":
+                    # For directories, remove all files within the directory from the index
+                    repo.index.remove_all([f"{relative_path}/*"])
+                else:
+                    repo.index.remove(relative_path)
                 repo.index.write()
             except pygit2.GitError as e:
                 raise HTTPException(
@@ -278,9 +303,13 @@ class FileService:
                     detail=f"{ftype} deleted successfully, but failed to make the changes in the repository",
                 ) from e
         else:
-            # File not in git history - remove from index if staged
+            # File/folder not in git history - remove from index if staged
             try:
-                repo.index.remove(relative_path)
+                if ftype == "Folder":
+                    # For directories, remove all files within the directory from the index
+                    repo.index.remove_all([f"{relative_path}/*"])
+                else:
+                    repo.index.remove(relative_path)
                 repo.index.write()
             except pygit2.GitError:
                 # File wasn't in index, nothing to do
@@ -536,7 +565,7 @@ class FileService:
 
     async def get_file_context(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+        target_path = validate_workspace_path(file_path, workspace.abs_path)
         rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
         repo = get_repo(workspace.abs_path)
 
