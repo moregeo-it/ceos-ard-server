@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
-IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github", "LICENSE"}
+IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github"}
 
 
 def validate_pathname(filename: str) -> str:
@@ -153,7 +153,7 @@ def ignore_file_path(file: Path, relative_path: Path, ignored_paths: set[str]) -
     if root_entry in ignored_paths:
         return True
 
-    # Ignore hidden files and PDFs
-    if file.name.startswith(".") or file.name.endswith(".pdf"):
+    # Ignore hidden files
+    if file.name.startswith("."):
         return True
     return False

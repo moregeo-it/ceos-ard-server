@@ -420,12 +420,10 @@ paths:
 
         Doesn't list the following files / folders:
         - Files/folders starting with a dot (.)
-        - PDF files (files with .pdf extension)
 
         Additionalls, doesn't list the following Files/folders at the root:
         - templates
         - build
-        - LICENSE
       operationId: listFiles
       tags:
         - Files
