@@ -44,7 +44,8 @@ class PreviewService:
             file_path = normalize_workspace_path(path, workspace_path)
             return f'<a name="{file_path}"></a><button class="edit" value="{file_path}">Edit</button>'
 
-        html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\]+)\s*-->", replace_edit_tags, html_content)
+        # \ and : are needed for Windows compatibility
+        html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\:]+)\s*-->", replace_edit_tags, html_content)
 
         return html_content
 
