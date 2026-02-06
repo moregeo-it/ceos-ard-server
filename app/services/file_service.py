@@ -458,6 +458,8 @@ class FileService:
                 head_tree = repo.head.peel().tree
                 diff = repo.index.diff_to_tree(head_tree)
 
+            diff.find_similar()  # Enable rename detection
+
             # Find the specific file in the diff
             for patch in diff:
                 patch_path = patch.delta.new_file.path
