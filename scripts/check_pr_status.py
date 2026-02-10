@@ -102,10 +102,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
 
                 # Check if PR exists in our fetched data
                 if pr_number not in pr_lookup:
-                    logger.warning(
-                        f"PR #{pr_number} not found in repository for workspace {workspace.id} "
-                        f"(title: {workspace.title})"
-                    )
+                    logger.warning(f"PR #{pr_number} not found in repository for workspace {workspace.id} (title: {workspace.title})")
                     continue
 
                 pr = pr_lookup[pr_number]
@@ -128,30 +125,20 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
 
                 # Check if update is needed
                 if workspace.pull_request_status == new_status:
-                    logger.debug(
-                        f"Workspace {workspace.id} PR #{pr_number} status unchanged: {new_status.value}"
-                    )
+                    logger.debug(f"Workspace {workspace.id} PR #{pr_number} status unchanged: {new_status.value}")
                     continue
 
                 # Status has changed - log and update
                 old_status = workspace.pull_request_status.value if workspace.pull_request_status else "None"
-                logger.info(
-                    f"Workspace {workspace.id} (title: {workspace.title}) "
-                    f"PR #{pr_number}: {old_status} -> {new_status.value}"
-                )
+                logger.info(f"Workspace {workspace.id} (title: {workspace.title}) PR #{pr_number}: {old_status} -> {new_status.value}")
 
                 if dry_run:
-                    logger.info(
-                        f"[DRY RUN] Would update workspace {workspace.id} PR status to {new_status.value}"
-                    )
+                    logger.info(f"[DRY RUN] Would update workspace {workspace.id} PR status to {new_status.value}")
 
                     # Check if it would be archived
                     if new_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
                         if workspace.status != WorkspaceStatus.ARCHIVED:
-                            logger.info(
-                                f"[DRY RUN] Would archive workspace {workspace.id} "
-                                f"(PR is {new_status.value})"
-                            )
+                            logger.info(f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})")
                 else:
                     # Update workspace PR status
                     workspace.pull_request_status = new_status
@@ -162,10 +149,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                         if workspace.status != WorkspaceStatus.ARCHIVED:
                             workspace.status = WorkspaceStatus.ARCHIVED
                             workspace.archived_at = datetime.utcnow()
-                            logger.info(
-                                f"Archived workspace {workspace.id} "
-                                f"(PR #{pr_number} is {new_status.value})"
-                            )
+                            logger.info(f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})")
 
                     db.commit()
                     db.refresh(workspace)
@@ -190,9 +174,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Check and update pull request status for all workspaces"
-    )
+    parser = argparse.ArgumentParser(description="Check and update pull request status for all workspaces")
     parser.add_argument(
         "--dry-run",
         action="store_true",
