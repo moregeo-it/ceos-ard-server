@@ -166,3 +166,39 @@ class GitHubService:
                 logger.info(f"Pull request {number} not found for {owner}/{repo}")
                 return None
             raise
+
+    async def get_repository_pull_requests(
+        self, owner: str, repo: str, token: str, state: str = "all", per_page: int = 100
+    ) -> list[dict[str, Any]]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
+        params = {"state": state, "per_page": per_page}
+
+        all_prs = []
+        page = 1
+
+        while True:
+            params["page"] = page
+
+            try:
+                prs = await self._make_github_request("GET", url, token, "token", params=params)
+
+                if not prs:
+                    break
+
+                all_prs.extend(prs)
+
+                # If we got fewer results than per_page, we've reached the last page
+                if len(prs) < per_page:
+                    break
+
+                page += 1
+
+            except HTTPException as e:
+                if e.status_code == 404:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found"
+                    ) from e
+                raise
+
+        logger.info(f"Fetched {len(all_prs)} pull requests from {owner}/{repo} (state={state})")
+        return all_prs
