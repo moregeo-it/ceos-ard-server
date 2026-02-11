@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.config import settings  # noqa: E402
 from app.db.database import SessionLocal  # noqa: E402
-
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus  # noqa: E402
 from app.services.github_service import GitHubService  # noqa: E402
 
@@ -127,34 +126,22 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                 # Determine if PR status field needs to be updated
                 status_changed = workspace.pull_request_status != new_status
                 if not status_changed:
-                    logger.debug(
-                        f"Workspace {workspace.id} PR #{pr_number} status unchanged: {new_status.value}"
-                    )
+                    logger.debug(f"Workspace {workspace.id} PR #{pr_number} status unchanged: {new_status.value}")
 
                 # Status has changed - log transition
                 if status_changed:
-                    old_status = (
-                        workspace.pull_request_status.value
-                        if workspace.pull_request_status
-                        else "None"
-                    )
-                    logger.info(
-                        f"Workspace {workspace.id} (title: {workspace.title}) PR #{pr_number}: {old_status} -> {new_status.value}"
-                    )
+                    old_status = workspace.pull_request_status.value if workspace.pull_request_status else "None"
+                    logger.info(f"Workspace {workspace.id} (title: {workspace.title}) PR #{pr_number}: {old_status} -> {new_status.value}")
 
                 if dry_run:
                     # Log what would happen for PR status
                     if status_changed:
-                        logger.info(
-                            f"[DRY RUN] Would update workspace {workspace.id} PR status to {new_status.value}"
-                        )
+                        logger.info(f"[DRY RUN] Would update workspace {workspace.id} PR status to {new_status.value}")
 
                     # Check if it would be archived (even if PR status value is unchanged)
                     if new_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
                         if workspace.status != WorkspaceStatus.ARCHIVED:
-                            logger.info(
-                                f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})"
-                            )
+                            logger.info(f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})")
                 else:
                     changed = False
 
@@ -169,9 +156,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                         if workspace.status != WorkspaceStatus.ARCHIVED:
                             workspace.status = WorkspaceStatus.ARCHIVED
                             workspace.archived_at = datetime.utcnow()
-                            logger.info(
-                                f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})"
-                            )
+                            logger.info(f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})")
                             changed = True
 
                     if changed:
