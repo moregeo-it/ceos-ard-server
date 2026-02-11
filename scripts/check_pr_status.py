@@ -31,6 +31,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.config import settings  # noqa: E402
 from app.db.database import SessionLocal  # noqa: E402
+
+# Import User first to register it with SQLAlchemy before GitWorkspace
+from app.models.user import User  # noqa: E402, F401
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus  # noqa: E402
 from app.services.github_service import GitHubService  # noqa: E402
 
@@ -65,7 +68,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
         if dry_run:
             logger.info("DRY RUN MODE - No changes will be made")
 
-        # Fetch all PRs from upstream repository (single API call)
+        # Fetch all PRs from upstream repository
         logger.info(f"Fetching all pull requests from {settings.CEOS_ARD_ORG}/{settings.CEOS_ARD_REPO}...")
         all_prs = await github_service.get_repository_pull_requests(
             owner=settings.CEOS_ARD_ORG,
@@ -142,6 +145,11 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                     if new_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
                         if workspace.status != WorkspaceStatus.ARCHIVED:
                             logger.info(f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})")
+
+                    # Check if it would be reactivated (PR reopened)
+                    if new_status == PullRequestStatus.OPEN:
+                        if workspace.status == WorkspaceStatus.ARCHIVED:
+                            logger.info(f"[DRY RUN] Would reactivate workspace {workspace.id} (PR #{pr_number} reopened)")
                 else:
                     changed = False
 
@@ -157,6 +165,14 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                             workspace.status = WorkspaceStatus.ARCHIVED
                             workspace.archived_at = datetime.utcnow()
                             logger.info(f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})")
+                            changed = True
+
+                    # Reactivate if PR is reopened
+                    elif new_status == PullRequestStatus.OPEN:
+                        if workspace.status == WorkspaceStatus.ARCHIVED:
+                            workspace.status = WorkspaceStatus.ACTIVE
+                            workspace.archived_at = None
+                            logger.info(f"Reactivated workspace {workspace.id} (PR #{pr_number} reopened)")
                             changed = True
 
                     if changed:

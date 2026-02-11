@@ -186,6 +186,13 @@ class GitHubService:
                 if not prs:
                     break
 
+                # Type guard: ensure we got a list, not a dict
+                if not isinstance(prs, list):
+                    logger.error(f"Unexpected response type from GitHub API: {type(prs)}, expected list")
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned unexpected response type: {type(prs).__name__}"
+                    )
+
                 all_prs.extend(prs)
 
                 # If we got fewer results than per_page, we've reached the last page
