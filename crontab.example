@@ -1,0 +1,77 @@
+# CEOS ARD Server - Cron Job Configuration
+# ===========================================
+#
+# This file contains the cron job schedules for automated maintenance tasks.
+# Copy this file and adjust paths/schedules as needed for your environment.
+#
+# Installation Instructions:
+# 1. Copy this file: cp crontab.example crontab.production
+# 2. Edit paths to match your server setup
+# 3. Ensure GITHUB_SERVICE_TOKEN is set in .env file
+# 4. Create logs directory: mkdir -p logs
+# 5. Install: crontab crontab.production
+# 6. Verify: crontab -l
+
+# ============================================================================
+# 1. Pull Request Status Checker
+# ============================================================================
+# Checks PR status for all workspaces and auto-archives merged/closed PRs
+# Frequency: Daily at midnight (00:00)
+# Duration: ~10-30 seconds (depends on number of PRs)
+# Requirements: GITHUB_SERVICE_TOKEN must be set in .env
+#
+0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
+
+# Alternative schedules (comment out the one above and uncomment one below):
+# Every 12 hours (midnight and noon):
+# 0 0,12 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
+#
+# Every 6 hours:
+# 0 */6 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
+#
+# Twice daily (2 AM and 2 PM):
+# 0 2,14 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
+
+# ============================================================================
+# 2. Archived Workspace Cleanup
+# ============================================================================
+# Permanently deletes archived workspaces after 1 month retention period
+# Frequency: Daily at 2:00 AM
+# Duration: Depends on number of workspaces to delete
+# Warning: This permanently deletes files - ensure backups if needed
+#
+0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
+
+# Alternative schedules:
+# Weekly on Sunday at 3 AM:
+# 0 3 * * 0 cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
+#
+# Monthly on the 1st at 3 AM:
+# 0 3 1 * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
+
+# ============================================================================
+# Optional: Log Rotation (Clean up old log files)
+# ============================================================================
+# Delete log files older than 30 days to save disk space
+# Frequency: Weekly on Sunday at 4 AM
+#
+# 0 4 * * 0 find /path/to/ceos-ard-server/logs -name "*.log" -type f -mtime +30 -delete
+
+# ============================================================================
+# Testing & Debugging
+# ============================================================================
+# Before deploying to production, test each script manually:
+#
+#   cd /path/to/ceos-ard-server
+#   pixi run python scripts/check_pr_status.py --dry-run
+#   pixi run python scripts/cleanup_archived_workspaces.py --dry-run
+#
+# To check if cron is running:
+#   tail -f logs/pr_status_check.log
+#   tail -f logs/workspace_cleanup.log
+#
+# To check cron daemon on Linux:
+#   sudo systemctl status cron
+#
+# To check cron daemon on macOS:
+#   sudo launchctl list | grep cron

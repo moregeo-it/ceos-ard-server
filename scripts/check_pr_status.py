@@ -76,7 +76,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
             token=service_token,
             state="all",  # Get open, closed, and merged PRs
         )
-        print(all_prs[0])
+
         # Create lookup dict: {pr_number: pr_data}
         pr_lookup = {str(pr["number"]): pr for pr in all_prs}
         logger.info(f"Found {len(pr_lookup)} total pull requests in repository")
