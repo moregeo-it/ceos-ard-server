@@ -28,7 +28,7 @@ class GitHubService:
 
     async def _make_github_request(
         self, method: str, url: str, token: str, auth_type: str = "Bearer", params: dict = None, json_data: dict = None, timeout: float = 30.0
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """Make a GitHub API request with comprehensive error handling.
 
         Args:
@@ -41,7 +41,7 @@ class GitHubService:
             timeout: Request timeout in seconds
 
         Returns:
-            JSON response data
+            JSON response data (dict for single resources, list for collections)
 
         Raises:
             HTTPException: For various error conditions with appropriate status codes
