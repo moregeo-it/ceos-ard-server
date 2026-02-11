@@ -121,37 +121,59 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                     logger.warning(f"Unknown PR state '{pr_state}' for PR #{pr_number}")
                     new_status = PullRequestStatus.UNKNOWN
 
-                # Check if update is needed
-                if workspace.pull_request_status == new_status:
-                    logger.debug(f"Workspace {workspace.id} PR #{pr_number} status unchanged: {new_status.value}")
-                    continue
+                # Determine if PR status field needs to be updated
+                status_changed = workspace.pull_request_status != new_status
+                if not status_changed:
+                    logger.debug(
+                        f"Workspace {workspace.id} PR #{pr_number} status unchanged: {new_status.value}"
+                    )
 
-                # Status has changed - log and update
-                old_status = workspace.pull_request_status.value if workspace.pull_request_status else "None"
-                logger.info(f"Workspace {workspace.id} (title: {workspace.title}) PR #{pr_number}: {old_status} -> {new_status.value}")
+                # Status has changed - log transition
+                if status_changed:
+                    old_status = (
+                        workspace.pull_request_status.value
+                        if workspace.pull_request_status
+                        else "None"
+                    )
+                    logger.info(
+                        f"Workspace {workspace.id} (title: {workspace.title}) PR #{pr_number}: {old_status} -> {new_status.value}"
+                    )
 
                 if dry_run:
-                    logger.info(f"[DRY RUN] Would update workspace {workspace.id} PR status to {new_status.value}")
+                    # Log what would happen for PR status
+                    if status_changed:
+                        logger.info(
+                            f"[DRY RUN] Would update workspace {workspace.id} PR status to {new_status.value}"
+                        )
 
-                    # Check if it would be archived
+                    # Check if it would be archived (even if PR status value is unchanged)
                     if new_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
                         if workspace.status != WorkspaceStatus.ARCHIVED:
-                            logger.info(f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})")
+                            logger.info(
+                                f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})"
+                            )
                 else:
-                    # Update workspace PR status
-                    workspace.pull_request_status = new_status
-                    workspace.pull_request_status_last_updated_at = datetime.utcnow()
+                    changed = False
 
-                    # Auto-archive if merged or closed
+                    # Update workspace PR status if it changed
+                    if status_changed:
+                        workspace.pull_request_status = new_status
+                        workspace.pull_request_status_last_updated_at = datetime.utcnow()
+                        changed = True
+
+                    # Auto-archive if merged or closed (even if PR status field did not change)
                     if new_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
                         if workspace.status != WorkspaceStatus.ARCHIVED:
                             workspace.status = WorkspaceStatus.ARCHIVED
                             workspace.archived_at = datetime.utcnow()
-                            logger.info(f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})")
+                            logger.info(
+                                f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})"
+                            )
+                            changed = True
 
-                    db.commit()
-                    db.refresh(workspace)
-
+                    if changed:
+                        db.commit()
+                        db.refresh(workspace)
             except Exception as e:
                 db.rollback()
                 logger.error(f"Error processing workspace {workspace.id}: {e}", exc_info=True)
