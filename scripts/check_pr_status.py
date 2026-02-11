@@ -5,7 +5,7 @@ Periodically checks the status of all pull requests for workspaces and updates t
 status in the database. Automatically archives workspaces when their PRs are merged or closed.
 
 This script:
-- Fetches all PRs from the upstream repository in a single API call
+- Fetches all PRs from the upstream repository
 - Matches workspace PR numbers against fetched PRs
 - Updates PR status (open/merged/closed) in the database
 - Auto-archives workspaces with merged/closed PRs
