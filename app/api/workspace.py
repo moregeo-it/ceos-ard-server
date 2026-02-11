@@ -182,9 +182,7 @@ async def propose(
             db=db,
             workspace_id=workspace_id,
             data=propose_data,
-            user_id=current_user["user"].id,
-            username=current_user["user"].username,
-            access_token=current_user["user"].access_token,
+            user=current_user["user"],
         )
     except HTTPException:
         raise

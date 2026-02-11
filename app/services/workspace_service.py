@@ -406,8 +406,8 @@ class WorkspaceService:
             logger.error(f"Error getting proposal changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get proposal changes: {str(e)}") from e
 
-    async def propose(self, db: Session, workspace_id: str, user_id: str, username: str, access_token: str, data: ProposalRequest) -> Proposal:
-        workspace = await self.sync_workspace(db, user_id, workspace_id, access_token)
+    async def propose(self, db: Session, workspace_id: str, user: User, data: ProposalRequest) -> Proposal:
+        workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token)
 
         if workspace.pull_request_status == PullRequestStatus.MERGED:
             raise HTTPException(
@@ -431,17 +431,16 @@ class WorkspaceService:
             changed_files = get_repo_changes(repo)
             if len(changed_files) > 0:
                 # Commit and push changes to the repository
-                await self.git_service.push_changes(
+                await self.git_service.push(
                     repo=repo,
+                    user=user,
                     branch_name=workspace.branch_name,
-                    username=username,
-                    access_token=access_token,
                 )
 
             # Create or update pull request
             pr_response = await self._handle_pull_request(
-                access_token=access_token,
                 propose_data=data,
+                access_token=user.access_token,
                 head_branch_name=workspace.branch_name,
                 head_repo_owner=workspace.fork_repo_owner,
                 pull_request_number=workspace.pull_request_number,
