@@ -33,6 +33,8 @@ class Settings:
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET")
 
+    GITHUB_SERVICE_TOKEN: str = os.getenv("GITHUB_SERVICE_TOKEN")
+
     GITHUB_CLIENT_RESPONSE_TYPE: str = "code"
     GITHUB_API_BASE_URL: str = "https://api.github.com"
     GITHUB_CLIENT_SCOPE: str = "user:email read:org public_repo repo:status workflow"

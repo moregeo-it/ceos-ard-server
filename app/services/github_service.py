@@ -28,7 +28,7 @@ class GitHubService:
 
     async def _make_github_request(
         self, method: str, url: str, token: str, auth_type: str = "Bearer", params: dict = None, json_data: dict = None, timeout: float = 30.0
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """Make a GitHub API request with comprehensive error handling.
 
         Args:
@@ -41,7 +41,7 @@ class GitHubService:
             timeout: Request timeout in seconds
 
         Returns:
-            JSON response data
+            JSON response data (dict for single resources, list for collections)
 
         Raises:
             HTTPException: For various error conditions with appropriate status codes
@@ -166,3 +166,45 @@ class GitHubService:
                 logger.info(f"Pull request {number} not found for {owner}/{repo}")
                 return None
             raise
+
+    async def get_repository_pull_requests(self, owner: str, repo: str, token: str, state: str = "all", per_page: int = 100) -> list[dict[str, Any]]:
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
+        params = {"state": state, "per_page": per_page}
+
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing GitHub token")
+
+        all_prs = []
+        page = 1
+
+        while True:
+            params["page"] = page
+
+            try:
+                prs = await self._make_github_request("GET", url, token, "token", params=params)
+
+                if not prs:
+                    break
+
+                # Type guard: ensure we got a list, not a dict
+                if not isinstance(prs, list):
+                    logger.error(f"Unexpected response type from GitHub API: {type(prs)}, expected list")
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub API returned unexpected response type: {type(prs).__name__}"
+                    )
+
+                all_prs.extend(prs)
+
+                # If we got fewer results than per_page, we've reached the last page
+                if len(prs) < per_page:
+                    break
+
+                page += 1
+
+            except HTTPException as e:
+                if e.status_code == 404:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found") from e
+                raise
+
+        logger.info(f"Fetched {len(all_prs)} pull requests from {owner}/{repo} (state={state})")
+        return all_prs
