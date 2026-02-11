@@ -171,6 +171,9 @@ class GitHubService:
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
         params = {"state": state, "per_page": per_page}
 
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing GitHub token")
+
         all_prs = []
         page = 1
 
