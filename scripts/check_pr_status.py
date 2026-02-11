@@ -32,8 +32,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.config import settings  # noqa: E402
 from app.db.database import SessionLocal  # noqa: E402
 
-# Import User first to register it with SQLAlchemy before GitWorkspace
-from app.models.user import User  # noqa: E402, F401
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus  # noqa: E402
 from app.services.github_service import GitHubService  # noqa: E402
 
