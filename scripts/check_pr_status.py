@@ -82,9 +82,12 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
         # Get all workspaces with PR numbers
         query = db.query(GitWorkspace).filter(GitWorkspace.pull_request_number.isnot(None))
 
-        if limit:
-            query = query.limit(limit)
-            logger.info(f"Limiting check to {limit} workspaces")
+        if limit is not None:
+            if limit <= 0:
+                logger.warning(f"Ignoring non-positive limit value: {limit} (must be > 0)")
+            else:
+                query = query.limit(limit)
+                logger.info(f"Limiting check to {limit} workspaces")
 
         workspaces = query.all()
         logger.info(f"Found {len(workspaces)} workspace(s) with pull requests")
