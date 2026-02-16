@@ -136,21 +136,22 @@ For automated maintenance scripts (PR status checker and workspace cleanup), you
 1. **Create a GitHub bot/service account** (recommended) or use your personal account:
   - Create a new GitHub account (e.g., `ceos-ard-bot`)
 
-2. **Generate a Personal Access Token**:
+2. **Generate a Fine-Grained Personal Access Token**:
   - Login to the bot/service account
-  - Go to Settings → Developer settings → Personal access tokens → **Tokens (classic)**
-  - Click "Generate new token (classic)"
-  - Set note: "CEOS ARD PR Status Checker"
-  - Expiration: "No expiration" (for production) or custom duration
-  - Scopes needed:
-    - For **public repositories**: No scopes required (or select `public_repo` for clarity)
-    - For **private repositories**: Select `repo` (full repository access)
+  - Go to Settings → Developer settings → Personal access tokens → **Fine-grained tokens**
+  - Click "Generate new token"
+  - Set token name: "CEOS ARD PR Status Checker"
+  - Expiration: The desired expiration time. Make sure to set this time in the config to enable a reminder for renewal.
+  - Repository access: Select the repository that is conifgured as target for PRs (e.g. ceos-org/ceos-ard).
+  - Permissions needed:
+    - **Pull requests**: Read-only access (to fetch PR status)
+    - No other permissions required for public repositories
   - Click "Generate token"
   - **Copy the token immediately** - you won't see it again!
 
 3. **Add to `.env` file**:
   ```bash
-  GITHUB_SERVICE_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+  GITHUB_SERVICE_TOKEN=github_pat_xxxxxxxxxxxxxxxxxxxx
   ```
 
 **Alternative**: For development/testing, you can use a personal access token from your own GitHub account.
