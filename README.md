@@ -141,16 +141,18 @@ For automated maintenance scripts (PR status checker and workspace cleanup), you
   - Go to Settings → Developer settings → Personal access tokens → **Tokens (classic)**
   - Click "Generate new token (classic)"
   - Set note: "CEOS ARD PR Status Checker"
-  - Expiration: "No expiration" (for production) or custom duration
+  - Expiration: Add custom duration
   - Scopes needed:
     - For **public repositories**: No scopes required (or select `public_repo` for clarity)
     - For **private repositories**: Select `repo` (full repository access)
   - Click "Generate token"
   - **Copy the token immediately** - you won't see it again!
+  - **Note the expiration date** - you'll need it for the next step
 
 3. **Add to `.env` file**:
   ```bash
   GITHUB_SERVICE_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+  GITHUB_SERVICE_TOKEN_EXPIRES_AT=2027-03-15  # Use the expiry date from step 2
   ```
 
 **Alternative**: For development/testing, you can use a personal access token from your own GitHub account.
@@ -255,9 +257,45 @@ pixi run python scripts/cleanup_archived_workspaces.py --dry-run
 pixi run python scripts/cleanup_archived_workspaces.py
 ```
 
+#### 3. Token Expiration Monitor
+
+Simple script to check manual expiration date and send email alerts.
+
+```bash
+# Check token expiry status
+pixi run python scripts/check_token_expiry.py
+
+# Check without sending email (log only)
+pixi run python scripts/check_token_expiry.py --no-email
+
+# Test email configuration
+pixi run python scripts/check_token_expiry.py --force-email
+```
+
+**Configuration**:
+
+Set the token expiration date in `.env` (REQUIRED):
+
+```bash
+GITHUB_SERVICE_TOKEN_EXPIRES_AT=2027-03-15  # Format: YYYY-MM-DD
+```
+
+**Email alerts** (optional - configure SMTP in `.env`):
+- 14 days before expiry - Early warning
+- 7 days before expiry - Urgent warning
+- When expired - Critical alert
+
+```bash
+ALERT_EMAIL_TO=admin@example.com
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+```
+
 #### Setting Up Cron Jobs
 
-**Recommended**: Set up automated cron jobs for both maintenance tasks.
+**Recommended**: Set up automated cron jobs for all maintenance tasks.
 
 ```bash
 # Edit crontab
@@ -269,12 +307,15 @@ crontab -e
 
 # Cleanup archived workspaces daily at 2 AM
 0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
+
+# Check token expiration weekly on Monday at 9 AM
+0 9 * * 1 cd /path/to/ceos-ard-server && pixi run python scripts/check_token_expiry.py >> logs/token_check.log 2>&1
 ```
 
 **How it works:**
-- Each maintenance script explicitly loads `GITHUB_SERVICE_TOKEN` from `.env` file at startup
-- Cron just needs to `cd` to project directory and run the script
-- Ensure `.env` file exists in project root with `GITHUB_SERVICE_TOKEN` set.
+- Cron just needs to `cd` to project directory and run the script.
+- Ensure `.env` file exists in project root with `GITHUB_SERVICE_TOKEN` and `GITHUB_SERVICE_TOKEN_EXPIRES_AT` set.
+- Token checker sends email alerts if configured (see above).
 
 ### Database Models
 
