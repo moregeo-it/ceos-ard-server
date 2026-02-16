@@ -141,10 +141,8 @@ For automated maintenance scripts (PR status checker and workspace cleanup), you
   - Go to Settings → Developer settings → Personal access tokens → **Fine-grained tokens**
   - Click "Generate new token"
   - Set token name: "CEOS ARD PR Status Checker"
-  - Expiration: "No expiration" (for production) or custom duration
-  - Repository access:
-    - Select "Public Repositories (read-only)" for public repos
-    - Or select specific repositories if needed
+  - Expiration: The desired expiration time. Make sure to set this time in the config to enable a reminder for renewal.
+  - Repository access: Select the repository that is conifgured as target for PRs (e.g. ceos-org/ceos-ard).
   - Permissions needed:
     - **Pull requests**: Read-only access (to fetch PR status)
     - No other permissions required for public repositories
