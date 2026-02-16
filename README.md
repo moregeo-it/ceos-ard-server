@@ -100,10 +100,11 @@ cp .env.example .env
 Update the `.env` file according to your needs.
 The following properties should be changed at least:
 
-- `GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`
-- `SECRET_KEY`
-- `ENVIRONMENT`
+- `GITHUB_CLIENT_ID` (for OAuth login)
+- `GITHUB_CLIENT_SECRET` (for OAuth login)
+- `GITHUB_SERVICE_TOKEN` (for automated maintenance tasks - see setup below)
+- `SECRET_KEY` (for JWT token signing)
+- `ENVIRONMENT` (development/production)
 
 ### 5. OAuth Setup
 
@@ -127,6 +128,32 @@ The following properties should be changed at least:
 3. Copy the Client ID and Client Secret to your `.env` file
 
 **Note**: Google authentication is currently not used for workspace features. Reserved for potential future functionality.
+
+#### GitHub Service Token (Required for Automated Tasks)
+
+For automated maintenance scripts (PR status checker and workspace cleanup), you need a GitHub service token:
+
+1. **Create a GitHub bot/service account** (recommended) or use your personal account:
+  - Create a new GitHub account (e.g., `ceos-ard-bot`)
+
+2. **Generate a Personal Access Token**:
+  - Login to the bot/service account
+  - Go to Settings → Developer settings → Personal access tokens → **Tokens (classic)**
+  - Click "Generate new token (classic)"
+  - Set note: "CEOS ARD PR Status Checker"
+  - Expiration: "No expiration" (for production) or custom duration
+  - Scopes needed:
+    - For **public repositories**: No scopes required (or select `public_repo` for clarity)
+    - For **private repositories**: Select `repo` (full repository access)
+  - Click "Generate token"
+  - **Copy the token immediately** - you won't see it again!
+
+3. **Add to `.env` file**:
+  ```bash
+  GITHUB_SERVICE_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+  ```
+
+**Alternative**: For development/testing, you can use a personal access token from your own GitHub account.
 
 ## 🚀 Running the Application
 
@@ -190,9 +217,35 @@ The application uses SQLite as the database backend:
 
 ### Maintenance Tasks
 
-#### Cleanup Archived Workspaces
+The server includes two automated maintenance scripts designed to run as cron jobs:
 
-Archived workspaces are automatically cleaned up after the retention period (default: 30 days).
+#### 1. Pull Request Status Checker
+
+Automatically monitors and updates the status of all workspace pull requests:
+
+- Fetches PR status from GitHub (open/merged/closed)
+- Updates workspace PR status in database
+- Auto-archives workspaces with merged/closed PRs
+- Reactivates workspaces if PRs are reopened
+
+```bash
+# Dry-run to see what would be updated
+pixi run python scripts/check_pr_status.py --dry-run
+
+# Actually update PR statuses
+pixi run python scripts/check_pr_status.py
+
+# Limit to specific number of workspaces for testing
+pixi run python scripts/check_pr_status.py --dry-run --limit 5
+```
+
+**Requirements**:
+- `GITHUB_SERVICE_TOKEN` must be set in `.env` file
+- See [GitHub Service Token setup](#github-service-token-required-for-automated-tasks) for how to obtain this token
+
+#### 2. Cleanup Archived Workspaces
+
+Archived workspaces are automatically cleaned up after the retention period (default: 1 month).
 
 ```bash
 # Dry-run to see what would be deleted
@@ -202,12 +255,26 @@ pixi run python scripts/cleanup_archived_workspaces.py --dry-run
 pixi run python scripts/cleanup_archived_workspaces.py
 ```
 
-**Recommended**: Set up a cron job or scheduled task to run cleanup daily:
+#### Setting Up Cron Jobs
+
+**Recommended**: Set up automated cron jobs for both maintenance tasks.
 
 ```bash
-# Add to crontab (run daily at 2 AM)
-0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py
+# Edit crontab
+crontab -e
+
+# Add these lines (replace /path/to/ceos-ard-server with actual path):
+# Check PR status daily at midnight
+0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
+
+# Cleanup archived workspaces daily at 2 AM
+0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
 ```
+
+**How it works:**
+- Each maintenance script explicitly loads `GITHUB_SERVICE_TOKEN` from `.env` file at startup
+- Cron just needs to `cd` to project directory and run the script
+- Ensure `.env` file exists in project root with `GITHUB_SERVICE_TOKEN` set.
 
 ### Database Models
 
