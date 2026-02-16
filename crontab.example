@@ -25,7 +25,7 @@
 # Duration: ~10-30 seconds (depends on number of PRs)
 # Requirements: GITHUB_SERVICE_TOKEN must be set in .env file
 #
-0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
+0 0 * * * cd ~/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
 
 # ============================================================================
 # 2. Archived Workspace Cleanup
@@ -35,7 +35,7 @@
 # Duration: Depends on number of workspaces to delete
 # Warning: This permanently deletes files - ensure backups if needed
 #
-0 2 * * * cd /path/to/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
+0 2 * * * cd ~/ceos-ard-server && pixi run python scripts/cleanup_archived_workspaces.py >> logs/workspace_cleanup.log 2>&1
 
 # ============================================================================
 # Optional: Log Rotation (Clean up old log files)
@@ -43,7 +43,7 @@
 # Delete log files older than 30 days to save disk space
 # Frequency: Weekly on Sunday at 4 AM
 #
-# 0 4 * * 0 find /path/to/ceos-ard-server/logs -name "*.log" -type f -mtime +30 -delete
+# 0 4 * * 0 find ~/ceos-ard-server/logs -name "*.log" -type f -mtime +30 -delete
 
 # ============================================================================
 # Testing & Debugging
