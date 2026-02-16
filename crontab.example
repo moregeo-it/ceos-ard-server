@@ -7,29 +7,15 @@
 # Installation Instructions:
 # 1. Copy this file: cp crontab.example crontab.production
 # 2. Edit paths to match your server setup
-# 3. Set GITHUB_SERVICE_TOKEN environment variable (see options below)
+# 3. Ensure GITHUB_SERVICE_TOKEN is set in .env file in project root
 # 4. Create logs directory: mkdir -p logs
 # 5. Install: crontab crontab.production
 # 6. Verify: crontab -l
 #
-# IMPORTANT: Cron does NOT automatically load .env files!
-# Choose ONE of these options to provide GITHUB_SERVICE_TOKEN:
-#
-# Option A: Set in crontab directly (easier but less secure)
-#   Add before your cron jobs:
-#   GITHUB_SERVICE_TOKEN=ghp_your_token_here
-#
-# Option B: Load from .env file in each command (recommended)
-#   Use the example commands below that source .env before running
-#
-# Option C: Set system-wide environment variable
-#   Add to /etc/environment or systemd service file
-
-# ============================================================================
-# Environment Variables
-# ============================================================================
-# Option A: Set token directly in crontab (uncomment and set your token)
-# GITHUB_SERVICE_TOKEN=ghp_your_token_here
+# How it works:
+# - The cron job changes directory to the project root (cd /path/to/ceos-ard-server)
+# - Each maintenance script explicitly loads .env using load_dotenv() at the top
+# - Scripts access GITHUB_SERVICE_TOKEN via settings.GITHUB_SERVICE_TOKEN
 
 # ============================================================================
 # 1. Pull Request Status Checker
@@ -37,13 +23,9 @@
 # Checks PR status for all workspaces and auto-archives merged/closed PRs
 # Frequency: Daily at midnight (00:00)
 # Duration: ~10-30 seconds (depends on number of PRs)
-# Requirements: GITHUB_SERVICE_TOKEN must be available
+# Requirements: GITHUB_SERVICE_TOKEN must be set in .env file
 #
-# Option A: If GITHUB_SERVICE_TOKEN is set above in crontab
 0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
-
-# Option B: Load .env file before running (recommended for security)
-# 0 0 * * * cd /path/to/ceos-ard-server && set -a && . .env && set +a && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
 
 # ============================================================================
 # 2. Archived Workspace Cleanup
