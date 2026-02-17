@@ -15,7 +15,7 @@ Optional (for email alerts):
     SMTP_PORT         - SMTP server port (default: 587)
     SMTP_USER         - SMTP username
     SMTP_PASSWORD     - SMTP password
-    SMTP_USE_TLS      - Use TLS (default: true)
+    SMTP_MODE         - SMTP mode (ssl, tls, none)
 """
 
 import argparse
@@ -66,10 +66,15 @@ def send_email(subject, message):
         return False
 
     email_from = os.getenv("ALERT_EMAIL_FROM", "ceos-ard-server@localhost")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_port = os.getenv("SMTP_PORT")
+    if smtp_port:
+        smtp_port = int(smtp_port)
+    port_str = f":{smtp_port}" if smtp_port else ""
     smtp_user = os.getenv("SMTP_USER")
     smtp_password = os.getenv("SMTP_PASSWORD")
-    smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    smtp_mode = os.getenv("SMTP_MODE", "tls").lower()  # tls, ssl, none
+
+    logger.info(f"Sending email to {email_to} via SMTP server {smtp_host}{port_str} (mode: {smtp_mode})")
 
     try:
         msg = MIMEText(message)
@@ -77,8 +82,12 @@ def send_email(subject, message):
         msg["From"] = email_from
         msg["To"] = email_to
 
-        server = smtplib.SMTP(smtp_host, smtp_port)
-        if smtp_use_tls:
+        timeout = 10
+        if smtp_mode == "ssl":
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=timeout)
+        if smtp_mode == "tls":
             server.starttls()
         if smtp_user and smtp_password:
             server.login(smtp_user, smtp_password)

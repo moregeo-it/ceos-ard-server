@@ -288,9 +288,10 @@ GITHUB_SERVICE_TOKEN_EXPIRES_AT=2027-03-15  # Format: YYYY-MM-DD
 
 ```bash
 ALERT_EMAIL_TO=admin@example.com
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_MODE=ssl
+SMTP_USER=your-email@example.com
 SMTP_PASSWORD=your-app-password
 ```
 
