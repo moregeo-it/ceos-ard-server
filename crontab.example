@@ -19,6 +19,12 @@
 # - The cron job changes directory to the project root (cd /path/to/ceos-ard-server)
 # - Each maintenance script loads .env via app/config.py when importing app modules
 # - Scripts access GITHUB_SERVICE_TOKEN and other settings from environment
+#
+# IMPORTANT: Cron uses a minimal PATH that doesn't include ~/.pixi/bin.
+# The PATH line below ensures pixi (and other user-installed tools) are found.
+# Adjust if pixi is installed elsewhere (check with: which pixi)
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pixi/bin
 
 # ============================================================================
 # 1. Pull Request Status Checker

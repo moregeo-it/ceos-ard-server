@@ -303,7 +303,10 @@ SMTP_PASSWORD=your-app-password
 # Edit crontab
 crontab -e
 
-# Add these lines (replace /path/to/ceos-ard-server with actual path):
+# Add these lines (replace USER and paths with your actual values):
+# IMPORTANT: Cron uses a minimal PATH - add pixi's location (check with: which pixi)
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pixi/bin
+
 # Check PR status daily at midnight
 0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
 
