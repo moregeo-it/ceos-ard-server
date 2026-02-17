@@ -139,20 +139,17 @@ class GitService:
         # File has no git history - cannot revert
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert file with no git history. File was never committed.")
 
-    async def commit_changes(self, repo: pygit2.Repository, message: str) -> pygit2.Commit:
+    async def commit_changes(self, repo: pygit2.Repository, message: str, user: User) -> pygit2.Commit:
         """
         Commit changes to the current branch in the repository.
 
         Args:
             repo: pygit2 Repository instance
             message: Commit message
+            user: User object to use for the commit signature
         """
         try:
-            # Get the current user signature from config or use defaults
-            try:
-                signature = repo.default_signature
-            except pygit2.GitError:
-                signature = pygit2.Signature("CEOS-ARD Editor", "noreply@ceos.org")
+            signature = pygit2.Signature(user.full_name or user.username, user.email)
 
             # Get the tree from the index
             tree_id = repo.index.write_tree()
@@ -175,8 +172,7 @@ class GitService:
 
             return repo.get(commit_id)
         except Exception as e:
-            logger.error(f"Unable to commit changes: {str(e)}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to commit changes, please try again.") from e
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to commit changes: {str(e)}") from e
 
     async def push(self, repo: pygit2.Repository, branch_name: str, user: User, set_upstream: bool = False):
         """

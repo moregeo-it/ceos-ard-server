@@ -495,7 +495,7 @@ class FileService:
         repo = get_repo(workspace.abs_path)
 
         # Commit and push changes to the repository
-        commit = await self.git_service.commit_changes(repo, message)
+        commit = await self.git_service.commit_changes(repo, message, user=user)
 
         # Try to push, revert commit on failure
         try:
