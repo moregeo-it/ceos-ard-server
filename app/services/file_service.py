@@ -523,7 +523,7 @@ class FileService:
         Returns:
             List of PFS folder names that use this requirement
         """
-        match = re.match(r"^/?requirements/(.+)\.ya?ml$", file_path)
+        match = re.match(r"^[\\/]?requirements[\\/](.+)\.ya?ml$", file_path)
         if not match:
             # TODO: implement for glossary, sections, references as well
             return None
@@ -536,18 +536,19 @@ class FileService:
             return None
 
         pfs_documents = []
-        # Check each PFS folder's requirements.yaml file
+        # Check each PFS folder's document.yaml file
         for pfs_folder in pfs_dir.iterdir():
             if not pfs_folder.is_dir():
                 continue
 
-            requirements_file = pfs_folder / "requirements.yaml"
+            requirements_file = pfs_folder / "document.yaml"
             if not requirements_file.exists():
                 continue
 
             try:
                 content = requirements_file.read_text(encoding="utf-8")
-                categories = yaml_load(content)
+                document = yaml_load(content)
+                categories = document.get("requirements", [])
             except Exception as e:
                 logger.warning(f"Could not read or parse requirements file for {pfs_folder.name}: {e}")
                 continue
