@@ -560,7 +560,9 @@ class FileService:
             for category in categories:
                 if isinstance(category, dict) and "requirements" in category:
                     requirements = category.get("requirements", [])
-                    if isinstance(requirements, list) and requirement_name in requirements:
+                    if isinstance(requirements, list) and any(
+                        req == requirement_name or (isinstance(req, dict) and req.get("ref") == requirement_name) for req in requirements
+                    ):
                         pfs_documents.append(pfs_folder.name)
                         break
 
