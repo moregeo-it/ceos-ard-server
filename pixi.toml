@@ -9,6 +9,7 @@ dev = "uvicorn app.main:app --reload"
 
 [dependencies]
 fastapi = ">=0.135.2,<0.136"
+starlette = ">=1.0.1,<2"
 uvicorn = ">=0.42.0,<0.43"
 authlib = ">=1.7.0,<2"
 httpx = ">=0.28.1,<0.29"
