@@ -353,18 +353,25 @@ class FileService:
 
         relative_old = normalize_workspace_path(source_path, workspace_path, absolute=False)
         relative_new = normalize_workspace_path(target_path, workspace_path, absolute=False)
-        try:
-            # Stage the rename: remove old path, add new path
+        if ftype == "folder":
+            # For directories, remove all files within the directory from the index and add new paths
+            try:
+                repo.index.remove_all([f"{relative_old}/*"])
+            except pygit2.GitError:
+                pass  # Old path might not be in index yet
+            for file in target_path.rglob("*"):
+                if file.is_file():
+                    relative_file_path = normalize_workspace_path(file, workspace_path, absolute=False)
+                    repo.index.add(relative_file_path)
+        else:
+            # For files, just remove the old path and add the new path
             try:
                 repo.index.remove(relative_old)
             except pygit2.GitError:
                 pass  # Old path might not be in index yet
             repo.index.add(relative_new)
-            repo.index.write()
-        except pygit2.GitError as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"The {ftype} was renamed, but failed to update the repository"
-            ) from e
+
+        repo.index.write()
 
         return {
             "name": new_name,
