@@ -265,13 +265,10 @@ class WorkspaceService:
                     validated_document = load(yaml_content, PFS_DOCUMENT(file=pfs_document_path.name, base_path=workspace.abs_path))
                     document_data = validated_document.data
 
-                    if not document_data.get("title"):
-                        logger.warning(f"Skipping PFS {pfs_dir.name} due to missing title in document.yaml")
-                        continue
                     pfs_types.append(
                         {
                             "id": pfs_dir.name,
-                            "name": document_data["title"],
+                            "name": document_data.get("title", pfs_dir.name),
                         }
                     )
                 except YAMLValidationError as e:
