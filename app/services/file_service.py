@@ -293,7 +293,7 @@ class FileService:
             try:
                 if ftype == "Folder":
                     # For directories, remove all files within the directory from the index
-                    repo.index.remove_all([f"{relative_path}/*"])
+                    repo.index.remove_all([f"{relative_path}/**"])
                 else:
                     repo.index.remove(relative_path)
                 repo.index.write()
@@ -307,7 +307,7 @@ class FileService:
             try:
                 if ftype == "Folder":
                     # For directories, remove all files within the directory from the index
-                    repo.index.remove_all([f"{relative_path}/*"])
+                    repo.index.remove_all([f"{relative_path}/**"])
                 else:
                     repo.index.remove(relative_path)
                 repo.index.write()
@@ -356,7 +356,7 @@ class FileService:
         if ftype == "folder":
             # For directories, remove all files within the directory from the index and add new paths
             try:
-                repo.index.remove_all([f"{relative_old}/*"])
+                repo.index.remove_all([f"{relative_old}/**"])
             except pygit2.GitError:
                 pass  # Old path might not be in index yet
             for file in target_path.rglob("*"):
