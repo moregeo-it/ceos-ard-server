@@ -228,7 +228,8 @@ async def list_workspace_pfs_types(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> list[PFSResponse]:
     try:
-        return await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return {"pfsTypes": pfs_types}
     except HTTPException:
         raise
     except Exception as e:
