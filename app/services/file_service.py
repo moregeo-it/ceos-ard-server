@@ -384,7 +384,7 @@ class FileService:
         except pygit2.GitError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="The rename was applied to the file, but writing the changes to the repository failed.",
+                detail=f"The rename was applied to the {ftype}, but writing the changes to the repository failed.",
             ) from e
 
         return {
