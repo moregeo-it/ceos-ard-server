@@ -73,7 +73,7 @@ async def list_pfs_folders(
         logger.info(f"Fetching PFS folders for {final_owner}/{final_repo} on {final_branch} branch")
 
         pfs_types = await github_service.get_pfs_types(owner=final_owner, repo=final_repo, token=access_token, branch=final_branch)
-        response_pfs_types = ({"id": pfs} for pfs in pfs_types)
+        response_pfs_types = [{"id": pfs} for pfs in pfs_types]
         return {"pfsTypes": response_pfs_types}
 
     except HTTPException:

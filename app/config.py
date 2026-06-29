@@ -19,7 +19,7 @@ load_dotenv()
 
 CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5173")
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000")
-DEFAULT_VERSION = "1.0-draft"
+DEFAULT_VERSION = "1.0.0-draft"
 DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
 
 

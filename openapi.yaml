@@ -482,7 +482,7 @@ paths:
                   type: string
                   enum:
                     - file
-                    - is_directory
+                    - folder
                   description: Type of item to create
               required:
                 - name
@@ -1301,7 +1301,7 @@ paths:
       description: >-
         Creates a new PFS based on an existing one.
 
-        The generated documents should be validated against the strictyaml schemas.
+        Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
       operationId: createPFS
       tags:
         - PFS
@@ -1332,7 +1332,7 @@ paths:
                 version:
                   type: string
                   description: Version of the new PFS
-                  default: "1.0"
+                  default: "1.0.0-draft"
                 type:
                   type: string
                   description: Type of the new PFS
@@ -1697,6 +1697,8 @@ components:
 
     pfsTypes:
       type: object
+      required:
+        - pfsTypes
       properties:
         pfsTypes:
           type: array

@@ -322,26 +322,27 @@ class WorkspaceService:
 
                 if not isinstance(data, dict):
                     data = {
-                        "id": request_data.id,
+                        "id": pfs_id,
                         "title": request_data.title,
                         "version": request_data.version or settings.PFS_DEFAULT_VERSION,
                     }
             else:
                 # Handle case when no base_pfs is provided
                 data = {
-                    "id": request_data.id,
+                    "id": pfs_id,
                     "title": request_data.title,
                     "version": request_data.version or settings.PFS_DEFAULT_VERSION,
                 }
 
             update_data = request_data.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
+            update_data["id"] = pfs_id
 
             data.update(update_data)
             yaml_content = yaml_save(data, sort_keys=False)
 
             documents_path.write_text(yaml_content, encoding="utf-8")
 
-            logger.info(f"Successfully created PFS {request_data.id} for workspace {workspace_id}")
+            logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
 
             # Add changes to the repository
             try:
@@ -361,7 +362,7 @@ class WorkspaceService:
             raise
         except Exception as e:
             shutil.rmtree(pfs_path, ignore_errors=True)
-            logger.error(f"Error creating PFS {request_data.id} for workspace {workspace_id}: {e}")
+            logger.error(f"Error creating PFS {pfs_id} for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
     async def get_proposal(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> Proposal | None:
