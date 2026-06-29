@@ -298,6 +298,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS directory: {str(e)}") from e
 
         try:
+            data = None
             if create_pfs_request.base_pfs:
                 base_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.base_pfs
                 if not base_pfs_path.exists():
@@ -307,26 +308,27 @@ class WorkspaceService:
 
                 documents_path = new_pfs_path / "document.yaml"
                 if documents_path.exists():
-                    documents_data = yaml_load(documents_path.read_text(encoding="utf-8"))
-                else:
-                    documents_data = {
+                    data = yaml_load(documents_path.read_text(encoding="utf-8"))
+                if not data:
+                    data = {
                         "id": create_pfs_request.id,
                         "title": create_pfs_request.title,
-                        "version": create_pfs_request.version or "1.0.0-draft",
+                        "version": create_pfs_request.version or settings.PFS_DEFAULT_VERSION,
                     }
             else:
                 # Handle case when no base_pfs is provided
                 documents_path = new_pfs_path / "document.yaml"
-                documents_data = {
+                data = {
                     "id": create_pfs_request.id,
                     "title": create_pfs_request.title,
-                    "version": create_pfs_request.version or "1.0.0-draft",
+                    "version": create_pfs_request.version or settings.PFS_DEFAULT_VERSION,
                 }
 
             update_data = create_pfs_request.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
 
-            documents_data.update(update_data)
-            documents_path.write_text(yaml_save(documents_data), encoding="utf-8")
+            data.update(update_data)
+            yaml_content = yaml_save(data, sort_keys=False)
+            documents_path.write_text(yaml_content, encoding="utf-8")
 
             logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
 
