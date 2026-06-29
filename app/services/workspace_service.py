@@ -261,17 +261,14 @@ class WorkspaceService:
                     continue
 
                 try:
-                    yaml_content = pfs_document_path.read_text()
+                    yaml_content = pfs_document_path.read_text(encoding="utf-8")
                     validated_document = load(yaml_content, PFS_DOCUMENT(file=pfs_document_path.name, base_path=workspace.abs_path))
                     document_data = validated_document.data
 
-                    if not document_data.get("id") or not document_data.get("title"):
-                        logger.warning(f"Skipping PFS {pfs_dir.name} due to missing id or title in document.yaml")
-                        continue
                     pfs_types.append(
                         {
-                            "id": document_data["id"],
-                            "name": document_data["title"],
+                            "id": pfs_dir.name,
+                            "name": document_data.get("title") or pfs_dir.name,
                         }
                     )
                 except YAMLValidationError as e:
@@ -316,7 +313,7 @@ class WorkspaceService:
 
                 documents_path = new_pfs_path / "document.yaml"
                 if documents_path.exists():
-                    yaml_content = documents_path.read_text()
+                    yaml_content = documents_path.read_text(encoding="utf-8")
                     validated_document = load(yaml_content)
                     documents_data = validated_document.data
                 else:
