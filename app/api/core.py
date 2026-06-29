@@ -74,7 +74,7 @@ async def list_pfs_folders(
 
         pfs_types = await github_service.get_pfs_types(owner=final_owner, repo=final_repo, token=access_token, branch=final_branch)
 
-        return {"pfsTypes": map(lambda pfs: {"id": pfs}, pfs_types)}
+        return {"pfsTypes": ({"id": pfs} for pfs in pfs_types)}
 
     except HTTPException:
         raise
