@@ -127,12 +127,13 @@ class CreatePFSRequest(BaseModel):
         use_enum_values = True
 
 
-class PFSResponse(BaseModel):
+class PfsType(BaseModel):
     id: str
-    name: str
+    title: str | None = None
 
-    class ConfigDict:
-        from_attributes = True
+
+class PFSTypesResponse(BaseModel):
+    pfsTypes: list[PfsType]
 
 
 class FileListResponse(BaseModel):

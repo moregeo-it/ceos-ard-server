@@ -17,6 +17,7 @@ from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, W
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
+from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo, get_repo_changes
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ class WorkspaceService:
                     pfs_types.append(
                         {
                             "id": pfs_dir.name,
-                            "name": document.get("title") or pfs_dir.name,
+                            "title": document.get("title") or pfs_dir.name,
                         }
                     )
                 except Exception as e:
@@ -283,34 +284,32 @@ class WorkspaceService:
             logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get PFS types: {str(e)}") from e
 
-    async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, create_pfs_request: CreatePFSRequest):
+    async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, request_data: CreatePFSRequest):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
-        if not create_pfs_request.id or not create_pfs_request.title:
+        if not request_data.id or not request_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
         repo = get_repo(workspace.abs_path)
-        new_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.id
-        if new_pfs_path.exists():
+        pfs_container = workspace.abs_path / "pfs"
+        pfs_path = pfs_container / request_data.id
+        if pfs_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
 
-        try:
-            new_pfs_path.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Error creating PFS directory {new_pfs_path}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS directory: {str(e)}") from e
+        folder_details = create_folder(workspace.abs_path, request_data.id, pfs_path)
+
+        documents_path = pfs_path / "document.yaml"
 
         try:
             data = None
-            if create_pfs_request.base_pfs:
-                base_pfs_path = workspace.abs_path / "pfs" / create_pfs_request.base_pfs
+            if request_data.base_pfs:
+                base_pfs_path = pfs_container / request_data.base_pfs
                 if not base_pfs_path.exists():
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
 
-                shutil.copytree(base_pfs_path, new_pfs_path, dirs_exist_ok=True)
+                shutil.copytree(base_pfs_path, pfs_path, dirs_exist_ok=True)
 
-                documents_path = new_pfs_path / "document.yaml"
                 if documents_path.exists():
                     try:
                         data = yaml_load(documents_path.read_text(encoding="utf-8"))
@@ -318,33 +317,34 @@ class WorkspaceService:
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                         ) from ye
+
                 if not isinstance(data, dict):
                     data = {
-                        "id": create_pfs_request.id,
-                        "title": create_pfs_request.title,
-                        "version": create_pfs_request.version or settings.PFS_DEFAULT_VERSION,
+                        "id": request_data.id,
+                        "title": request_data.title,
+                        "version": request_data.version or settings.PFS_DEFAULT_VERSION,
                     }
             else:
                 # Handle case when no base_pfs is provided
-                documents_path = new_pfs_path / "document.yaml"
                 data = {
-                    "id": create_pfs_request.id,
-                    "title": create_pfs_request.title,
-                    "version": create_pfs_request.version or settings.PFS_DEFAULT_VERSION,
+                    "id": request_data.id,
+                    "title": request_data.title,
+                    "version": request_data.version or settings.PFS_DEFAULT_VERSION,
                 }
 
-            update_data = create_pfs_request.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
+            update_data = request_data.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
 
             data.update(update_data)
             yaml_content = yaml_save(data, sort_keys=False)
+
             documents_path.write_text(yaml_content, encoding="utf-8")
 
-            logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
+            logger.info(f"Successfully created PFS {request_data.id} for workspace {workspace_id}")
 
             # Add changes to the repository
             try:
                 # Add all files in the new PFS directory
-                for file_path in new_pfs_path.rglob("*"):
+                for file_path in pfs_path.rglob("*"):
                     if file_path.is_file():
                         rel_file = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
                         repo.index.add(rel_file)
@@ -353,13 +353,13 @@ class WorkspaceService:
                 logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
 
-            return {"id": create_pfs_request.id, "name": create_pfs_request.title}
+            return folder_details
         except HTTPException:
-            shutil.rmtree(new_pfs_path, ignore_errors=True)
+            shutil.rmtree(pfs_path, ignore_errors=True)
             raise
         except Exception as e:
-            shutil.rmtree(new_pfs_path, ignore_errors=True)
-            logger.error(f"Error creating PFS {create_pfs_request.id} for workspace {workspace_id}: {e}")
+            shutil.rmtree(pfs_path, ignore_errors=True)
+            logger.error(f"Error creating PFS {request_data.id} for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
     async def get_proposal(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> Proposal | None:

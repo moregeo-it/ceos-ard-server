@@ -11,7 +11,7 @@ from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     Commit,
     CreatePFSRequest,
-    PFSResponse,
+    PFSTypesResponse,
     Proposal,
     ProposalRequest,
     WorkspaceCreate,
@@ -219,14 +219,14 @@ def get_workspace_commits(
 
 
 @router.get(
-    "/{workspace_id}/pfs", response_model=list[PFSResponse], summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"]
+    "/{workspace_id}/pfs", response_model=PFSTypesResponse, summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"]
 )
 async def list_workspace_pfs_types(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
-) -> list[PFSResponse]:
+) -> PFSTypesResponse:
     try:
         pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
         return {"pfsTypes": pfs_types}
@@ -237,17 +237,17 @@ async def list_workspace_pfs_types(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list PFS types", e)) from e
 
 
-@router.post("/{workspace_id}/pfs", response_model=PFSResponse, summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
+@router.post("/{workspace_id}/pfs", summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
 async def create_workspace_pfs(
     workspace_id: str,
     create_pfs_request: CreatePFSRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
-) -> PFSResponse:
+):
     try:
         return await workspace_service.create_workspace_pfs(
-            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, create_pfs_request=create_pfs_request
+            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, request_data=create_pfs_request
         )
     except HTTPException:
         raise

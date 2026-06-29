@@ -48,17 +48,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  pfsTypes:
-                    description: List of available PFS types.
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/pfsId'
-              example:
-                pfsTypes:
-                  - NRB
-                  - POL
+                $ref: '#/components/schemas/pfsTypes'
         '401':
           description: Unauthorized
           content:
@@ -1292,12 +1282,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  pfsTypes:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/pfsType'
+                $ref: '#/components/schemas/pfsTypes'
         '404':
           description: Workspace not found
           content:
@@ -1328,6 +1313,9 @@ paths:
           application/json:
             schema:
               type: object
+              required:
+                - id
+                - title
               properties:
                 base:
                   type:
@@ -1362,17 +1350,13 @@ paths:
                     - what-are-ceos-ard-products
                     - when-is-a-product-ceos-ard
                     - difference-threshold-goal
-              required:
-                - id
-                - title
-                - version
       responses:
         '201':
           description: PFS created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pfsType'
+                $ref: '#/components/schemas/FileItem'
         '400':
           description: Invalid request data
           content:
@@ -1711,20 +1695,24 @@ components:
         - NRB
         - POL
 
-    pfsType:
+    pfsTypes:
       type: object
       properties:
-        id:
-          $ref: '#/components/schemas/pfsId'
-        name:
-          type: string
-          description: Human-readable name
-      required:
-        - id
-        - name
-      example:
-        id: NRB
-        name: SAR Normalised Radar Backscatter
+        pfsTypes:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+            properties:
+              id:
+                $ref: '#/components/schemas/pfsId'
+              title:
+                type: string
+                description: Human-readable title
+            example:
+              id: NRB
+              title: SAR Normalised Radar Backscatter
 
     pfsId:
       type: string
