@@ -6,6 +6,7 @@ from typing import Any
 import pygit2
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from yaml import YAMLError
 from yaml import safe_dump as yaml_save
 from yaml import safe_load as yaml_load
 
@@ -308,7 +309,12 @@ class WorkspaceService:
 
                 documents_path = new_pfs_path / "document.yaml"
                 if documents_path.exists():
-                    data = yaml_load(documents_path.read_text(encoding="utf-8"))
+                    try:
+                        data = yaml_load(documents_path.read_text(encoding="utf-8"))
+                    except YAMLError as ye:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
+                        ) from ye
                 if not data:
                     data = {
                         "id": create_pfs_request.id,
