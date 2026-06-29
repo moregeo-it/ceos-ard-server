@@ -263,6 +263,9 @@ class WorkspaceService:
 
                 try:
                     document = yaml_load(pfs_document_path.read_text(encoding="utf-8"))
+                    if not isinstance(document, dict):
+                        logger.error(f"Invalid PFS document format in {pfs_document_path}")
+                        continue
                     pfs_types.append(
                         {
                             "id": pfs_dir.name,
@@ -315,7 +318,7 @@ class WorkspaceService:
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                         ) from ye
-                if not data:
+                if not isinstance(data, dict):
                     data = {
                         "id": create_pfs_request.id,
                         "title": create_pfs_request.title,
