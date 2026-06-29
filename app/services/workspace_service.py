@@ -19,6 +19,7 @@ from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo, get_repo_changes
+from app.utils.validation import validate_pathname
 
 logger = logging.getLogger(__name__)
 
@@ -293,18 +294,19 @@ class WorkspaceService:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
         repo = get_repo(workspace.abs_path)
         pfs_container = workspace.abs_path / "pfs"
-        pfs_path = pfs_container / request_data.id
+        pfs_id = validate_pathname(request_data.id)
+        pfs_path = pfs_container / pfs_id
         if pfs_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
 
-        folder_details = create_folder(workspace.abs_path, request_data.id, pfs_path)
+        folder_details = create_folder(workspace.abs_path, pfs_id, pfs_path)
 
         documents_path = pfs_path / "document.yaml"
 
         try:
             data = None
-            if request_data.base_pfs:
-                base_pfs_path = pfs_container / request_data.base_pfs
+            if request_data.base:
+                base_pfs_path = pfs_container / validate_pathname(request_data.base)
                 if not base_pfs_path.exists():
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
 

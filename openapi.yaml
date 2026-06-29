@@ -482,7 +482,7 @@ paths:
                   type: string
                   enum:
                     - file
-                    - directory
+                    - is_directory
                   description: Type of item to create
               required:
                 - name
@@ -1662,7 +1662,7 @@ components:
         path:
           type: string
           description: Absolute path to the file/folder starting from the workspace root
-        directory:
+        is_directory:
           type: boolean
           description: Whether the item is a Directory
           default: false
@@ -1671,20 +1671,20 @@ components:
             - string
             - "null"
           enum:
-            - A
-            - M
-            - D
-            - R
+            - added
+            - modified
+            - deleted
+            - renamed
             - null
           default: null
           description: |-
             Status of the file
 
             - *null*=Unchanged
-            - A=Added
-            - M=Modified
-            - D=Deleted
-            - R=Renamed
+            - added=Added
+            - modified=Modified
+            - deleted=Deleted
+            - renamed=Renamed
 
     pfs:
       description: List of PFS types assigned to the workspace, used for preview generation.

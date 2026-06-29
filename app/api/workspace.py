@@ -11,6 +11,7 @@ from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     Commit,
     CreatePFSRequest,
+    FileResponse,
     PFSTypesResponse,
     Proposal,
     ProposalRequest,
@@ -237,7 +238,14 @@ async def list_workspace_pfs_types(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list PFS types", e)) from e
 
 
-@router.post("/{workspace_id}/pfs", summary="Create a PFS", description="Create a PFS of a workspace", tags=["PFS"])
+@router.post(
+    "/{workspace_id}/pfs",
+    summary="Create a PFS",
+    description="Create a PFS of a workspace",
+    tags=["PFS"],
+    response_model=FileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_workspace_pfs(
     workspace_id: str,
     create_pfs_request: CreatePFSRequest,
