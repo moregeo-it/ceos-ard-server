@@ -268,7 +268,7 @@ class WorkspaceService:
                     pfs_types.append(
                         {
                             "id": pfs_dir.name,
-                            "name": document_data.get("title", pfs_dir.name),
+                            "name": document_data.get("title") or pfs_dir.name,
                         }
                     )
                 except YAMLValidationError as e:
