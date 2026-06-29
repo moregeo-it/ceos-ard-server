@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Any
 
 import pygit2
-from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from strictyaml import YAMLValidationError, as_document, load
+from yaml import safe_dump as yaml_save
+from yaml import safe_load as yaml_load
 
 from app.config import settings
 from app.models.user import User
@@ -261,19 +261,13 @@ class WorkspaceService:
                     continue
 
                 try:
-                    yaml_content = pfs_document_path.read_text(encoding="utf-8")
-                    validated_document = load(yaml_content, PFS_DOCUMENT(file=pfs_document_path.name, base_path=workspace.abs_path))
-                    document_data = validated_document.data
-
+                    document = yaml_load(pfs_document_path.read_text(encoding="utf-8"))
                     pfs_types.append(
                         {
                             "id": pfs_dir.name,
-                            "name": document_data.get("title") or pfs_dir.name,
+                            "name": document.get("title") or pfs_dir.name,
                         }
                     )
-                except YAMLValidationError as e:
-                    logger.error(f"Invalid YAML content in {pfs_document_path}: {e}")
-                    continue
                 except Exception as e:
                     logger.error(f"Error reading PFS document {pfs_document_path}: {e}")
                     continue
@@ -313,14 +307,12 @@ class WorkspaceService:
 
                 documents_path = new_pfs_path / "document.yaml"
                 if documents_path.exists():
-                    yaml_content = documents_path.read_text(encoding="utf-8")
-                    validated_document = load(yaml_content)
-                    documents_data = validated_document.data
+                    documents_data = yaml_load(documents_path.read_text(encoding="utf-8"))
                 else:
                     documents_data = {
                         "id": create_pfs_request.id,
                         "title": create_pfs_request.title,
-                        "version": create_pfs_request.version or "1.0-draft",
+                        "version": create_pfs_request.version or "1.0.0-draft",
                     }
             else:
                 # Handle case when no base_pfs is provided
@@ -328,14 +320,13 @@ class WorkspaceService:
                 documents_data = {
                     "id": create_pfs_request.id,
                     "title": create_pfs_request.title,
-                    "version": create_pfs_request.version or "1.0-draft",
+                    "version": create_pfs_request.version or "1.0.0-draft",
                 }
 
             update_data = create_pfs_request.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
 
             documents_data.update(update_data)
-            yaml_document = as_document(documents_data)
-            documents_path.write_text(yaml_document.as_yaml(), encoding="utf-8")
+            documents_path.write_text(yaml_save(documents_data), encoding="utf-8")
 
             logger.info(f"Successfully created PFS {create_pfs_request.id} for workspace {workspace_id}")
 
@@ -352,10 +343,6 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
 
             return {"id": create_pfs_request.id, "name": create_pfs_request.title}
-        except YAMLValidationError as e:
-            shutil.rmtree(new_pfs_path, ignore_errors=True)
-            logger.error(f"Invalid YAML content for PFS {create_pfs_request.id}: {e}")
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid YAML content: {str(e)}") from e
         except HTTPException:
             shutil.rmtree(new_pfs_path, ignore_errors=True)
             raise

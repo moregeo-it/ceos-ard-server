@@ -567,8 +567,7 @@ class FileService:
                 continue
 
             try:
-                content = requirements_file.read_text(encoding="utf-8")
-                document = yaml_load(content)
+                document = yaml_load(requirements_file.read_text(encoding="utf-8"))
                 categories = document.get("requirements", [])
             except Exception as e:
                 logger.warning(f"Could not read or parse requirements file for {pfs_folder.name}: {e}")
