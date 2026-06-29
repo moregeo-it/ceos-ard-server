@@ -48,17 +48,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  pfsTypes:
-                    description: List of available PFS types.
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/pfsId'
-              example:
-                pfsTypes:
-                  - NRB
-                  - POL
+                $ref: '#/components/schemas/pfsTypes'
         '401':
           description: Unauthorized
           content:
@@ -492,7 +482,7 @@ paths:
                   type: string
                   enum:
                     - file
-                    - directory
+                    - folder
                   description: Type of item to create
               required:
                 - name
@@ -1292,12 +1282,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  pfsTypes:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/pfsType'
+                $ref: '#/components/schemas/pfsTypes'
         '404':
           description: Workspace not found
           content:
@@ -1316,7 +1301,7 @@ paths:
       description: >-
         Creates a new PFS based on an existing one.
 
-        The generated documents should be validated against the strictyaml schemas.
+        Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
       operationId: createPFS
       tags:
         - PFS
@@ -1328,6 +1313,9 @@ paths:
           application/json:
             schema:
               type: object
+              required:
+                - id
+                - title
               properties:
                 base:
                   type:
@@ -1344,7 +1332,7 @@ paths:
                 version:
                   type: string
                   description: Version of the new PFS
-                  default: "1.0"
+                  default: "1.0.0-draft"
                 type:
                   type: string
                   description: Type of the new PFS
@@ -1362,17 +1350,13 @@ paths:
                     - what-are-ceos-ard-products
                     - when-is-a-product-ceos-ard
                     - difference-threshold-goal
-              required:
-                - id
-                - title
-                - version
       responses:
         '201':
           description: PFS created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pfsType'
+                $ref: '#/components/schemas/FileItem'
         '400':
           description: Invalid request data
           content:
@@ -1678,7 +1662,7 @@ components:
         path:
           type: string
           description: Absolute path to the file/folder starting from the workspace root
-        directory:
+        is_directory:
           type: boolean
           description: Whether the item is a Directory
           default: false
@@ -1687,20 +1671,20 @@ components:
             - string
             - "null"
           enum:
-            - A
-            - M
-            - D
-            - R
+            - added
+            - modified
+            - deleted
+            - renamed
             - null
           default: null
           description: |-
             Status of the file
 
             - *null*=Unchanged
-            - A=Added
-            - M=Modified
-            - D=Deleted
-            - R=Renamed
+            - added=Added
+            - modified=Modified
+            - deleted=Deleted
+            - renamed=Renamed
 
     pfs:
       description: List of PFS types assigned to the workspace, used for preview generation.
@@ -1711,20 +1695,26 @@ components:
         - NRB
         - POL
 
-    pfsType:
+    pfsTypes:
       type: object
-      properties:
-        id:
-          $ref: '#/components/schemas/pfsId'
-        name:
-          type: string
-          description: Human-readable name
       required:
-        - id
-        - name
-      example:
-        id: NRB
-        name: SAR Normalised Radar Backscatter
+        - pfsTypes
+      properties:
+        pfsTypes:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+            properties:
+              id:
+                $ref: '#/components/schemas/pfsId'
+              title:
+                type: string
+                description: Human-readable title
+            example:
+              id: NRB
+              title: SAR Normalised Radar Backscatter
 
     pfsId:
       type: string

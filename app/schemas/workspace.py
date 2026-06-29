@@ -119,7 +119,7 @@ class CreatePFSRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
     version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
-    base_pfs: str | None = Field(None, description="Base PFS ID")
+    base: str | None = Field(None, description="Base PFS ID")
     type: str | None = Field(None, description="PFS type")
     introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
 
@@ -127,22 +127,23 @@ class CreatePFSRequest(BaseModel):
         use_enum_values = True
 
 
-class PFSResponse(BaseModel):
+class PfsType(BaseModel):
     id: str
-    name: str
-
-    class ConfigDict:
-        from_attributes = True
+    title: str | None = None
 
 
-class FileListResponse(BaseModel):
+class PFSTypesResponse(BaseModel):
+    pfsTypes: list[PfsType]
+
+
+class FileResponse(BaseModel):
     status: str | None
     name: str
     is_directory: bool
     path: str
 
 
-class FileContextResponse(FileListResponse):
+class FileContextResponse(FileResponse):
     usage: list[str] | None
 
 

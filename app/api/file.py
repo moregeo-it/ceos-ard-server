@@ -13,8 +13,8 @@ from app.schemas.workspace import (
     CommitRequest,
     CreateFileRequest,
     FileContextResponse,
-    FileListResponse,
     FilePatchRequest,
+    FileResponse,
     FileSearchResponse,
     ListDiffsResponse,
 )
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/workspaces", tags=["Files"])
     "/{workspace_id}/files",
     summary="List files in a workspace",
     description="List files and folders in a workspace",
-    response_model=list[FileListResponse],
+    response_model=list[FileResponse],
     status_code=status.HTTP_200_OK,
 )
 async def list_workspace_files(
@@ -55,7 +55,7 @@ async def list_workspace_files(
     "/{workspace_id}/files",
     summary="Create a file or folder in a workspace",
     description="Create a file or folder in a workspace",
-    response_model=FileListResponse,
+    response_model=FileResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create(
@@ -100,7 +100,7 @@ async def read_file_content(
     "/{workspace_id}/files/{file_path:path}",
     summary="Store content of a file",
     description="Store content of a file",
-    response_model=FileListResponse,
+    response_model=FileResponse,
     status_code=status.HTTP_200_OK,
 )
 async def store_file_content(
@@ -156,7 +156,7 @@ async def delete(
     "/{workspace_id}/files/{file_path:path}",
     summary="Update file metadata or operations",
     description="Perform file operations such rename or revert changes",
-    response_model=FileListResponse,
+    response_model=FileResponse,
     status_code=status.HTTP_200_OK,
 )
 async def patch_file(

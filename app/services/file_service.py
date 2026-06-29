@@ -14,6 +14,7 @@ from app.schemas.workspace import FilePatchRequest
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
+from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
@@ -175,50 +176,11 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
 
         if request_data.type == "file":
-            return self._create_file(workspace.abs_path, request_data.name, target_path)
+            return create_file(workspace.abs_path, request_data.name, target_path)
         elif request_data.type == "folder":
-            return self._create_folder(workspace.abs_path, request_data.name, target_path)
+            return create_folder(workspace.abs_path, request_data.name, target_path)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
-
-    def _create_file(self, workspace_path: Path, name: str, target_path: Path, content: bytes = None):
-        repo = get_repo(workspace_path)
-        try:
-            if content is not None:
-                target_path.write_bytes(content)
-            else:
-                target_path.touch()
-
-            # Stage the file using pygit2
-            relative_path = str(target_path.relative_to(workspace_path)).replace("\\", "/")
-            repo.index.add(relative_path)
-            repo.index.write()
-
-            return {
-                "name": name,
-                "is_directory": False,
-                "status": get_file_status(repo, target_path),
-                "path": normalize_workspace_path(target_path, workspace_path),
-            }
-        except pygit2.GitError as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been created, but it failed to be added to the repository"
-            ) from e
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create file: {str(e)}") from e
-
-    def _create_folder(self, workspace_path: Path, name: str, target_path: Path):
-        repo = get_repo(workspace_path)
-        try:
-            target_path.mkdir(parents=True, exist_ok=True)
-            return {
-                "name": name,
-                "is_directory": True,
-                "status": get_file_status(repo, target_path),
-                "path": normalize_workspace_path(target_path, workspace_path),
-            }
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create folder: {str(e)}") from e
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -567,8 +529,7 @@ class FileService:
                 continue
 
             try:
-                content = requirements_file.read_text(encoding="utf-8")
-                document = yaml_load(content)
+                document = yaml_load(requirements_file.read_text(encoding="utf-8"))
                 categories = document.get("requirements", [])
             except Exception as e:
                 logger.warning(f"Could not read or parse requirements file for {pfs_folder.name}: {e}")
