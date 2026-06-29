@@ -359,10 +359,18 @@ class FileService:
                 repo.index.remove_all([f"{relative_old}/**"])
             except pygit2.GitError:
                 pass  # Old path might not be in index yet
-            for file in target_path.rglob("*"):
-                if file.is_file():
-                    relative_file_path = normalize_workspace_path(file, workspace_path, absolute=False)
-                    repo.index.add(relative_file_path)
+            try:
+                for file in target_path.rglob("*"):
+                    if file.is_file():
+                        relative_file_path = normalize_workspace_path(file, workspace_path, absolute=False)
+                        repo.index.add(relative_file_path)
+            except pygit2.GitError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="The renames were applied to the files, but updating the repository failed.",
+                ) from e
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to rename files: {str(e)}") from e
         else:
             # For files, just remove the old path and add the new path
             try:
@@ -371,7 +379,13 @@ class FileService:
                 pass  # Old path might not be in index yet
             repo.index.add(relative_new)
 
-        repo.index.write()
+        try:
+            repo.index.write()
+        except pygit2.GitError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="The rename was applied to the file, but writing the changes to the repository failed.",
+            ) from e
 
         return {
             "name": new_name,
