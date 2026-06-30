@@ -120,7 +120,7 @@ class CreatePFSRequest(BaseModel):
     version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
     base: str | None = Field(None, description="Base PFS ID")
-    type: str | None = Field(None, description="PFS type")
+    type: str | None = Field(default=settings.PFS_DEFAULT_TYPE, description="PFS type")
     introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
 
     class ConfigDict:

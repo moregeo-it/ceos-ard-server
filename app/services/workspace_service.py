@@ -6,9 +6,8 @@ from typing import Any
 import pygit2
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from yaml import YAMLError
-from yaml import safe_dump as yaml_save
 from yaml import safe_load as yaml_load
+from strictyaml import as_document, load as strict_yaml_load, YAMLValidationError
 
 from app.config import settings
 from app.models.user import User
@@ -285,7 +284,7 @@ class WorkspaceService:
             logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get PFS types: {str(e)}") from e
 
-    async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, request_data: CreatePFSRequest):
+    async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, request_data: CreatePFSRequest, username: str):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
         if not request_data.id or not request_data.title:
@@ -314,34 +313,48 @@ class WorkspaceService:
 
                 if documents_path.exists():
                     try:
-                        data = yaml_load(documents_path.read_text(encoding="utf-8"))
-                    except YAMLError as ye:
+                        data = strict_yaml_load(documents_path.read_text(encoding="utf-8")).data
+                    except YAMLValidationError as ye:
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                         ) from ye
 
                 if not isinstance(data, dict):
                     data = {
-                        "id": pfs_id,
+                        "type": request_data.type,
                         "title": request_data.title,
-                        "version": request_data.version or settings.PFS_DEFAULT_VERSION,
+                        "version": request_data.version,
+                        "applies_to": request_data.applies_to,
+                        "introduction": request_data.introduction,
+                        "authors": [username],
+                        "requirements": [{"category": "general-metadata", "requirements": ["metadata/traceability-st"]}],
                     }
             else:
                 # Handle case when no base_pfs is provided
                 data = {
-                    "id": pfs_id,
+                    "type": request_data.type,
                     "title": request_data.title,
-                    "version": request_data.version or settings.PFS_DEFAULT_VERSION,
+                    "version": request_data.version,
+                    "applies_to": request_data.applies_to,
+                    "introduction": request_data.introduction,
+                    "authors": [username],
+                    "requirements": [{"category": "general-metadata", "requirements": ["metadata/traceability-st"]}],
                 }
 
             update_data = request_data.model_dump(include={"title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
 
             data.update(update_data)
-            yaml_content = yaml_save(data, sort_keys=False)
 
-            documents_path.write_text(yaml_content, encoding="utf-8")
+            try:
+                yaml_content = as_document(data)
 
-            logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
+                documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
+
+                logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
+            except YAMLValidationError as ye:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}"
+                ) from ye
 
             # Add changes to the repository
             try:

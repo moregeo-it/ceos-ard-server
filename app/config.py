@@ -19,8 +19,9 @@ load_dotenv()
 
 CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5173")
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000")
-DEFAULT_VERSION = "1.0.0-draft"
-DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
+PFS_DEFAULT_VERSION = "1.0.0-draft"
+PFS_DEFAULT_TYPE = "Optical"
+PFS_DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
 
 
 class Settings:
@@ -62,10 +63,13 @@ class Settings:
     WORKSPACES_ROOT: Path = Path(os.getenv("WORKSPACES_ROOT", "workspaces")).resolve()
 
     # PFS default version for new PFS documents
-    PFS_DEFAULT_VERSION: str = os.getenv("PFS_DEFAULT_VERSION", DEFAULT_VERSION)
+    PFS_DEFAULT_VERSION: str = os.getenv("PFS_DEFAULT_VERSION", PFS_DEFAULT_VERSION)
     # The sections that should be added to the introduction by default for new PFS documents
     # Separate sections with a comma (,)
-    PFS_DEFAULT_INTRODUCTION: list[str] = [item.strip() for item in os.getenv("PFS_DEFAULT_INTRODUCTION", DEFAULT_INTRODUCTION).split(",")]
+    PFS_DEFAULT_INTRODUCTION: list[str] = [item.strip() for item in os.getenv("PFS_DEFAULT_INTRODUCTION", PFS_DEFAULT_INTRODUCTION).split(",")]
+
+    # PFS default type for new PFS documents
+    PFS_DEFAULT_TYPE: str = os.getenv("PFS_DEFAULT_TYPE", PFS_DEFAULT_TYPE)
 
     # One or more CORS origins separated by commas
     CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", CLIENT_URL).split(",")

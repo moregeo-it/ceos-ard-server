@@ -255,7 +255,7 @@ async def create_workspace_pfs(
 ):
     try:
         return await workspace_service.create_workspace_pfs(
-            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, request_data=create_pfs_request
+            db=db, workspace_id=workspace_id, user_id=current_user["user"].id, request_data=create_pfs_request, username=current_user["user"].username
         )
     except HTTPException:
         raise
