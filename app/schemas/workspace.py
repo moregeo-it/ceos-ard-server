@@ -113,9 +113,11 @@ class FilePatchRequest(BaseModel):
             raise ValueError("New name is required for rename operation")
         return self
 
+
 class RequirementCategory(BaseModel):
     category: str
     requirements: list[str]
+
 
 class CreatePFSRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=10, description="PFS ID")

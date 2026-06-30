@@ -25,6 +25,7 @@ PFS_DEFAULT_TYPE = "Optical"
 PFS_DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
 PFS_DEFAULT_REQUIREMENTS = '[{"category": "general-metadata", "requirements": ["metadata/traceability-st"]}]'
 
+
 class Settings:
     CLIENT_URL: str = CLIENT_URL
     SERVER_URL: str = SERVER_URL
