@@ -334,8 +334,7 @@ class WorkspaceService:
                     "version": request_data.version or settings.PFS_DEFAULT_VERSION,
                 }
 
-            update_data = request_data.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
-            update_data["id"] = pfs_id
+            update_data = request_data.model_dump(include={"title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
 
             data.update(update_data)
             yaml_content = yaml_save(data, sort_keys=False)
