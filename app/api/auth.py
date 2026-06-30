@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPBearer
@@ -81,7 +81,7 @@ async def logout(current_user=Depends(get_current_user), db: Session = Depends(g
         user.access_token = None
         user.refresh_token = None
         user.token_expiry = None
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(UTC)
         db.commit()
 
         logger.info(f"User {user.username} logged out successfully, provider tokens cleared")
@@ -156,8 +156,8 @@ async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user
         REFRESH_THRESHOLD_MINUTES = 3 * PING_INTERVAL_MINUTES  # 15 minutes
 
         # Check if JWT is nearing expiry
-        jwt_exp = datetime.fromtimestamp(payload["exp"])
-        time_until_expiry = jwt_exp - datetime.utcnow()
+        jwt_exp = datetime.fromtimestamp(payload["exp"], UTC)
+        time_until_expiry = jwt_exp - datetime.now(UTC)
         should_refresh = time_until_expiry.total_seconds() < (REFRESH_THRESHOLD_MINUTES * 60)
 
         if should_refresh:
