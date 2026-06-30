@@ -328,7 +328,7 @@ class WorkspaceService:
                         "applies_to": request_data.applies_to,
                         "introduction": request_data.introduction,
                         "authors": [username],
-                        "requirements": [{"category": "general-metadata", "requirements": ["metadata/traceability-st"]}],
+                        "requirements": [r.model_dump() for r in request_data.requirements],
                     }
             else:
                 # Handle case when no base_pfs is provided
@@ -339,7 +339,7 @@ class WorkspaceService:
                     "applies_to": request_data.applies_to,
                     "introduction": request_data.introduction,
                     "authors": [username],
-                    "requirements": [{"category": "general-metadata", "requirements": ["metadata/traceability-st"]}],
+                    "requirements": [r.model_dump() for r in request_data.requirements],
                 }
 
             update_data = request_data.model_dump(include={"title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)

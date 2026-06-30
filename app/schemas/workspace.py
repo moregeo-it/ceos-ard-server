@@ -113,6 +113,9 @@ class FilePatchRequest(BaseModel):
             raise ValueError("New name is required for rename operation")
         return self
 
+class RequirementCategory(BaseModel):
+    category: str
+    requirements: list[str]
 
 class CreatePFSRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
@@ -122,6 +125,10 @@ class CreatePFSRequest(BaseModel):
     base: str | None = Field(None, description="Base PFS ID")
     type: str | None = Field(default=settings.PFS_DEFAULT_TYPE, description="PFS type")
     introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
+    requirements: list[RequirementCategory] | None = Field(
+        default_factory=lambda: [RequirementCategory(**r) for r in settings.PFS_DEFAULT_REQUIREMENTS],
+        description="PFS requirements, used when no base PFS is provided",
+    )
 
     class ConfigDict:
         use_enum_values = True
