@@ -6,8 +6,9 @@ from typing import Any
 import pygit2
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from strictyaml import YAMLValidationError, as_document
+from strictyaml import load as strict_yaml_load
 from yaml import safe_load as yaml_load
-from strictyaml import as_document, load as strict_yaml_load, YAMLValidationError
 
 from app.config import settings
 from app.models.user import User
@@ -352,9 +353,7 @@ class WorkspaceService:
 
                 logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
             except YAMLValidationError as ye:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}"
-                ) from ye
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}") from ye
 
             # Add changes to the repository
             try:
