@@ -118,6 +118,5 @@ class TokenRefreshService:
         if not user.token_expiry:
             # If no expiry is set, assume it might be expired
             return True
-
         # Add 5 minute buffer to refresh before actual expiry
-        return datetime.now(UTC) >= (user.token_expiry.replace(tzinfo=UTC) - timedelta(minutes=5))
+        return datetime.now(UTC) >= (user.token_expiry - timedelta(minutes=5))

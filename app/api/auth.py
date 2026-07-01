@@ -156,7 +156,7 @@ async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user
         REFRESH_THRESHOLD_MINUTES = 3 * PING_INTERVAL_MINUTES  # 15 minutes
 
         # Check if JWT is nearing expiry
-        jwt_exp = datetime.fromtimestamp(payload["exp"], UTC)
+        jwt_exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
         time_until_expiry = jwt_exp - datetime.now(UTC)
         should_refresh = time_until_expiry.total_seconds() < (REFRESH_THRESHOLD_MINUTES * 60)
 
