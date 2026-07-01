@@ -8,10 +8,9 @@ version = "0.1.0"
 dev = "uvicorn app.main:app --reload"
 
 [dependencies]
-fastapi = ">=0.136.3,<0.137"
-starlette = ">=1.0.1,<2" # we pin starlette to temporarily work around a security issue, see https://badhost.org/
+fastapi = ">=0.138.2,<0.139"
 uvicorn = ">=0.48.0,<0.49"
-authlib = ">=1.7.0,<2"
+authlib = ">=1.7.2,<2"
 httpx = ">=0.28.1,<0.29"
 python-dotenv = ">=1.1.1,<2"
 sqlalchemy = ">=2.0.41,<3"
@@ -24,7 +23,6 @@ strictyaml = ">=1.7.3,<2"
 PyYAML = ">=6.0,<7" # todo: replace usage with strictyaml once the CLI is more library friendly
 pygit2 = ">=1.17.0,<2"
 python-dateutil = ">=2.8.2,<3"
-joserfc = "*" # just needed because an upstream dependency doesn't install it properly.
 
 [feature.dev.dependencies]
 ruff = ">=0.15.8,<0.16.0"
