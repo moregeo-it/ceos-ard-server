@@ -14,22 +14,24 @@ TABLES_AND_COLUMNS = {
 def convert(raw):
     if raw is None:
         return None
-    naive_local = datetime.fromisoformat(raw)
-    aware_local = naive_local.replace(tzinfo=LOCAL_TZ, fold=0)
+    parsed = datetime.fromisoformat(raw)
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None).isoformat(sep=" ")
+    aware_local = parsed.replace(tzinfo=LOCAL_TZ, fold=0)
     return aware_local.astimezone(UTC).replace(tzinfo=None).isoformat(sep=" ")
 
 
 conn = sqlite3.connect("./ceos_ard_server.db")  # Make sure it's the correct name of the SQLite database
-cur = conn.cursor()
+read_cur = conn.cursor()
+write_cur = conn.cursor()
 
 for table, columns in TABLES_AND_COLUMNS.items():
-    rows = cur.execute(f"SELECT id, {', '.join(columns)} FROM {table}").fetchall()
-    for row in rows:
+    for row in read_cur.execute(f"SELECT id, {', '.join(columns)} FROM {table}"):
         row_id = row[0]
         updates = {col: convert(row[i]) for i, col in enumerate(columns, start=1) if row[i] is not None}
         if updates:
             set_clause = ", ".join(f"{c} = ?" for c in updates)
-            cur.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?", (*updates.values(), row_id))
+            write_cur.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?", (*updates.values(), row_id))
 
 conn.commit()
 conn.close()
