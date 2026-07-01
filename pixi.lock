@@ -22,9 +22,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/fastar-0.11.0-py314h0b738fb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/greenlet-3.4.0-py314h42812f9_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/h11-0.16.0-pyhcf101f3_1.conda
@@ -123,9 +123,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/fastar-0.11.0-py314h1f604f8_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/greenlet-3.4.0-py314h2883b87_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/h11-0.16.0-pyhcf101f3_1.conda
@@ -227,9 +227,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/fastar-0.11.0-py314hbcbdb20_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/greenlet-3.4.0-py314he609de1_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/h11-0.16.0-pyhcf101f3_1.conda
@@ -331,9 +331,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/fastar-0.11.0-py314h401f7ea_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/greenlet-3.4.0-py314hb98de8c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/h11-0.16.0-pyhcf101f3_1.conda
@@ -434,9 +434,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/fastar-0.11.0-py314h0b738fb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/filelock-3.29.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/greenlet-3.4.0-py314h42812f9_0.conda
@@ -554,9 +554,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/fastar-0.11.0-py314h1f604f8_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/filelock-3.29.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/greenlet-3.4.0-py314h2883b87_0.conda
@@ -677,9 +677,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/fastar-0.11.0-py314hbcbdb20_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/filelock-3.29.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/greenlet-3.4.0-py314he609de1_0.conda
@@ -799,9 +799,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/email-validator-2.3.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/email_validator-2.3.0-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/fastar-0.11.0-py314h401f7ea_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/filelock-3.29.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/greenlet-3.4.0-py314hb98de8c_0.conda
@@ -1329,11 +1329,11 @@ packages:
   - pkg:pypi/exceptiongroup?source=hash-mapping
   size: 21333
   timestamp: 1763918099466
-- conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.136.3-h5ddb490_0.conda
-  sha256: 5e3817e17e302f243c4b152d8202431731be0d8a629951e28348ec329d7a5957
-  md5: 966cdb82bffe2677a8bc33a458c05675
+- conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-0.138.2-h7fd9f67_0.conda
+  sha256: e2da7f74b881e2c7389416639dff959883f6b9019624760ae5f1420298e2f48d
+  md5: 89a7c41a4b68439f1aa3ae23d2a56ca9
   depends:
-  - fastapi-core ==0.136.3 pyhcf101f3_0
+  - fastapi-core ==0.138.2 pyhcf101f3_0
   - email_validator
   - fastapi-cli
   - fastar
@@ -1348,7 +1348,7 @@ packages:
   purls:
   - pkg:pypi/fastapi?source=compressed-mapping
   size: 4840
-  timestamp: 1779758767257
+  timestamp: 1782765988154
 - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
   sha256: cb60fc8c96dcd2a6335914d4d6d7d5f5549c9e1ff4533be28ba699e648babf37
   md5: 442ec6511754418c87a84bc1dc0c5384
@@ -1365,9 +1365,9 @@ packages:
   - pkg:pypi/fastapi-cli?source=hash-mapping
   size: 18920
   timestamp: 1771293215825
-- conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.3-pyhcf101f3_0.conda
-  sha256: b9a0a6e01610cbfc92caa121bc7e1d79989a0233b4c98a5a3ef9a41f4f08ecaf
-  md5: af1c276d3cf531c643f89ec242d91564
+- conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.138.2-pyhcf101f3_0.conda
+  sha256: 2b990c953430a1065ada849ac86333d1897639bf11bb3a287a35c0f9aeda4238
+  md5: 2af745190b661436043098b79130e391
   depends:
   - python >=3.10
   - annotated-doc >=0.0.2
@@ -1390,8 +1390,8 @@ packages:
   license_family: MIT
   purls:
   - pkg:pypi/fastapi?source=compressed-mapping
-  size: 95535
-  timestamp: 1779758767257
+  size: 103236
+  timestamp: 1782765988154
 - conda: https://conda.anaconda.org/conda-forge/linux-64/fastar-0.11.0-py314h0b738fb_0.conda
   sha256: 2d73e265b8b105a0b9f3eaf024c4564d39b3ac2a973c6c9a94ee3c0aa6777b85
   md5: 71e6f16831c3276a80373ba89f11a327
