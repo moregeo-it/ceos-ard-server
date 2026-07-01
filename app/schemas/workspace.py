@@ -125,12 +125,8 @@ class CreatePFSRequest(BaseModel):
     version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
     base: str | None = Field(None, description="Base PFS ID")
-    type: str | None = Field(default=settings.PFS_DEFAULT_TYPE, description="PFS type")
+    type: str | None = Field(None, description="PFS type")
     introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
-    requirements: list[RequirementCategory] | None = Field(
-        default_factory=lambda: [RequirementCategory(**r) for r in settings.PFS_DEFAULT_REQUIREMENTS],
-        description="PFS requirements, used when no base PFS is provided",
-    )
 
     class ConfigDict:
         use_enum_values = True

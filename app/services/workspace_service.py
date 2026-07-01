@@ -18,6 +18,7 @@ from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.utils.file_utils import create_folder
+from app.utils.pfs_utils import build_default_pfs_document
 from app.utils.git_utils import get_repo, get_repo_changes
 from app.utils.validation import validate_pathname
 
@@ -285,13 +286,13 @@ class WorkspaceService:
             logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get PFS types: {str(e)}") from e
 
-    async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, request_data: CreatePFSRequest, username: str):
+    async def create_workspace_pfs(self, db: Session, workspace_id: str, user: User, request_data: CreatePFSRequest):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
         if not request_data.id or not request_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id)
         repo = get_repo(workspace.abs_path)
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)
@@ -321,28 +322,18 @@ class WorkspaceService:
                         ) from ye
 
                 if not isinstance(data, dict):
-                    data = {
-                        "type": request_data.type,
-                        "title": request_data.title,
-                        "version": request_data.version,
-                        "applies_to": request_data.applies_to,
-                        "introduction": request_data.introduction,
-                        "authors": [username],
-                        "requirements": [r.model_dump() for r in request_data.requirements],
-                    }
+                    data = build_default_pfs_document(
+                        **request_data.model_dump(include={"title", "version", "applies_to", "type"}),
+                        author_username=user.username,
+                    )
             else:
                 # Handle case when no base_pfs is provided
-                data = {
-                    "type": request_data.type,
-                    "title": request_data.title,
-                    "version": request_data.version,
-                    "applies_to": request_data.applies_to,
-                    "introduction": request_data.introduction,
-                    "authors": [username],
-                    "requirements": [r.model_dump() for r in request_data.requirements],
-                }
+                data = build_default_pfs_document(
+                    **request_data.model_dump(include={"title", "version", "applies_to", "type"}),
+                    author_username=user.username,
+                )
 
-            update_data = request_data.model_dump(include={"title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
+            update_data = request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True)
 
             data.update(update_data)
 

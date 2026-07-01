@@ -23,7 +23,6 @@ SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000")
 PFS_DEFAULT_VERSION = "1.0.0-draft"
 PFS_DEFAULT_TYPE = "Optical"
 PFS_DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
-PFS_DEFAULT_REQUIREMENTS = '[{"category": "general-metadata", "requirements": ["metadata/traceability-st"]}]'
 
 
 class Settings:
@@ -69,9 +68,6 @@ class Settings:
     # The sections that should be added to the introduction by default for new PFS documents
     # Separate sections with a comma (,)
     PFS_DEFAULT_INTRODUCTION: list[str] = [item.strip() for item in os.getenv("PFS_DEFAULT_INTRODUCTION", PFS_DEFAULT_INTRODUCTION).split(",")]
-
-    # The requirements that should be added to the requirements by default for new PFS documents
-    PFS_DEFAULT_REQUIREMENTS: list[dict] = json.loads(os.getenv("PFS_DEFAULT_REQUIREMENTS", PFS_DEFAULT_REQUIREMENTS))
 
     # PFS default type for new PFS documents
     PFS_DEFAULT_TYPE: str = os.getenv("PFS_DEFAULT_TYPE", PFS_DEFAULT_TYPE)
