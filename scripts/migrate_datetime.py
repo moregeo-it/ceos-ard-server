@@ -10,6 +10,7 @@ TABLES_AND_COLUMNS = {
     "git_workspaces": ["created_at", "updated_at", "archived_at", "pull_request_status_last_updated_at"],
 }
 
+
 def convert(raw):
     if raw is None:
         return None
@@ -17,7 +18,8 @@ def convert(raw):
     aware_local = naive_local.replace(tzinfo=LOCAL_TZ, fold=0)
     return aware_local.astimezone(UTC).replace(tzinfo=None).isoformat(sep=" ")
 
-conn = sqlite3.connect("./ceos_ard_server.db") # Make sure it's the correct name of the SQLite database
+
+conn = sqlite3.connect("./ceos_ard_server.db")  # Make sure it's the correct name of the SQLite database
 cur = conn.cursor()
 
 for table, columns in TABLES_AND_COLUMNS.items():
