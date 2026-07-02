@@ -8,8 +8,7 @@ from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from strictyaml import YAMLValidationError, as_document
-from strictyaml import load as strict_yaml_load
-from yaml import safe_load as yaml_load
+from yaml import load as yaml_load
 
 from app.config import settings
 from app.models.user import User
@@ -20,7 +19,7 @@ from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo, get_repo_changes
-from app.utils.pfs_utils import build_default_pfs_document
+from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
 from app.utils.validation import validate_pathname
 
 logger = logging.getLogger(__name__)
@@ -266,7 +265,7 @@ class WorkspaceService:
                     continue
 
                 try:
-                    document = yaml_load(pfs_document_path.read_text(encoding="utf-8"))
+                    document = yaml_load(pfs_document_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
                     if not isinstance(document, dict):
                         logger.error(f"Invalid PFS document format in {pfs_document_path}")
                         continue
@@ -317,31 +316,32 @@ class WorkspaceService:
 
                 if documents_path.exists():
                     try:
-                        data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
+                        data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
+                        # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
+                        # This means we will loose e.g. comments in the document.yaml file.
+                        # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
+                        # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
                     except YAMLValidationError as ye:
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                         ) from ye
 
-                if not isinstance(data, dict):
-                    data = build_default_pfs_document(
-                        **request_data.model_dump(include={"title", "version", "applies_to", "type"}),
-                        author_username=user.username,
-                    )
-            else:
-                # Handle case when no base_pfs is provided
+                    data.update(request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True))
+
+            if not isinstance(data, dict):
                 data = build_default_pfs_document(
-                    **request_data.model_dump(include={"title", "version", "applies_to", "type"}),
+                    **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
                     author_username=user.username,
                 )
 
-            update_data = request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True)
-
-            data.update(update_data)
+            # Set default values if any is None
+            default_document = build_default_pfs_document()
+            for key, value in data.items():
+                if value is None and key in default_document:
+                    data[key] = default_document[key]
 
             try:
                 yaml_content = as_document(data, pfs_schema)
-
                 documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
 
                 logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
