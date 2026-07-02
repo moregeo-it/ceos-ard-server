@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import pygit2
+from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from strictyaml import YAMLValidationError, as_document
@@ -303,6 +304,7 @@ class WorkspaceService:
         folder_details = create_folder(workspace.abs_path, pfs_id, pfs_path)
 
         documents_path = pfs_path / "document.yaml"
+        pfs_schema = PFS_DOCUMENT(file=documents_path.name, base_path=workspace.abs_path)
 
         try:
             data = None
@@ -315,7 +317,7 @@ class WorkspaceService:
 
                 if documents_path.exists():
                     try:
-                        data = strict_yaml_load(documents_path.read_text(encoding="utf-8")).data
+                        data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
                     except YAMLValidationError as ye:
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
@@ -338,7 +340,7 @@ class WorkspaceService:
             data.update(update_data)
 
             try:
-                yaml_content = as_document(data)
+                yaml_content = as_document(data, pfs_schema)
 
                 documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
 
