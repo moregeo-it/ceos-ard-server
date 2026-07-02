@@ -4,11 +4,11 @@ from datetime import datetime
 from typing import Any
 
 import pygit2
+from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from yaml import YAMLError
-from yaml import safe_dump as yaml_save
-from yaml import safe_load as yaml_load
+from strictyaml import YAMLValidationError, as_document
+from yaml import load as yaml_load
 
 from app.config import settings
 from app.models.user import User
@@ -19,6 +19,7 @@ from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo, get_repo_changes
+from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
 from app.utils.validation import validate_pathname
 
 logger = logging.getLogger(__name__)
@@ -264,7 +265,7 @@ class WorkspaceService:
                     continue
 
                 try:
-                    document = yaml_load(pfs_document_path.read_text(encoding="utf-8"))
+                    document = yaml_load(pfs_document_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
                     if not isinstance(document, dict):
                         logger.error(f"Invalid PFS document format in {pfs_document_path}")
                         continue
@@ -285,13 +286,13 @@ class WorkspaceService:
             logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get PFS types: {str(e)}") from e
 
-    async def create_workspace_pfs(self, db: Session, workspace_id: str, user_id: str, request_data: CreatePFSRequest):
+    async def create_workspace_pfs(self, db: Session, workspace_id: str, user: User, request_data: CreatePFSRequest):
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
         if not request_data.id or not request_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id)
         repo = get_repo(workspace.abs_path)
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)
@@ -302,6 +303,7 @@ class WorkspaceService:
         folder_details = create_folder(workspace.abs_path, pfs_id, pfs_path)
 
         documents_path = pfs_path / "document.yaml"
+        pfs_schema = PFS_DOCUMENT(file=documents_path.name, base_path=workspace.abs_path)
 
         try:
             data = None
@@ -314,35 +316,37 @@ class WorkspaceService:
 
                 if documents_path.exists():
                     try:
-                        data = yaml_load(documents_path.read_text(encoding="utf-8"))
-                    except YAMLError as ye:
+                        data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
+                        # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
+                        # This means we will loose e.g. comments in the document.yaml file.
+                        # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
+                        # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
+                    except YAMLValidationError as ye:
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                         ) from ye
 
-                if not isinstance(data, dict):
-                    data = {
-                        "id": pfs_id,
-                        "title": request_data.title,
-                        "version": request_data.version or settings.PFS_DEFAULT_VERSION,
-                    }
-            else:
-                # Handle case when no base_pfs is provided
-                data = {
-                    "id": pfs_id,
-                    "title": request_data.title,
-                    "version": request_data.version or settings.PFS_DEFAULT_VERSION,
-                }
+                    data.update(request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True))
 
-            update_data = request_data.model_dump(include={"id", "title", "version", "applies_to", "introduction", "type"}, exclude_unset=True)
-            update_data["id"] = pfs_id
+            if not isinstance(data, dict):
+                data = build_default_pfs_document(
+                    **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
+                    author_username=user.username,
+                )
 
-            data.update(update_data)
-            yaml_content = yaml_save(data, sort_keys=False)
+            # Set default values if any is None
+            default_document = build_default_pfs_document()
+            for key, value in data.items():
+                if value is None and key in default_document:
+                    data[key] = default_document[key]
 
-            documents_path.write_text(yaml_content, encoding="utf-8")
+            try:
+                yaml_content = as_document(data, pfs_schema)
+                documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
 
-            logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
+                logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
+            except YAMLValidationError as ye:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}") from ye
 
             # Add changes to the repository
             try:

@@ -114,6 +114,11 @@ class FilePatchRequest(BaseModel):
         return self
 
 
+class RequirementCategory(BaseModel):
+    category: str
+    requirements: list[str]
+
+
 class CreatePFSRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
