@@ -438,7 +438,7 @@ Type=simple
 User=server
 WorkingDirectory=/home/server/ceos-ard-server
 Environment="PATH=/home/server/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/server/.pixi/bin/pixi run uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/home/server/.pixi/bin/pixi run uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=always
 RestartSec=3
 StandardOutput=journal
