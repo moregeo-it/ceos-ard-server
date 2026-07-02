@@ -402,7 +402,7 @@ SECRET_KEY=your-production-secret-key
 DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
 ```
 
-### Running production Server Persistently
+### Running the Production Server Persistently
 
 The application runs via `uvicorn`, managed through `pixi`.
 
