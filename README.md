@@ -402,6 +402,167 @@ SECRET_KEY=your-production-secret-key
 DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
 ```
 
+### Running production Server Persistently
+
+The application runs via `uvicorn`, managed through `pixi`.
+
+For deployment, use **systemd**. It will:
+
+- Keep the server running after you log out or close your terminal
+- Automatically restart the server if it crashes
+- Start the server automatically on system boot
+- Centralize logs via `journalctl`
+
+#### 1. Prerequisites
+
+- `pixi` must be installed for the user the service will run as (not root). This is typically a dedicated service account, e.g. `server`.
+- The project must already be checked out on the server, e.g. at `/home/server/ceos-ard-server`.
+- Run `pixi install` once inside the project directory to make sure the environment resolves correctly before relying on the service to do it:
+
+  ```bash
+  cd /home/server/ceos-ard-server
+  pixi install
+  ```
+
+#### 2. Create the service file
+
+Create `/etc/systemd/system/ceos-ard-server.service`:
+
+```ini
+[Unit]
+Description=CEOS-ARD FastAPI Server
+After=network.target
+
+[Service]
+Type=simple
+User=server
+WorkingDirectory=/home/server/ceos-ard-server
+Environment="PATH=/home/server/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/server/.pixi/bin/pixi run uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ceos-ard-server
+
+[Install]
+WantedBy=multi-user.target
+```
+
+If your deployment differs from the defaults above, update:
+
+| Field | Meaning | Adjust if... |
+|-------|---------|--------------|
+| `User` | System user the process runs as | You use a different service account than `server` |
+| `WorkingDirectory` | Path to the checked-out project | Your install path differs |
+| `Environment="PATH=..."` | Must include the pixi binary path for `User` | pixi is installed elsewhere, or for a different user |
+| `ExecStart` | Full path to `pixi` + the run command | Same as above, or if host/port should differ |
+
+#### 3. Enable and start the service
+
+```bash
+sudo systemctl daemon-reload            # re-read unit files after creating/editing one
+sudo systemctl enable ceos-ard-server   # start automatically on boot
+sudo systemctl start ceos-ard-server    # start it now
+```
+
+#### 4. Managing the running server
+
+| Action | Command |
+|--------|---------|
+| Check status | `sudo systemctl status ceos-ard-server` |
+| Stop the server | `sudo systemctl stop ceos-ard-server` |
+| Restart the server | `sudo systemctl restart ceos-ard-server` |
+| Disable auto-start on boot | `sudo systemctl disable ceos-ard-server` |
+| Tail logs live | `journalctl -u ceos-ard-server -f` |
+| View last 100 log lines | `journalctl -u ceos-ard-server -n 100` |
+
+#### 5. Updating the server with new code
+
+To deploy new changes to an already-running server:
+
+```bash
+cd /home/server/ceos-ard-server
+git pull
+pixi install          # only strictly needed if pixi.toml/pixi.lock changed.
+sudo systemctl restart ceos-ard-server
+```
+
+`systemctl restart` stops the old process and starts a new one from the updated code in `WorkingDirectory` — no manual kill needed.
+
+After restarting, confirm it came back up cleanly:
+
+```bash
+sudo systemctl status ceos-ard-server
+journalctl -u ceos-ard-server -n 30
+```
+
+### Configuring a Reverse Proxy (Nginx)
+
+The systemd service binds `uvicorn` to `127.0.0.1:8000` — it's not reachable from outside the server. A reverse proxy sits in front of it to handle incoming traffic on ports 80/443, terminate TLS, and forward requests internally.
+
+#### 1. Install Nginx
+
+```bash
+sudo apt update
+sudo apt install nginx
+```
+
+#### 2. Create the site config
+
+Create `/etc/nginx/sites-available/ceos-ard-server`:
+
+```nginx
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Replace `api.yourdomain.com` with your actual domain — it should match `SERVER_URL` in your `.env`.
+
+#### 3. Enable the site
+
+```bash
+sudo ln -s /etc/nginx/sites-available/ceos-ard-server /etc/nginx/sites-enabled/
+sudo nginx -t                  # test the config before reloading
+sudo systemctl reload nginx
+```
+
+#### 4. Add HTTPS with Let's Encrypt
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d api.yourdomain.com
+```
+
+Certbot will edit the Nginx config to redirect HTTP → HTTPS and set up automatic certificate renewal. Verify renewal works with:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+#### 5. Managing Nginx
+
+| Action | Command |
+|--------|---------|
+| Test config for syntax errors | `sudo nginx -t` |
+| Reload config (no downtime) | `sudo systemctl reload nginx` |
+| Restart Nginx | `sudo systemctl restart nginx` |
+| View error logs | `sudo tail -f /var/log/nginx/error.log` |
+| View access logs | `sudo tail -f /var/log/nginx/access.log` |
+
+**Note:** After changing `SERVER_URL`/`CLIENT_URL` in `.env` or the OAuth callback URLs in your GitHub/Google OAuth app settings, restart the server (`sudo systemctl restart ceos-ard-server`) — Nginx doesn't need a restart for `.env` changes, only for changes to its own config file.
+
 ### Docker Deployment (Example)
 
 ```dockerfile
