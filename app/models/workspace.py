@@ -44,6 +44,8 @@ class GitWorkspace(Base):
     archived_at = Column(UTCDateTime, nullable=True)
 
     user = relationship("User", back_populates="workspaces")
+    shares = relationship("WorkspaceShare", back_populates="workspace", cascade="all, delete-orphan")
+    share_links = relationship("WorkspaceShareLink", back_populates="workspace", cascade="all, delete-orphan")
 
     @property
     def abs_path(self) -> Path:
