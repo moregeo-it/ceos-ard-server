@@ -33,6 +33,8 @@ tags:
     description: Preview generation and management
   - name: PFS
     description: Product Family Specification management
+  - name: Sharing
+    description: Workspace sharing, collaborator management, and invitations
 
 paths:
   /pfs:
@@ -1376,6 +1378,321 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/shares:
+    get:
+      summary: List workspace shares
+      description: |
+        Retrieves all collaborators and pending invitations for a workspace,
+        including their mode and status. Owner only.
+      operationId: listWorkspaceShares
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: List of workspace shares
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shares:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceShare'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Share a workspace with a collaborator
+      description: |
+        Invites a person to collaborate on a workspace, identified by
+        GitHub username or email. Owner only.
+
+        - If the invitee is an existing CEOS-ARD user, the invite is still
+          delivered via a signed link (`{clientUrl}/invites/{token}`); they
+          simply won't need to onboard when they accept.
+        - If the invitee has no CEOS-ARD account yet, they must sign in with
+          GitHub (onboarding) before the invite link can be accepted.
+        - Re-inviting an identity that already has a pending or accepted
+          share for a workspace updates that existing share (rotating the
+          invite token if still pending) rather than creating a duplicate.
+      operationId: createWorkspaceShare
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareCreateRequest'
+      responses:
+        '201':
+          description: Invitation created and sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShare'
+        '400':
+          description: |
+            Invalid request data.
+
+            Possible errors:
+            - Neither email nor githubUsername provided
+            - Both email and githubUsername provided
+            - Invalid mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can share it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: This identity already has a pending or accepted share for the workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/shares/{shareId}:
+    patch:
+      summary: Change a collaborator's access mode
+      description: Updates the mode (readonly/comment/edit) of an existing share. Owner only.
+      operationId: updateWorkspaceShare
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareUpdateRequest'
+      responses:
+        '200':
+          description: Share updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShare'
+        '404':
+          description: Workspace or share not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Revoke a collaborator's access
+      description: |
+        Revokes an accepted collaborator's access, or cancels a pending
+        invitation. Takes effect immediately on the collaborator's next
+        request. Owner only.
+      operationId: revokeWorkspaceShare
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareId'
+      responses:
+        '204':
+          description: Share revoked successfully
+        '404':
+          description: Workspace or share not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /invites/{token}:
+    get:
+      summary: Preview an invitation
+      description: |
+        Resolves an invite token to a preview of the workspace and invite
+        details, without requiring authentication. Used by the client to
+        render the invite landing page and decide whether to prompt login
+        or GitHub onboarding before the invite can be accepted.
+
+        Returns no sensitive data (no file contents, no other collaborators,
+        no owner contact details beyond display name).
+      operationId: previewInvite
+      tags:
+        - Sharing
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/InviteToken'
+      responses:
+        '200':
+          description: Invitation preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitePreview'
+        '404':
+          description: Invalid, expired, or revoked invitation token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /invites/{token}/accept:
+    post:
+      summary: Accept an invitation
+      description: |
+        Accepts a pending invitation for the currently authenticated user.
+
+        The invited identity (GitHub username, or email if no username was
+        specified) must match the authenticated user; otherwise the invite
+        cannot be accepted from this account. Login (including first-time
+        GitHub onboarding) must happen before calling this endpoint - see
+        `GET /invites/{token}` for the pre-authentication preview flow.
+      operationId: acceptInvite
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/InviteToken'
+      responses:
+        '200':
+          description: Invitation accepted; share is now active
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - share
+                  - workspace
+                properties:
+                  share:
+                    $ref: '#/components/schemas/WorkspaceShare'
+                  workspace:
+                    $ref: '#/components/schemas/Workspace'
+        '401':
+          description: Unauthorized - the user must be logged in to accept an invitation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: This invitation was sent to a different identity than the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Invalid, expired, or revoked invitation token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Invitation has already been accepted or declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /invites/{token}/decline:
+    post:
+      summary: Decline an invitation
+      description: Declines a pending invitation for the currently authenticated user.
+      operationId: declineInvite
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/InviteToken'
+      responses:
+        '200':
+          description: Invitation declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShare'
+        '401':
+          description: Unauthorized - the user must be logged in to decline an invitation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: This invitation was sent to a different identity than the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Invalid, expired, or revoked invitation token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Invitation has already been accepted or declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1426,6 +1743,25 @@ components:
         enum:
           - pdf
           - docx
+
+    ShareId:
+      name: shareId
+      in: path
+      required: true
+      description: Unique identifier of the workspace share
+      schema:
+        type: string
+        format: uuid
+
+    InviteToken:
+      name: token
+      in: path
+      required: true
+      description: |
+        Signed, time-limited invitation token from the invite link
+        (`{clientUrl}/invites/{token}`). Not a session/JWT access token.
+      schema:
+        type: string
 
   schemas:
     Error:
@@ -1649,6 +1985,20 @@ components:
         owner:
           type: string
           description: The user ID of the workspace owner
+        role:
+          type: string
+          enum:
+            - owner
+            - edit
+            - comment
+            - readonly
+          readOnly: true
+          description: |
+            The current authenticated user's effective role on this workspace.
+
+            Computed per-request; not stored. Always "owner" for the workspace
+            creator. For collaborators, reflects their accepted share mode,
+            clamped to "readonly" while the workspace is archived.
 
     FileItem:
       type: object
@@ -1721,3 +2071,169 @@ components:
       description: PFS type identifier
       pattern: ^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$
       example: NRB
+
+    ShareMode:
+      type: string
+      enum:
+        - readonly
+        - comment
+        - edit
+      description: |
+        Access level granted to a collaborator.
+
+        - "readonly": Can view the workspace and its files, cannot make
+          changes. Equivalent to viewing an archived workspace.
+        - "comment": Same as "readonly" today; reserved for the upcoming
+          commenting feature. Enforced now so no client changes are needed
+          once commenting ships.
+        - "edit": Can read and write files, create PFS documents, revert
+          changes, and commit within the workspace. Cannot propose (open/
+          update a Pull Request), rename/archive/delete the workspace, or
+          manage other shares — those remain owner-only, since only the
+          owner's GitHub credentials have push access to the workspace's fork.
+
+    ShareStatus:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - declined
+        - revoked
+        - expired
+      description: |
+        Lifecycle status of a share/invitation.
+
+        - "pending": Invitation created and sent, not yet actioned.
+        - "accepted": Collaborator has accepted and has active access.
+        - "declined": Collaborator explicitly declined the invitation.
+        - "revoked": Owner removed access (previously accepted or pending).
+        - "expired": Invitation token expired before being actioned.
+
+    WorkspaceShare:
+      type: object
+      description: A single collaborator or pending invitation on a workspace.
+      required:
+        - id
+        - workspaceId
+        - mode
+        - status
+        - invitedBy
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier of the share
+        workspaceId:
+          type: string
+          format: uuid
+          description: ID of the workspace this share belongs to
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        status:
+          $ref: '#/components/schemas/ShareStatus'
+        invitedEmail:
+          type:
+            - string
+            - "null"
+          format: email
+          description: Email address the invite was sent to, if provided
+          default: null
+        invitedGithubUsername:
+          type:
+            - string
+            - "null"
+          description: GitHub username the invite targets, if provided
+          default: null
+        invitedUserId:
+          type:
+            - string
+            - "null"
+          description: |
+            User ID of the invited collaborator, once resolved.
+
+            Null until the invite is accepted by a matching, authenticated
+            CEOS-ARD user (existing or newly onboarded via GitHub OAuth).
+          default: null
+        invitedBy:
+          type: string
+          description: User ID of the workspace owner who created the share
+        createdAt:
+          type: string
+          format: date-time
+          description: When the share/invitation was created
+        acceptedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the invitation was accepted
+          default: null
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the pending invitation token expires (7 days from creation/resend)
+          default: null
+
+    ShareCreateRequest:
+      type: object
+      description: |
+        Invite a collaborator to a workspace. Exactly one of `email` or
+        `githubUsername` must be provided to identify the invitee.
+      required:
+        - mode
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email address to send the invite to
+        githubUsername:
+          type: string
+          description: GitHub username to target the invite to
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+
+    ShareUpdateRequest:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+
+    InvitePreview:
+      type: object
+      description: |
+        Public, unauthenticated preview of an invitation. Contains no
+        sensitive workspace data — used by the client to render the
+        invite landing page and decide whether to prompt login or
+        onboarding before accepting.
+      required:
+        - workspaceTitle
+        - ownerDisplayName
+        - mode
+        - status
+      properties:
+        workspaceTitle:
+          type: string
+          description: Title of the shared workspace
+        ownerDisplayName:
+          type: string
+          description: Display name of the workspace owner
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        status:
+          $ref: '#/components/schemas/ShareStatus'
+        invitedEmail:
+          type:
+            - string
+            - "null"
+          format: email
+          default: null
+        invitedGithubUsername:
+          type:
+            - string
+            - "null"
+          default: null
