@@ -1380,10 +1380,11 @@ paths:
 
   /workspaces/{workspaceId}/shares:
     get:
-      summary: List workspace shares
+      summary: List all shares for a workspace
       description: |
-        Retrieves all collaborators and pending invitations for a workspace,
-        including their mode and status. Owner only.
+        Retrieves everyone with access to the workspace - both direct grants
+        and users who joined via a share link - along with their mode and
+        status. Owner only.
       operationId: listWorkspaceShares
       tags:
         - Sharing
@@ -1421,20 +1422,21 @@ paths:
                 $ref: '#/components/schemas/Error'
 
     post:
-      summary: Share a workspace with a collaborator
+      summary: Share a workspace with specific people
       description: |
-        Invites a person to collaborate on a workspace, identified by
-        GitHub username or email. Owner only.
+        Grants one or more GitHub users access to the workspace at the given
+        mode. Owner only.
 
-        - If the invitee is an existing CEOS-ARD user, the invite is still
-          delivered via a signed link (`{clientUrl}/invites/{token}`); they
-          simply won't need to onboard when they accept.
-        - If the invitee has no CEOS-ARD account yet, they must sign in with
-          GitHub (onboarding) before the invite link can be accepted.
-        - Re-inviting an identity that already has a pending or accepted
-          share for a workspace updates that existing share (rotating the
-          invite token if still pending) rather than creating a duplicate.
-      operationId: createWorkspaceShare
+        - If a given username already belongs to an onboarded CEOS-ARD user,
+          that person has access right away; it appears next time they view
+          their workspaces ("Shared with me").
+        - If a given username hasn't onboarded yet, the grant is recorded as
+          `pending` and activates automatically the moment that person signs
+          in with GitHub for the first time.
+        - Re-sharing to a username that already has a share on this
+          workspace updates the existing share's mode (and reactivates it if
+          it was previously `revoked`) rather than creating a duplicate.
+      operationId: createWorkspaceShares
       tags:
         - Sharing
       parameters:
@@ -1447,19 +1449,24 @@ paths:
               $ref: '#/components/schemas/ShareCreateRequest'
       responses:
         '201':
-          description: Invitation created and sent
+          description: Shares created or updated successfully.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkspaceShare'
+                type: object
+                properties:
+                  shares:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceShare'
         '400':
           description: |
             Invalid request data.
 
             Possible errors:
-            - Neither email nor githubUsername provided
-            - Both email and githubUsername provided
+            - `githubUsernames` empty or missing
             - Invalid mode
+            - Owner's own username included in `githubUsernames`
           content:
             application/json:
               schema:
@@ -1478,12 +1485,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '403':
           description: Forbidden - only the workspace owner can share it
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: This identity already has a pending or accepted share for the workspace
           content:
             application/json:
               schema:
@@ -1534,9 +1535,10 @@ paths:
     delete:
       summary: Revoke a collaborator's access
       description: |
-        Revokes an accepted collaborator's access, or cancels a pending
-        invitation. Takes effect immediately on the collaborator's next
-        request. Owner only.
+        Revokes a person's access to the workspace, direct share or share link.
+        Takes effect immediately on their next request. Revocation is sticky:
+        if they still hold a share link for this workspace, re-opening it will
+        not restore access - the owner must explicitly re-share. Owner only.
       operationId: revokeWorkspaceShare
       tags:
         - Sharing
@@ -1565,56 +1567,201 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /invites/{token}:
+  /workspaces/{workspaceId}/share-links:
     get:
-      summary: Preview an invitation
-      description: |
-        Resolves an invite token to a preview of the workspace and invite
-        details, without requiring authentication. Used by the client to
-        render the invite landing page and decide whether to prompt login
-        or GitHub onboarding before the invite can be accepted.
-
-        Returns no sensitive data (no file contents, no other collaborators,
-        no owner contact details beyond display name).
-      operationId: previewInvite
+      summary: List share links for a workspace
+      description: Retrieves all share links (active and inactive) for a workspace. Owner only.
+      operationId: listWorkspaceShareLinks
       tags:
         - Sharing
-      security: []
       parameters:
-        - $ref: '#/components/parameters/InviteToken'
+        - $ref: '#/components/parameters/WorkspaceId'
       responses:
         '200':
-          description: Invitation preview
+          description: List of share links
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InvitePreview'
+                type: object
+                properties:
+                  shareLinks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceShareLink'
         '404':
-          description: Invalid, expired, or revoked invitation token
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view share links
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /invites/{token}/accept:
     post:
-      summary: Accept an invitation
+      summary: Create a share link
       description: |
-        Accepts a pending invitation for the currently authenticated user.
+        Generates a signed, mode-bound share link for the workspace. Anyone
+        who opens the link is granted access with this mode once they're
+        authenticated.
 
-        The invited identity (GitHub username, or email if no username was
-        specified) must match the authenticated user; otherwise the invite
-        cannot be accepted from this account. Login (including first-time
-        GitHub onboarding) must happen before calling this endpoint - see
-        `GET /invites/{token}` for the pre-authentication preview flow.
-      operationId: acceptInvite
+        The link's mode and active state are looked up on every use, so the
+        owner can change the mode without needing to reissue a new
+        URL. Deactivating a link is reversible - the same URL works again
+        once `isActive` is set back to `true`. Deleting a link is permanent,
+        so restoring access means creating a brand-new link.
+        Changing an active link's mode does not retroactively change the mode
+        already granted to people who joined earlier through it.
+      operationId: createWorkspaceShareLink
       tags:
         - Sharing
       parameters:
-        - $ref: '#/components/parameters/InviteToken'
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareLinkCreateRequest'
+      responses:
+        '201':
+          description: Share link created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShareLink'
+        '400':
+          description: Invalid mode or expiresAt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can create share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/share-links/{linkId}:
+    patch:
+      summary: Update a share link
+      description: |
+        Changes a share link's mode, active state, and/or expiry. Owner only.
+        Setting `isActive: false` immediately stops the link from granting
+        new access (existing collaborators who already joined through it are
+        unaffected - revoke them individually via
+        `DELETE /workspaces/{workspaceId}/shares/{shareId}` if needed).
+      operationId: updateWorkspaceShareLink
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareLinkId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareLinkUpdateRequest'
       responses:
         '200':
-          description: Invitation accepted; share is now active
+          description: Share link updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShareLink'
+        '404':
+          description: Workspace or share link not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete a share link
+      description: |
+        Permanently deletes a share link. The URL stops working immediately
+        and not reversible - sharing again means creating a new link,
+        which produces a new URL. Owner only.
+      operationId: deleteWorkspaceShareLink
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareLinkId'
+      responses:
+        '204':
+          description: Share link deleted successfully
+        '404':
+          description: Workspace or share link not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /share-links/{token}/redeem:
+    post:
+      summary: Redeem a share link
+      description: |
+        Grants the currently authenticated user access to the shared
+        workspace with the appropriate mode.
+      operationId: redeemShareLink
+      tags:
+        - Sharing
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareLinkToken'
+      responses:
+        '200':
+          description: Access granted (or already held); returns the resulting share and workspace
           content:
             application/json:
               schema:
@@ -1624,70 +1771,33 @@ paths:
                   - workspace
                 properties:
                   share:
-                    $ref: '#/components/schemas/WorkspaceShare'
+                    type:
+                      - object
+                      - "null"
+                    allOf:
+                      - $ref: '#/components/schemas/WorkspaceShare'
+                    description: |
+                      Null when the requester is the workspace owner (they
+                      already have full access; no share row is created).
                   workspace:
                     $ref: '#/components/schemas/Workspace'
         '401':
-          description: Unauthorized - the user must be logged in to accept an invitation
+          description: |
+            Not authenticated yet. Body is a share link preview, not a
+            generic error - use it to render context before redirecting to
+            login/onboarding, then call this same endpoint again afterward.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ShareLinkPreview'
         '403':
-          description: This invitation was sent to a different identity than the authenticated user
+          description: This user's access to the workspace was previously revoked by the owner
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Invalid, expired, or revoked invitation token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Invitation has already been accepted or declined
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /invites/{token}/decline:
-    post:
-      summary: Decline an invitation
-      description: Declines a pending invitation for the currently authenticated user.
-      operationId: declineInvite
-      tags:
-        - Sharing
-      parameters:
-        - $ref: '#/components/parameters/InviteToken'
-      responses:
-        '200':
-          description: Invitation declined
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceShare'
-        '401':
-          description: Unauthorized - the user must be logged in to decline an invitation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: This invitation was sent to a different identity than the authenticated user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Invalid, expired, or revoked invitation token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Invitation has already been accepted or declined
+          description: Invalid, inactive, expired, or deleted share link
           content:
             application/json:
               schema:
@@ -1753,13 +1863,24 @@ components:
         type: string
         format: uuid
 
-    InviteToken:
+    ShareLinkId:
+      name: linkId
+      in: path
+      required: true
+      description: Unique identifier of the share link
+      schema:
+        type: string
+        format: uuid
+
+    ShareLinkToken:
       name: token
       in: path
       required: true
       description: |
-        Signed, time-limited invitation token from the invite link
-        (`{clientUrl}/invites/{token}`). Not a session/JWT access token.
+        Signed, mode-bound share link token from `{clientUrl}/share/{token}`.
+        Invitee-agnostic - not tied to any specific identity, and not a
+        session/JWT access token. Grants no access by itself; only
+        `POST /share-links/{token}/redeem` (as an authenticated user) does.
       schema:
         type: string
 
@@ -1985,7 +2106,7 @@ components:
         owner:
           type: string
           description: The user ID of the workspace owner
-        role:
+        viewerRole:
           type: string
           enum:
             - owner
@@ -2097,26 +2218,32 @@ components:
       enum:
         - pending
         - accepted
-        - declined
         - revoked
-        - expired
       description: |
-        Lifecycle status of a share/invitation.
+        Lifecycle status of a share.
 
-        - "pending": Invitation created and sent, not yet actioned.
-        - "accepted": Collaborator has accepted and has active access.
-        - "declined": Collaborator explicitly declined the invitation.
-        - "revoked": Owner removed access (previously accepted or pending).
-        - "expired": Invitation token expired before being actioned.
+        - "pending": Granted by GitHub username to someone who hasn't
+          onboarded to CEOS-ARD yet. Resolves to "accepted" automatically
+          the moment they first sign in with GitHub.
+        - "accepted": Active access, either granted immediately (existing
+          user, or via a redeemed share link) or auto-resolved from
+          "pending".
+        - "revoked": Owner removed access. Sticky: reusing a share link the
+          person still holds does not restore it.
 
     WorkspaceShare:
       type: object
-      description: A single collaborator or pending invitation on a workspace.
+      description: |
+        A single collaborator's access grant on a workspace, however it was
+        created - a direct share by username, or a redeemed share link (see
+        `shareLinkId`). There is no separate "invitation" object: this row
+        *is* the grant, from the moment it's created.
       required:
         - id
         - workspaceId
         - mode
         - status
+        - invitedGithubUsername
         - invitedBy
         - createdAt
       properties:
@@ -2128,70 +2255,72 @@ components:
           type: string
           format: uuid
           description: ID of the workspace this share belongs to
+        shareLinkId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: |
+            ID of the share link this grant was created through, if any.
+            Null for shares created directly by username. Provenance only -
+            does not affect permission evaluation.
+          default: null
         mode:
           $ref: '#/components/schemas/ShareMode'
         status:
           $ref: '#/components/schemas/ShareStatus'
-        invitedEmail:
-          type:
-            - string
-            - "null"
-          format: email
-          description: Email address the invite was sent to, if provided
-          default: null
         invitedGithubUsername:
-          type:
-            - string
-            - "null"
-          description: GitHub username the invite targets, if provided
-          default: null
+          type: string
+          description: GitHub username this share was granted to
         invitedUserId:
           type:
             - string
             - "null"
           description: |
-            User ID of the invited collaborator, once resolved.
+            User ID of the collaborator, once resolved.
 
-            Null until the invite is accepted by a matching, authenticated
-            CEOS-ARD user (existing or newly onboarded via GitHub OAuth).
+            Set immediately for shares granted to an existing CEOS-ARD user,
+            or on redeeming a share link. Null while `status` is "pending"
+            (username not yet onboarded).
           default: null
         invitedBy:
           type: string
-          description: User ID of the workspace owner who created the share
+          description: User ID of the workspace owner who granted this share
         createdAt:
           type: string
           format: date-time
-          description: When the share/invitation was created
+          description: When the share was created
         acceptedAt:
           type:
             - string
             - "null"
           format: date-time
-          description: When the invitation was accepted
+          description: When the share became active (immediately, or upon the invitee's first login if it started "pending")
           default: null
-        expiresAt:
+        revokedAt:
           type:
             - string
             - "null"
           format: date-time
-          description: When the pending invitation token expires (7 days from creation/resend)
+          description: When the owner revoked this share, if applicable
           default: null
 
     ShareCreateRequest:
       type: object
       description: |
-        Invite a collaborator to a workspace. Exactly one of `email` or
-        `githubUsername` must be provided to identify the invitee.
+        Grant one or more GitHub users access to a workspace. Access takes
+        effect immediately (or automatically upon the invitee's next login,
+        if they haven't onboarded yet).
       required:
+        - githubUsernames
         - mode
       properties:
-        email:
-          type: string
-          format: email
-          description: Email address to send the invite to
-        githubUsername:
-          type: string
-          description: GitHub username to target the invite to
+        githubUsernames:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: GitHub usernames to grant access to
         mode:
           $ref: '#/components/schemas/ShareMode'
 
@@ -2203,18 +2332,99 @@ components:
         mode:
           $ref: '#/components/schemas/ShareMode'
 
-    InvitePreview:
+    WorkspaceShareLink:
       type: object
       description: |
-        Public, unauthenticated preview of an invitation. Contains no
-        sensitive workspace data — used by the client to render the
-        invite landing page and decide whether to prompt login or
-        onboarding before accepting.
+        A shareable, mode-bound, invitee-agnostic link for a workspace.
+        Mode and active state are resolved live from this record on every
+        use, not baked into the token, so they can be changed without
+        reissuing the link.
+      required:
+        - id
+        - workspaceId
+        - mode
+        - isActive
+        - createdBy
+        - createdAt
+        - url
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier of the share link
+        workspaceId:
+          type: string
+          format: uuid
+          description: ID of the workspace this link grants access to
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        isActive:
+          type: boolean
+          description: Whether this link currently grants access. Owner-toggleable.
+        url:
+          type: string
+          format: uri
+          description: The full shareable URL (`{clientUrl}/share/{token}`)
+        createdBy:
+          type: string
+          description: User ID of the workspace owner who created the link
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Optional expiry. Null means the link does not expire.
+          default: null
+        revokedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          default: null
+
+    ShareLinkCreateRequest:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Optional expiry. Omit or set null for a link that does not expire.
+
+    ShareLinkUpdateRequest:
+      type: object
+      description: All fields optional; only supplied fields are changed.
+      properties:
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        isActive:
+          type: boolean
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+
+    ShareLinkPreview:
+      type: object
+      description: |
+        Public, unauthenticated preview of a share link. Contains no
+        sensitive workspace data - used by the client to render the share
+        landing page and decide whether to prompt login or onboarding
+        before the link can be redeemed.
       required:
         - workspaceTitle
         - ownerDisplayName
         - mode
-        - status
+        - isActive
       properties:
         workspaceTitle:
           type: string
@@ -2224,16 +2434,6 @@ components:
           description: Display name of the workspace owner
         mode:
           $ref: '#/components/schemas/ShareMode'
-        status:
-          $ref: '#/components/schemas/ShareStatus'
-        invitedEmail:
-          type:
-            - string
-            - "null"
-          format: email
-          default: null
-        invitedGithubUsername:
-          type:
-            - string
-            - "null"
-          default: null
+        isActive:
+          type: boolean
+          description: Whether this link currently grants access
