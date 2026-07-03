@@ -331,7 +331,7 @@ class WorkspaceService:
             if not isinstance(data, dict):
                 data = build_default_pfs_document(
                     **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
-                    author_username=user.username,
+                    author_username=user.full_name or user.username,
                 )
 
             # Set default values if any is None
