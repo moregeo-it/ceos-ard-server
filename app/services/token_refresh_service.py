@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -58,9 +58,9 @@ class TokenRefreshService:
             user.access_token = access_token  # Store new provider access token
             user.refresh_token = refresh_token
             if expires_in:
-                user.token_expiry = datetime.now() + timedelta(seconds=expires_in)
+                user.token_expiry = datetime.now(UTC) + timedelta(seconds=expires_in)
 
-            user.updated_at = datetime.now()
+            user.updated_at = datetime.now(UTC)
             db.commit()
 
             logger.info(f"Successfully refreshed provider token for Google user {user.username}")
@@ -118,6 +118,5 @@ class TokenRefreshService:
         if not user.token_expiry:
             # If no expiry is set, assume it might be expired
             return True
-
         # Add 5 minute buffer to refresh before actual expiry
-        return datetime.now() >= (user.token_expiry - timedelta(minutes=5))
+        return datetime.now(UTC) >= (user.token_expiry - timedelta(minutes=5))

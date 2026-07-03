@@ -1,11 +1,13 @@
 import uuid
+from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Column, String
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
+from app.db.types import UTCDateTime
 
 
 class IdentityProvider(str, Enum):
@@ -24,9 +26,9 @@ class User(Base):
     identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
     access_token = Column(String, nullable=True)  # Provider's access token (stored server-side)
     refresh_token = Column(String, nullable=True)  # Provider's refresh token (stored server-side)
-    token_expiry = Column(DateTime, nullable=True)  # Access token expiry
-    created_at = Column(DateTime, nullable=False)
-    updated_at = Column(DateTime, nullable=False)
+    token_expiry = Column(UTCDateTime, nullable=True)  # Access token expiry
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
 
     workspaces = relationship("GitWorkspace", back_populates="user")
 

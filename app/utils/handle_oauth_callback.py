@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -35,6 +35,7 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
             )
 
         # Create or update user in database (stores provider tokens)
+        # Note: Github does not provider refresh tokens and expires_in, so we only store access_token.
         user_to_use = await create_or_update_user(db, user_info, provider, token)
 
         # Generate JWT token for client (never expose provider token)
@@ -76,20 +77,20 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
         # Extract token information
         access_token = token.get("access_token")  # Provider's access token
-        refresh_token = token.get("refresh_token")
-        expires_in = token.get("expires_in")
+        refresh_token = token.get("refresh_token")  # Provider's refresh token (None for GitHub)
+        expires_in = token.get("expires_in")  # Provider's token expiry in seconds (None for GitHub)
 
         # Calculate access token expiry time (use UTC for consistency with JWT)
         if expires_in:
             # Google provides expires_in (typically 3600 seconds = 1 hour)
-            token_expiry = datetime.utcnow() + timedelta(seconds=int(expires_in))
+            token_expiry = datetime.now(UTC) + timedelta(seconds=int(expires_in))
         elif provider == IdentityProvider.github.value:
             # GitHub doesn't provide expires_in, but tokens typically last 8 hours
-            token_expiry = datetime.utcnow() + timedelta(hours=8)
+            token_expiry = datetime.now(UTC) + timedelta(hours=8)
             logger.info("GitHub token created with default 8-hour expiry")
         else:
             # Default fallback
-            token_expiry = datetime.utcnow() + timedelta(hours=1)
+            token_expiry = datetime.now(UTC) + timedelta(hours=1)
             logger.warning(f"No expires_in for {provider}, using 1-hour default")
 
         provider_enum = IdentityProvider(provider)
@@ -103,7 +104,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             existing_user.access_token = access_token  # Store provider token
             existing_user.refresh_token = refresh_token
             existing_user.token_expiry = token_expiry
-            existing_user.updated_at = datetime.utcnow()
+            existing_user.updated_at = datetime.now(UTC)
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
@@ -118,8 +119,8 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
                 access_token=access_token,  # Store provider token
                 refresh_token=refresh_token,
                 token_expiry=token_expiry,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
 
             db.add(new_user)

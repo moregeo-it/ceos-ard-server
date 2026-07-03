@@ -1,6 +1,6 @@
 import logging
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pygit2
@@ -142,10 +142,10 @@ class WorkspaceService:
                 if pull_request is not None:
                     pr_state = pull_request["state"]
                     workspace.pull_request_status = pr_state.upper()
-                    workspace.pull_request_status_last_updated_at = datetime.now()
+                    workspace.pull_request_status_last_updated_at = datetime.now(UTC)
 
                     if pr_state in [PullRequestStatus.CLOSED.value, PullRequestStatus.MERGED.value]:
-                        workspace.archived_at = datetime.now()
+                        workspace.archived_at = datetime.now(UTC)
                         workspace.status = WorkspaceStatus.ARCHIVED
 
                 db.add(workspace)
@@ -185,7 +185,7 @@ class WorkspaceService:
             # Handle archiving - set timestamps when status changes to ARCHIVED
             if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ARCHIVED.value.upper():
                 if workspace.status != WorkspaceStatus.ARCHIVED:
-                    archived_at = datetime.utcnow()
+                    archived_at = datetime.now(UTC)
                     update_dict["archived_at"] = archived_at
                     logger.info(f"Archiving workspace {workspace_id}, deletion scheduled for 1 month from now")
 
@@ -331,7 +331,7 @@ class WorkspaceService:
             if not isinstance(data, dict):
                 data = build_default_pfs_document(
                     **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
-                    author_username=user.username,
+                    author_username=user.full_name or user.username,
                 )
 
             # Set default values if any is None
@@ -386,10 +386,10 @@ class WorkspaceService:
 
             pull_request_status = pull_request["state"]
             workspace.pull_request_status = pull_request_status.upper()
-            workspace.pull_request_status_last_updated_at = datetime.now()
+            workspace.pull_request_status_last_updated_at = datetime.now(UTC)
 
             if pull_request_status in [PullRequestStatus.CLOSED.value, PullRequestStatus.MERGED.value]:
-                workspace.archived_at = datetime.now()
+                workspace.archived_at = datetime.now(UTC)
                 workspace.status = WorkspaceStatus.ARCHIVED
 
             db.commit()
@@ -453,7 +453,7 @@ class WorkspaceService:
                 workspace.status = WorkspaceStatus.ACTIVE
             workspace.pull_request_number = pr_response["number"]
             workspace.pull_request_status = pr_response["state"].upper()
-            workspace.pull_request_status_last_updated_at = datetime.now()
+            workspace.pull_request_status_last_updated_at = datetime.now(UTC)
             db.commit()
 
             return Proposal(

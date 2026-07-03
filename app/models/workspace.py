@@ -1,14 +1,15 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Column, ForeignKey, String
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.config import settings
 from app.db.database import Base
+from app.db.types import UTCDateTime
 
 
 class WorkspaceStatus(Enum):
@@ -35,12 +36,12 @@ class GitWorkspace(Base):
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)
     pull_request_number = Column(String, nullable=True)
-    pull_request_status_last_updated_at = Column(DateTime, nullable=True)
+    pull_request_status_last_updated_at = Column(UTCDateTime, nullable=True)
     pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
     status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=datetime.now(), nullable=False)
-    archived_at = Column(DateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
+    archived_at = Column(UTCDateTime, nullable=True)
 
     user = relationship("User", back_populates="workspaces")
 

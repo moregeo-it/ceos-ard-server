@@ -215,3 +215,6 @@ marimo/_lsp/
 __marimo__/
 # pixi environments
 .pixi
+
+# OS generated files
+.DS_Store
