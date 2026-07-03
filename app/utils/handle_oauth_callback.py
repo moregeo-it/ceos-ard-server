@@ -77,8 +77,8 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
         # Extract token information
         access_token = token.get("access_token")  # Provider's access token
-        refresh_token = token.get("refresh_token") # Provider's refresh token (None for GitHub)
-        expires_in = token.get("expires_in") # Provider's token expiry in seconds (None for GitHub)
+        refresh_token = token.get("refresh_token")  # Provider's refresh token (None for GitHub)
+        expires_in = token.get("expires_in")  # Provider's token expiry in seconds (None for GitHub)
 
         # Calculate access token expiry time (use UTC for consistency with JWT)
         if expires_in:
