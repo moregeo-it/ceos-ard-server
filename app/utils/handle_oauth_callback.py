@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -82,14 +82,14 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
         # Calculate access token expiry time (use UTC for consistency with JWT)
         if expires_in:
             # Google provides expires_in (typically 3600 seconds = 1 hour)
-            token_expiry = datetime.utcnow() + timedelta(seconds=int(expires_in))
+            token_expiry = datetime.now(UTC) + timedelta(seconds=int(expires_in))
         elif provider == IdentityProvider.github.value:
             # GitHub doesn't provide expires_in, but tokens typically last 8 hours
-            token_expiry = datetime.utcnow() + timedelta(hours=8)
+            token_expiry = datetime.now(UTC) + timedelta(hours=8)
             logger.info("GitHub token created with default 8-hour expiry")
         else:
             # Default fallback
-            token_expiry = datetime.utcnow() + timedelta(hours=1)
+            token_expiry = datetime.now(UTC) + timedelta(hours=1)
             logger.warning(f"No expires_in for {provider}, using 1-hour default")
 
         provider_enum = IdentityProvider(provider)
@@ -103,7 +103,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             existing_user.access_token = access_token  # Store provider token
             existing_user.refresh_token = refresh_token
             existing_user.token_expiry = token_expiry
-            existing_user.updated_at = datetime.utcnow()
+            existing_user.updated_at = datetime.now(UTC)
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
@@ -118,8 +118,8 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
                 access_token=access_token,  # Store provider token
                 refresh_token=refresh_token,
                 token_expiry=token_expiry,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
 
             db.add(new_user)

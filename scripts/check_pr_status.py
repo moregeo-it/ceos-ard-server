@@ -23,7 +23,7 @@ Options:
 import asyncio
 import logging
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Add parent directory to path to import app modules
@@ -156,14 +156,14 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                     # Update workspace PR status if it changed
                     if status_changed:
                         workspace.pull_request_status = new_status
-                        workspace.pull_request_status_last_updated_at = datetime.utcnow()
+                        workspace.pull_request_status_last_updated_at = datetime.now(UTC)
                         changed = True
 
                     # Auto-archive if merged or closed (even if PR status field did not change)
                     if new_status in [PullRequestStatus.MERGED, PullRequestStatus.CLOSED]:
                         if workspace.status != WorkspaceStatus.ARCHIVED:
                             workspace.status = WorkspaceStatus.ARCHIVED
-                            workspace.archived_at = datetime.utcnow()
+                            workspace.archived_at = datetime.now(UTC)
                             logger.info(f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})")
                             changed = True
 

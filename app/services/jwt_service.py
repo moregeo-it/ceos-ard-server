@@ -5,7 +5,7 @@ Provider tokens (GitHub, Google) are stored server-side and never exposed to cli
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -45,7 +45,7 @@ class JWTService:
         """
         # Use 8-hour expiry for both providers (sliding window session)
         expires_delta = timedelta(hours=JWTService.JWT_EXPIRY_HOURS)
-        expiry_time = datetime.utcnow() + expires_delta
+        expiry_time = datetime.now(UTC) + expires_delta
 
         # Create JWT payload
         payload = {
@@ -56,7 +56,7 @@ class JWTService:
             "external_id": user.external_id,
             "provider": user.identity_provider.value,  # Serialize enum to string
             "exp": expiry_time,
-            "iat": datetime.utcnow(),  # Issued at
+            "iat": datetime.now(UTC),  # Issued at
             "type": "access",
         }
 

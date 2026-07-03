@@ -15,7 +15,7 @@ Options:
 import logging
 import shutil
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
@@ -46,7 +46,7 @@ def cleanup_archived_workspaces(dry_run: bool = False):
     db = SessionLocal()
 
     try:
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         # Calculate cutoff date: workspaces archived more than 1 month ago
         cutoff_date = current_time - relativedelta(months=1)
 
