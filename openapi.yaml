@@ -187,7 +187,11 @@ paths:
   /workspaces:
     get:
       summary: List all workspaces
-      description: Retrieves all workspaces for the authenticated user
+      description: |
+        Retrieves all workspaces the authenticated user has access to - both
+        workspaces they own and workspaces shared with them ("Shared with
+        me"). Each workspace's `owner` and `viewerRole` fields indicate
+        whether the caller owns it or the mode of their share.
       operationId: listWorkspaces
       tags:
         - Workspaces
@@ -515,6 +519,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly/comment collaborators cannot create files or folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/files/{filePath}:
     get:
@@ -601,6 +611,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly/comment collaborators cannot upload file content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
     delete:
       summary: Delete file
@@ -637,6 +653,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly/comment collaborators cannot delete files or folders
           content:
             application/json:
               schema:
@@ -706,6 +728,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly/comment collaborators cannot rename or revert files
           content:
             application/json:
               schema:
@@ -800,6 +828,8 @@ paths:
     get:
       summary: Get list of changed files
       description: Retrieves a list of files that are not unchanged (including added, deleted, modified, etc.) according to git
+
+        Surfaced exclusively in the Propose view - owner only, even for collaborators with "edit" access.
       operationId: getChangedFiles
       tags:
         - Files
@@ -861,10 +891,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view the changed-files list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
     put:
       summary: Create a commit of the changes
-      description: Creates a new git commit for all current workspace changes.
+      description: |
+        Creates a new git commit for all current workspace changes.
+
+        Owner only, even for collaborators with "edit" access - only the
+        owner's GitHub credentials can push to the workspace's fork.
+        Collaborators' staged changes are committed and pushed by the owner.
       operationId: commitChanges
       tags:
         - Files
@@ -904,6 +945,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can commit changes
           content:
             application/json:
               schema:
@@ -1128,6 +1175,9 @@ paths:
 
         This endpoint returns the current state of the PR including title, description, draft status,
         and whether the PR has been closed or merged.
+
+        Owner only - the Propose view (and this data) is not exposed to collaborators at all,
+        even in read-only form.
       operationId: getProposal
       tags:
         - Workspaces
@@ -1150,6 +1200,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view the proposal
           content:
             application/json:
               schema:
@@ -1234,11 +1290,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can propose changes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/commits:
     get:
       summary: List workspace commits
-      description: Retrieves the list of git commits in the workspace
+      description: |
+        Retrieves the list of git commits in the workspace.
+
+        Owner only - surfaced exclusively in the Propose view, which is not exposed to collaborators.
       operationId: listWorkspaceCommits
       tags:
         - Workspaces
@@ -1264,6 +1329,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view commits
           content:
             application/json:
               schema:
@@ -1467,6 +1538,10 @@ paths:
             - `githubUsernames` empty or missing
             - Invalid mode
             - Owner's own username included in `githubUsernames`
+            - One or more `githubUsernames` do not correspond to a real GitHub user (validated
+              against the GitHub API; the response names exactly which ones failed). This check
+              runs before any shares are created - the whole request is rejected atomically if
+              any username is invalid.
           content:
             application/json:
               schema:
@@ -2208,10 +2283,12 @@ components:
           commenting feature. Enforced now so no client changes are needed
           once commenting ships.
         - "edit": Can read and write files, create PFS documents, revert
-          changes, and commit within the workspace. Cannot propose (open/
-          update a Pull Request), rename/archive/delete the workspace, or
-          manage other shares — those remain owner-only, since only the
-          owner's GitHub credentials have push access to the workspace's fork.
+          changes, but cannot commit or propose (open/update a Pull
+          Request) - only the workspace owner's GitHub credentials can push
+          to the workspace's fork, so committing and proposing always
+          happen through the owner, who reviews collaborators' staged
+          changes via the Propose view. Cannot rename/archive/delete the
+          workspace or manage other shares either - those remain owner-only.
 
     ShareStatus:
       type: string
