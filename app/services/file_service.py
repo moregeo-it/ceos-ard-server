@@ -167,7 +167,7 @@ class FileService:
         elif request_data.type not in ["file", "folder"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
         name = validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
 
@@ -191,7 +191,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
         file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         repo = get_repo(workspace.abs_path)
         try:
@@ -217,7 +217,7 @@ class FileService:
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
         target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
         relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         repo = get_repo(workspace.abs_path)
@@ -289,7 +289,7 @@ class FileService:
         }
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
         if operation_request.operation == "rename":
             return await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
         elif operation_request.operation == "revert":
@@ -421,7 +421,8 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from e
 
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        # The changed-files list is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         repo = get_repo(workspace.abs_path)
         return get_repo_changes(repo)
 
@@ -465,7 +466,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
     async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> pygit2.Commit:
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot commit changes for an archived workspace")

@@ -61,7 +61,7 @@ async def get_user_workspaces(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["user"].access_token)
+        return workspace_service.get_user_workspaces(db=db, user=current_user["user"])
     except HTTPException:
         raise
     except Exception as e:

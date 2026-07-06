@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
 
@@ -14,6 +14,13 @@ class WorkspaceError(BaseModel):
 class WorkspaceStatus(str, Enum):
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+class ViewerRole(str, Enum):
+    OWNER = "owner"
+    EDIT = "edit"
+    COMMENT = "comment"
+    READONLY = "readonly"
 
 
 class GitStatusFile(BaseModel):
@@ -44,6 +51,8 @@ class WorkspaceUpdate(BaseModel):
 
 
 class WorkspaceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     title: str
     user_id: str
@@ -60,9 +69,8 @@ class WorkspaceResponse(BaseModel):
     updated_at: datetime
     archived_at: datetime | None
     deletion_at: datetime | None  # Computed from archived_at + 1 month
-
-    class ConfigDict:
-        from_attributes = True
+    viewer_role: ViewerRole = Field(description="The current authenticated user's effective role on this workspace")
+    owner_username: str | None = Field(None, description="GitHub username of the workspace owner")
 
 
 class ProposalRequest(BaseModel):

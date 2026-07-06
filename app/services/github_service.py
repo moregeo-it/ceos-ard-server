@@ -157,6 +157,20 @@ class GitHubService:
                 return None
             raise
 
+    async def get_github_user(self, username: str, token: str) -> dict[str, Any] | None:
+        """Look up a GitHub user by username.
+
+        Returns the GitHub user object (including its canonical `login` casing) if the account
+        exists, or None if it doesn't. Used to validate GitHub usernames before granting workspace shares.
+        """
+        url = f"{self.base_url}/users/{username}"
+        try:
+            return await self._make_github_request("GET", url, token, timeout=15.0)
+        except HTTPException as e:
+            if e.status_code == 404:
+                return None
+            raise
+
     async def update_pull_request(self, owner: str, repo: str, number: int, access_token: str, pr_data: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{number}"
         try:

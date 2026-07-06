@@ -2,22 +2,25 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column, ForeignKey, String, UniqueConstraint, Boolean, JSON
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, ForeignKey, String, UniqueConstraint
 from sqlalchemy import Enum as SqlAlchemyEnum
+from sqlalchemy.orm import relationship
 
 from app.db.database import Base
 from app.db.types import UTCDateTime
+
 
 class ShareMode(str, Enum):
     EDIT = "edit"
     COMMENT = "comment"
     READONLY = "readonly"
 
+
 class ShareStatus(str, Enum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REVOKED = "revoked"
+
 
 class WorkspaceShare(Base):
     __tablename__ = "workspace_shares"
@@ -42,12 +45,11 @@ class WorkspaceShare(Base):
     invitee_user = relationship("User", foreign_keys=[invitee_user_id])
     invited_by_user = relationship("User", foreign_keys=[invited_by_user_id])
 
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "invitee_github_username", name="uq_share_workspace_gh"),
-    )
+    __table_args__ = (UniqueConstraint("workspace_id", "invitee_github_username", name="uq_share_workspace_gh"),)
 
     def __repr__(self):
         return f"<WorkspaceShare id={self.id} workspace_id={self.workspace_id} invitee_user_id={self.invitee_user_id} invited_by_user_id={self.invited_by_user_id} mode={self.mode} status={self.status}>"
+
 
 class WorkspaceShareLink(Base):
     __tablename__ = "workspace_share_links"
@@ -66,5 +68,6 @@ class WorkspaceShareLink(Base):
 
     workspace = relationship("GitWorkspace", back_populates="share_links")
     created_by_user = relationship("User", foreign_keys=[created_by_user_id])
+
     def __repr__(self):
         return f"<WorkspaceShareLink id={self.id} workspace_id={self.workspace_id} mode={self.mode} is_active={self.is_active}>"

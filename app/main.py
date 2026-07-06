@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import auth, core, file, preview, workspace
+from app.api import auth, core, file, preview, share, workspace
 from app.config import settings
 from app.db.database import Base, engine
 from app.utils.cli_utils import fastapi_run_checks, load_project_info
@@ -34,4 +34,5 @@ app.include_router(auth.router)
 app.include_router(core.router)
 app.include_router(file.router)
 app.include_router(preview.router)
+app.include_router(share.router)
 app.include_router(workspace.router)

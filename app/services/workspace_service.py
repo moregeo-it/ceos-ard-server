@@ -13,10 +13,12 @@ from yaml import load as yaml_load
 from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
+from app.models.workspace_share import ShareStatus, WorkspaceShare
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
+from app.services.share_service import ROLE_RANK, ShareService
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo, get_repo_changes
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
@@ -30,6 +32,7 @@ class WorkspaceService:
         self.git_service = GitService()
         self.build_service = BuildService()
         self.github_service = GitHubService()
+        self.share_service = ShareService()
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user: User) -> GitWorkspace:
         if not workspace_data.title:
@@ -51,6 +54,8 @@ class WorkspaceService:
             db.add(workspace)
             db.commit()
             db.refresh(workspace)
+            workspace.viewer_role = "owner"
+            workspace.owner_username = user.username
 
             # Clone the forked repository into the workspace directory
             success = await self.git_service.clone_repository(
@@ -66,6 +71,8 @@ class WorkspaceService:
             if success:
                 db.commit()
                 db.refresh(workspace)
+                workspace.viewer_role = "owner"
+                workspace.owner_username = user.username
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
             else:
@@ -80,42 +87,67 @@ class WorkspaceService:
                 db.rollback()
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
 
-    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
+    def get_user_workspaces(self, db: Session, user: User) -> list[GitWorkspace]:
         try:
-            if not user_id:
+            if not user.id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-            workspaces = (
+            owned = (
                 db.query(GitWorkspace)
-                .filter(GitWorkspace.user_id == user_id)
+                .filter(GitWorkspace.user_id == user.id)
                 .order_by(GitWorkspace.created_at.desc())
                 .with_for_update(of=GitWorkspace)
                 .all()
             )
+            for workspace in owned:
+                workspace.viewer_role = "owner"
+                workspace.owner_username = user.username
 
-            return workspaces
+            shared_workspace_ids = [
+                share.workspace_id
+                for share in db.query(WorkspaceShare.workspace_id)
+                .filter(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.status == ShareStatus.ACCEPTED)
+                .all()
+            ]
+            shared = db.query(GitWorkspace).filter(GitWorkspace.id.in_(shared_workspace_ids)).all() if shared_workspace_ids else []
+            for workspace in shared:
+                workspace.viewer_role = self.share_service.resolve_role(db, workspace, user.id)
+                workspace.owner_username = workspace.user.username if workspace.user else None
+
+            return owned + shared
 
         except Exception as e:
             logger.error(f"Error getting user workspaces: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
-    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True) -> GitWorkspace:
+    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = "readonly") -> GitWorkspace:
         try:
             if not workspace_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
             elif not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-            query = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id)
-
-            workspace = query.first()
+            workspace = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).first()
             if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-            elif exists and not workspace.abs_path.exists():
+
+            role = self.share_service.resolve_role(db, workspace, user_id)
+            # Don't leak workspace existence to users who have no access to it at all.
+            if role is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+            if ROLE_RANK[role] < ROLE_RANK[min_role]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to perform this action on this workspace"
+                )
+
+            if exists and not workspace.abs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found on filesystem")
             elif exists and not workspace.abs_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not a directory")
 
+            workspace.viewer_role = role
+            workspace.owner_username = workspace.user.username if workspace.user else None
             return workspace
         except HTTPException:
             raise
@@ -123,9 +155,11 @@ class WorkspaceService:
             logger.error(f"Error getting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
 
-    async def sync_workspace(self, db: Session, user_id: str, workspace_id: str, access_token: str) -> GitWorkspace | None:
+    async def sync_workspace(
+        self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = "readonly"
+    ) -> GitWorkspace | None:
         try:
-            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role=min_role)
 
             if not access_token:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
@@ -166,7 +200,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace status")
 
         try:
-            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+            workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
 
             if workspace.status == WorkspaceStatus.ARCHIVED and update_data.status == WorkspaceStatus.ACTIVE:
                 if workspace.pull_request_status == PullRequestStatus.MERGED or workspace.pull_request_status == PullRequestStatus.CLOSED:
@@ -212,10 +246,7 @@ class WorkspaceService:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id, exists=False)
-
-        if workspace.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, exists=False, min_role="owner")
 
         try:
             if workspace.abs_path.exists():
@@ -236,7 +267,8 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
     def get_workspace_commits(self, db: Session, workspace_id: str, user_id: str) -> list[pygit2.Commit]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        # Commit history is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         return self.git_service.get_commits(workspace.abs_path)
 
     async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
@@ -292,7 +324,7 @@ class WorkspaceService:
         if not request_data.id or not request_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user.id)
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="edit")
         repo = get_repo(workspace.abs_path)
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)
@@ -370,7 +402,8 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
     async def get_proposal(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> Proposal | None:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        # The proposal (PR) is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if not workspace.pull_request_number:
             return None
 
@@ -409,7 +442,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get proposal changes: {str(e)}") from e
 
     async def propose(self, db: Session, workspace_id: str, user: User, data: ProposalRequest) -> Proposal:
-        workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token)
+        workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token, min_role="owner")
 
         if workspace.pull_request_status == PullRequestStatus.MERGED:
             raise HTTPException(
