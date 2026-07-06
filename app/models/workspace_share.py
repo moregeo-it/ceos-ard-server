@@ -54,6 +54,7 @@ class WorkspaceShareLink(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id = Column(String, ForeignKey("git_workspaces.id"), nullable=False)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     mode = Column(SqlAlchemyEnum(ShareMode), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
@@ -64,6 +65,6 @@ class WorkspaceShareLink(Base):
     updated_at = Column(UTCDateTime, nullable=False, default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
     workspace = relationship("GitWorkspace", back_populates="share_links")
-
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
     def __repr__(self):
         return f"<WorkspaceShareLink id={self.id} workspace_id={self.workspace_id} mode={self.mode} is_active={self.is_active}>"
