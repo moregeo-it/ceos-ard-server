@@ -1,12 +1,14 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import auth, core, file, preview, share, workspace
+from app.api import auth, collab, core, file, preview, share, workspace
 from app.config import settings
 from app.db.database import Base, engine
+from app.services.collab_service import ws_server
 from app.utils.cli_utils import fastapi_run_checks, load_project_info
 
 logging.basicConfig(level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG)
@@ -16,7 +18,14 @@ title, version = load_project_info()
 
 logger.info(f"Starting {title} version {version} in {settings.ENVIRONMENT} environment")
 
-app = FastAPI(title=title, version=version, lifespan=fastapi_run_checks)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with fastapi_run_checks(app), ws_server:
+        yield
+
+
+app = FastAPI(title=title, version=version, lifespan=lifespan)
 
 Base.metadata.create_all(bind=engine)
 
@@ -31,6 +40,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 
+app.include_router(collab.router)
 app.include_router(core.router)
 app.include_router(file.router)
 app.include_router(preview.router)

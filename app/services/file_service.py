@@ -190,21 +190,25 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
-    async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
-        file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
-        repo = get_repo(workspace.abs_path)
+    def write_and_stage(self, workspace_abs_path: Path, file_path: Path, content: bytes) -> dict:
+        """Write raw bytes to disk and stage the file with pygit2.
+
+        No permission check here - callers are responsible for authorizing the write. This is
+        shared by the REST PUT endpoint and the collab service's debounced flush of a live
+        collaborative buffer, neither of which should re-derive a "current user" just to repeat
+        a check already performed when the caller's session/connection was authorized.
+        """
+        repo = get_repo(workspace_abs_path)
         try:
             file_path.write_bytes(content)
-            # Stage the file using pygit2
-            relative_path = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
+            relative_path = str(file_path.relative_to(workspace_abs_path)).replace("\\", "/")
             repo.index.add(relative_path)
             repo.index.write()
             return {
                 "name": file_path.name,
                 "is_directory": False,
                 "status": get_file_status(repo, file_path),
-                "path": normalize_workspace_path(file_path, workspace.abs_path),
+                "path": normalize_workspace_path(file_path, workspace_abs_path),
             }
         except pygit2.GitError as e:
             raise HTTPException(
@@ -212,6 +216,11 @@ class FileService:
             ) from e
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
+
+    async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
+        file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+        return self.write_and_stage(workspace.abs_path, file_path, content)
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not file_path:
