@@ -48,7 +48,7 @@ class WorkspaceShare(Base):
     __table_args__ = (UniqueConstraint("workspace_id", "invitee_github_username", name="uq_share_workspace_gh"),)
 
     def __repr__(self):
-        return f"<WorkspaceShare id={self.id} workspace_id={self.workspace_id} invitee_user_id={self.invitee_user_id} invited_by_user_id={self.invited_by_user_id} mode={self.mode} status={self.status}>"
+        return f"<WorkspaceShare id={self.id} workspace_id={self.workspace_id} invitee_user_id={self.invitee_user_id} invited_by_user_id={self.invited_by_user_id} mode={self.mode} status={self.status}>"  # noqa: E501
 
 
 class WorkspaceShareLink(Base):
