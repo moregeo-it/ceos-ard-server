@@ -56,6 +56,7 @@ class WorkspaceService:
             db.refresh(workspace)
             workspace.viewer_role = "owner"
             workspace.owner_username = user.username
+            workspace.owner_full_name = user.full_name
 
             # Clone the forked repository into the workspace directory
             success = await self.git_service.clone_repository(
@@ -73,6 +74,7 @@ class WorkspaceService:
                 db.refresh(workspace)
                 workspace.viewer_role = "owner"
                 workspace.owner_username = user.username
+                workspace.owner_full_name = user.full_name
 
                 logger.info(f"Successfully setup workspace {workspace.id}")
             else:
@@ -102,6 +104,7 @@ class WorkspaceService:
             for workspace in owned:
                 workspace.viewer_role = "owner"
                 workspace.owner_username = user.username
+                workspace.owner_full_name = user.full_name
 
             shared_workspace_ids = [
                 share.workspace_id
@@ -113,6 +116,7 @@ class WorkspaceService:
             for workspace in shared:
                 workspace.viewer_role = self.share_service.resolve_role(db, workspace, user.id)
                 workspace.owner_username = workspace.user.username if workspace.user else None
+                workspace.owner_full_name = workspace.user.full_name if workspace.user else None
 
             return owned + shared
 
@@ -148,6 +152,7 @@ class WorkspaceService:
 
             workspace.viewer_role = role
             workspace.owner_username = workspace.user.username if workspace.user else None
+            workspace.owner_full_name = workspace.user.full_name if workspace.user else None
             return workspace
         except HTTPException:
             raise

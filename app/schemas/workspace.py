@@ -71,6 +71,7 @@ class WorkspaceResponse(BaseModel):
     deletion_at: datetime | None  # Computed from archived_at + 1 month
     viewer_role: ViewerRole = Field(description="The current authenticated user's effective role on this workspace")
     owner_username: str | None = Field(None, description="GitHub username of the workspace owner")
+    owner_full_name: str | None = Field(None, description="Full name of the workspace owner")
 
 
 class ProposalRequest(BaseModel):

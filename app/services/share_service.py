@@ -274,6 +274,7 @@ class ShareService:
         if workspace.user_id == user.id:
             workspace.viewer_role = "owner"
             workspace.owner_username = user.username
+            workspace.owner_full_name = user.full_name
             return None, workspace
 
         share = db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_user_id == user.id).first()
@@ -312,4 +313,5 @@ class ShareService:
 
         workspace.viewer_role = self.resolve_role(db, workspace, user.id)
         workspace.owner_username = workspace.user.username if workspace.user else None
+        workspace.owner_full_name = workspace.user.full_name if workspace.user else None
         return share, workspace
