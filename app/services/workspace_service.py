@@ -6,14 +6,14 @@ from typing import Any
 import pygit2
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from strictyaml import YAMLValidationError, as_document
 from yaml import load as yaml_load
 
 from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.models.workspace_share import ShareStatus, WorkspaceShare
+from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
@@ -106,15 +106,23 @@ class WorkspaceService:
                 workspace.owner_username = user.username
                 workspace.owner_full_name = user.full_name
 
-            shared_workspace_ids = [
-                share.workspace_id
-                for share in db.query(WorkspaceShare.workspace_id)
+            shares_by_workspace_id = {
+                share.workspace_id: share
+                for share in db.query(WorkspaceShare)
                 .filter(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.status == ShareStatus.ACCEPTED)
                 .all()
-            ]
-            shared = db.query(GitWorkspace).filter(GitWorkspace.id.in_(shared_workspace_ids)).all() if shared_workspace_ids else []
+            }
+            shared = (
+                db.query(GitWorkspace)
+                .options(joinedload(GitWorkspace.user))
+                .filter(GitWorkspace.id.in_(shares_by_workspace_id.keys()))
+                .all()
+                if shares_by_workspace_id
+                else []
+            )
             for workspace in shared:
-                workspace.viewer_role = self.share_service.resolve_role(db, workspace, user.id)
+                share = shares_by_workspace_id[workspace.id]
+                workspace.viewer_role = ShareMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else share.mode.value
                 workspace.owner_username = workspace.user.username if workspace.user else None
                 workspace.owner_full_name = workspace.user.full_name if workspace.user else None
 
@@ -124,7 +132,7 @@ class WorkspaceService:
             logger.error(f"Error getting user workspaces: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
-    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = "readonly") -> GitWorkspace:
+    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = ShareMode.READONLY.value) -> GitWorkspace:
         try:
             if not workspace_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
@@ -161,7 +169,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
 
     async def sync_workspace(
-        self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = "readonly"
+        self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = ShareMode.READONLY.value
     ) -> GitWorkspace | None:
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role=min_role)

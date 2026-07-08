@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.models.workspace import GitWorkspace, WorkspaceStatus
-from app.models.workspace_share import ShareStatus, WorkspaceShare, WorkspaceShareLink
+from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare, WorkspaceShareLink
 from app.schemas.share import (
     ShareCreateRequest,
     ShareLinkCreateRequest,
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Effective-role ranking used to gate access. "comment" is intentionally ranked the same as
 # "readonly" today (no commenting feature yet), but kept as a distinct value end-to-end so a
 # future commenting feature can key off it without backend/permission-model changes.
-ROLE_RANK = {"readonly": 0, "comment": 0, "edit": 1, "owner": 2}
+ROLE_RANK = {ShareMode.READONLY.value: 0, ShareMode.COMMENT.value: 0, ShareMode.EDIT.value: 1, "owner": 2}
 SHARE_LINK_TOKEN_TYPE = "share_link"
 
 
@@ -57,7 +57,7 @@ class ShareService:
             return None
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
-            return "readonly"
+            return ShareMode.READONLY.value
 
         return share.mode.value
 
