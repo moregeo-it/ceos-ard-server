@@ -113,10 +113,7 @@ class WorkspaceService:
                 .all()
             }
             shared = (
-                db.query(GitWorkspace)
-                .options(joinedload(GitWorkspace.user))
-                .filter(GitWorkspace.id.in_(shares_by_workspace_id.keys()))
-                .all()
+                db.query(GitWorkspace).options(joinedload(GitWorkspace.user)).filter(GitWorkspace.id.in_(shares_by_workspace_id.keys())).all()
                 if shares_by_workspace_id
                 else []
             )
@@ -132,7 +129,9 @@ class WorkspaceService:
             logger.error(f"Error getting user workspaces: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
-    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = ShareMode.READONLY.value) -> GitWorkspace:
+    def get_workspace_by_id(
+        self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = ShareMode.READONLY.value
+    ) -> GitWorkspace:
         try:
             if not workspace_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
