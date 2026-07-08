@@ -62,7 +62,6 @@ class WorkspaceShareLink(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     expires_at = Column(UTCDateTime, nullable=True)
 
-    revoked_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
     updated_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 

@@ -209,6 +209,8 @@ class ShareService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expiresAt must be in the future")
 
         for key, value in request.model_dump(exclude_unset=True).items():
+            if key in ("mode", "is_active") and value is None:
+                continue
             setattr(link, key, value)
 
         db.commit()
@@ -247,7 +249,7 @@ class ShareService:
         share_link_id = self._decode_share_link_token(token)
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == share_link_id).first()
 
-        if not link or not link.is_active or link.revoked_at is not None:
+        if not link or not link.is_active:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid, inactive, or deleted share link")
 
         if link.expires_at and link.expires_at <= datetime.now(UTC):

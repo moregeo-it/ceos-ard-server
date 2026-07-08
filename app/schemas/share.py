@@ -63,7 +63,6 @@ class WorkspaceShareLinkResponse(BaseModel):
     created_by_user_id: str = Field(alias="createdBy")
     created_at: datetime = Field(alias="createdAt")
     expires_at: datetime | None = Field(None, alias="expiresAt")
-    revoked_at: datetime | None = Field(None, alias="revokedAt")
 
 
 class ListShareLinksResponse(BaseModel):
