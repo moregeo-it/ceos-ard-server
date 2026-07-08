@@ -78,7 +78,13 @@ class ShareService:
     async def create_shares(self, db: Session, workspace_id: str, user: User, request: ShareCreateRequest) -> list[WorkspaceShare]:
         workspace = self._get_workspace_owned_by(db, workspace_id, user.id)
 
-        usernames = [username.strip() for username in request.github_usernames if username and username.strip()]
+        seen_usernames: set[str] = set()
+        usernames: list[str] = []
+        for raw_username in request.github_usernames:
+            cleaned = raw_username.strip() if raw_username else ""
+            if cleaned and cleaned.lower() not in seen_usernames:
+                seen_usernames.add(cleaned.lower())
+                usernames.append(cleaned)
         if not usernames:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one GitHub username is required")
 

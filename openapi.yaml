@@ -827,7 +827,8 @@ paths:
   /workspaces/{workspaceId}/diffs:
     get:
       summary: Get list of changed files
-      description: Retrieves a list of files that are not unchanged (including added, deleted, modified, etc.) according to git
+      description: |
+        Retrieves a list of files that are not unchanged (including added, deleted, modified, etc.) according to git.
 
         Surfaced exclusively in the Propose view - owner only, even for collaborators with "edit" access.
       operationId: getChangedFiles
@@ -1790,7 +1791,7 @@ paths:
       summary: Delete a share link
       description: |
         Permanently deletes a share link. The URL stops working immediately
-        and not reversible - sharing again means creating a new link,
+        and is not reversible - sharing again means creating a new link,
         which produces a new URL. Owner only.
       operationId: deleteWorkspaceShareLink
       tags:

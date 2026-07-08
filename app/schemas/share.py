@@ -67,7 +67,9 @@ class WorkspaceShareLinkResponse(BaseModel):
 
 
 class ListShareLinksResponse(BaseModel):
-    shareLinks: list[WorkspaceShareLinkResponse]
+    model_config = ConfigDict(populate_by_name=True)
+
+    shareLinks: list[WorkspaceShareLinkResponse] = Field(alias="shareLinks")
 
 
 class ShareLinkPreview(BaseModel):

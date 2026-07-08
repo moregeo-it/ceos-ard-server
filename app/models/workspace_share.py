@@ -36,8 +36,8 @@ class WorkspaceShare(Base):
     mode = Column(SqlAlchemyEnum(ShareMode), nullable=False)
     status = Column(SqlAlchemyEnum(ShareStatus), nullable=False, default=ShareStatus.PENDING)
 
-    created_at = Column(UTCDateTime, nullable=False, default=datetime.now(UTC))
-    updated_at = Column(UTCDateTime, nullable=False, default=datetime.now(UTC), onupdate=datetime.now(UTC))
+    created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     accepted_at = Column(UTCDateTime, nullable=True)
     revoked_at = Column(UTCDateTime, nullable=True)
 
@@ -63,8 +63,8 @@ class WorkspaceShareLink(Base):
     expires_at = Column(UTCDateTime, nullable=True)
 
     revoked_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, nullable=False, default=datetime.now(UTC))
-    updated_at = Column(UTCDateTime, nullable=False, default=datetime.now(UTC), onupdate=datetime.now(UTC))
+    created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     workspace = relationship("GitWorkspace", back_populates="share_links")
     created_by_user = relationship("User", foreign_keys=[created_by_user_id])
