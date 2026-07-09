@@ -6,8 +6,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.dependencies import get_share_service
+from app.dependencies import get_event_broker, get_share_service
 from app.schemas.error import create_error_detail
+from app.schemas.events import EventType, build_event
 from app.schemas.share import (
     ListShareLinksResponse,
     ListSharesResponse,
@@ -20,6 +21,7 @@ from app.schemas.share import (
 )
 from app.schemas.workspace import WorkspaceResponse
 from app.services.auth_service import get_optional_current_user, require_github_user
+from app.services.events_service import EventBroker
 from app.services.share_service import ShareService
 
 logger = logging.getLogger(__name__)
@@ -106,9 +108,17 @@ async def revoke_workspace_share(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
+    broker: EventBroker = Depends(get_event_broker),
 ):
     try:
-        share_service.revoke_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id)
+        share = share_service.revoke_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id)
+        # A revoked invitee who has an active session gets their SSE stream closed and is routed out.
+        # A pending share (never redeemed) has no invitee_user_id and no live stream, so nothing to notify.
+        if share.invitee_user_id:
+            broker.publish(
+                workspace_id,
+                build_event(EventType.SHARE_REVOKED, actor_user_id=current_user["user"].id, target_user_id=share.invitee_user_id),
+            )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise

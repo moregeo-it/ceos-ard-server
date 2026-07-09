@@ -336,7 +336,7 @@ class WorkspaceService:
         if not request_data.id or not request_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="edit")
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
         repo = get_repo(workspace.abs_path)
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)

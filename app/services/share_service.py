@@ -21,10 +21,9 @@ from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
 
-# Effective-role ranking used to gate access. "comment" is intentionally ranked the same as
-# "readonly" today (no commenting feature yet), but kept as a distinct value end-to-end so a
-# future commenting feature can key off it without backend/permission-model changes.
-ROLE_RANK = {ShareMode.READONLY.value: 0, ShareMode.COMMENT.value: 0, ShareMode.EDIT.value: 1, "owner": 2}
+# Effective-role ranking used to gate access. Phase 1 supports readonly sharing only; the owner
+# is the sole writer. Additional collaborator roles (comment, edit) are deferred to later phases.
+ROLE_RANK = {ShareMode.READONLY.value: 0, "owner": 1}
 SHARE_LINK_TOKEN_TYPE = "share_link"
 
 
@@ -35,8 +34,8 @@ class ShareService:
     def resolve_role(self, db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
         """Resolve the effective role a user has on a workspace.
 
-        Returns "owner", "edit", "comment", "readonly", or None if the user has no access at all.
-        Access is clamped to "readonly" for collaborators (not the owner) while the workspace is archived.
+        Returns "owner", "readonly", or None if the user has no access at all.
+        Collaborators are always readonly (the owner is the sole writer).
         """
         if not user_id:
             return None
@@ -158,7 +157,7 @@ class ShareService:
         db.refresh(share)
         return share
 
-    def revoke_share(self, db: Session, workspace_id: str, share_id: str, user_id: str) -> None:
+    def revoke_share(self, db: Session, workspace_id: str, share_id: str, user_id: str) -> WorkspaceShare:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         share = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id, WorkspaceShare.workspace_id == workspace_id).first()
         if not share:
@@ -167,6 +166,9 @@ class ShareService:
         share.status = ShareStatus.REVOKED
         share.revoked_at = datetime.now(UTC)
         db.commit()
+        db.refresh(share)
+
+        return share
 
     # --- Share links ---
 

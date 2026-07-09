@@ -167,7 +167,7 @@ class FileService:
         elif request_data.type not in ["file", "folder"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         name = validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
 
@@ -191,7 +191,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         repo = get_repo(workspace.abs_path)
         try:
@@ -217,7 +217,7 @@ class FileService:
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
         relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         repo = get_repo(workspace.abs_path)
@@ -289,7 +289,7 @@ class FileService:
         }
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="edit")
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if operation_request.operation == "rename":
             return await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
         elif operation_request.operation == "revert":

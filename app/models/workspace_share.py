@@ -11,8 +11,6 @@ from app.db.types import UTCDateTime
 
 
 class ShareMode(str, Enum):
-    EDIT = "edit"
-    COMMENT = "comment"
     READONLY = "readonly"
 
 
