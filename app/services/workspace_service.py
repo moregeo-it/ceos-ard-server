@@ -122,6 +122,22 @@ class WorkspaceService:
                 workspace.viewer_role = ShareMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else share.mode.value
                 workspace.owner_username = workspace.user.username if workspace.user else None
                 workspace.owner_full_name = workspace.user.full_name if workspace.user else None
+                # It's in this user's list because it was shared with them, so it's shared by definition.
+                workspace.is_shared = True
+
+            # Mark which owned workspaces have accepted collaborators (single query, no N+1).
+            owned_ids = [w.id for w in owned]
+            shared_owned_ids: set[str] = set()
+            if owned_ids:
+                shared_owned_ids = {
+                    row[0]
+                    for row in db.query(WorkspaceShare.workspace_id)
+                    .filter(WorkspaceShare.workspace_id.in_(owned_ids), WorkspaceShare.status == ShareStatus.ACCEPTED)
+                    .distinct()
+                    .all()
+                }
+            for workspace in owned:
+                workspace.is_shared = workspace.id in shared_owned_ids
 
             return owned + shared
 
@@ -160,6 +176,10 @@ class WorkspaceService:
             workspace.viewer_role = role
             workspace.owner_username = workspace.user.username if workspace.user else None
             workspace.owner_full_name = workspace.user.full_name if workspace.user else None
+            workspace.is_shared = (
+                db.query(WorkspaceShare.id).filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.status == ShareStatus.ACCEPTED).first()
+                is not None
+            )
             return workspace
         except HTTPException:
             raise

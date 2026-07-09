@@ -72,6 +72,11 @@ class WorkspaceResponse(BaseModel):
     viewer_role: ViewerRole = Field(description="The current authenticated user's effective role on this workspace")
     owner_username: str | None = Field(None, description="GitHub username of the workspace owner")
     owner_full_name: str | None = Field(None, description="Full name of the workspace owner")
+    is_shared: bool = Field(
+        False,
+        description="Whether the workspace has at least one accepted collaborator. The client uses this to decide "
+        "whether to open a real-time collaboration session (the owner joins only when there is someone to collaborate with).",
+    )
 
 
 class ProposalRequest(BaseModel):
