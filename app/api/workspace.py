@@ -6,8 +6,9 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.dependencies import get_workspace_service
+from app.dependencies import get_event_broker, get_workspace_service
 from app.schemas.error import create_error_detail
+from app.schemas.events import EventType, build_event
 from app.schemas.workspace import (
     Commit,
     CreatePFSRequest,
@@ -17,9 +18,11 @@ from app.schemas.workspace import (
     ProposalRequest,
     WorkspaceCreate,
     WorkspaceResponse,
+    WorkspaceStatus,
     WorkspaceUpdate,
 )
 from app.services.auth_service import require_github_user
+from app.services.events_service import EventBroker
 from app.services.workspace_service import WorkspaceService
 from app.utils.git_utils import format_commit
 
@@ -99,9 +102,14 @@ async def update_workspace(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
+    broker: EventBroker = Depends(get_event_broker),
 ):
     try:
-        return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
+        result = await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
+        # Notify viewers to re-fetch when the owner archives the workspace.
+        if update_data.status == WorkspaceStatus.ARCHIVED:
+            broker.publish(workspace_id, build_event(EventType.WORKSPACE_ARCHIVED, actor_user_id=current_user["user"].id))
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -121,9 +129,13 @@ async def delete_workspace(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
+    broker: EventBroker = Depends(get_event_broker),
 ):
     try:
-        return await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        # Broadcast so any connected viewers close their stream and route out.
+        broker.publish(workspace_id, build_event(EventType.WORKSPACE_DELETED, actor_user_id=current_user["user"].id))
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
     except Exception as e:
@@ -252,11 +264,17 @@ async def create_workspace_pfs(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
+    broker: EventBroker = Depends(get_event_broker),
 ):
     try:
-        return await workspace_service.create_workspace_pfs(
+        result = await workspace_service.create_workspace_pfs(
             db=db, workspace_id=workspace_id, user=current_user["user"], request_data=create_pfs_request
         )
+        broker.publish(
+            workspace_id,
+            build_event(EventType.FILE_CREATED, actor_user_id=current_user["user"].id, path=result["path"], file=result),
+        )
+        return result
     except HTTPException:
         raise
     except Exception as e:

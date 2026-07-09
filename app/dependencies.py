@@ -1,4 +1,5 @@
 from app.services.build_service import BuildService
+from app.services.events_service import EventBroker, event_broker
 from app.services.file_service import FileService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
@@ -38,3 +39,7 @@ def get_share_service() -> ShareService:
 
 def get_token_refresh_service() -> TokenRefreshService:
     return TokenRefreshService()
+
+
+def get_event_broker() -> EventBroker:
+    return event_broker
