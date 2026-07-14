@@ -1,25 +1,23 @@
-import asyncio
 import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
 from app.db.database import get_db
 from app.dependencies import get_event_broker, get_workspace_service
 from app.schemas.events import EventType
 from app.services.auth_service import require_github_user
-from app.services.events_service import HEARTBEAT_SECONDS, EventBroker
+from app.services.events_service import FORCE_RESYNC, HEARTBEAT_SECONDS, EventBroker
 from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workspaces", tags=["Events"])
 
-# Event types that terminate the stream once delivered (the viewer has lost access or the
-# workspace is gone), so the client stops reconnecting.
+# Delivering one of these ends the stream: the viewer's access is gone, so it shouldn't reconnect.
 _CLOSING_EVENTS = {EventType.SHARE_REVOKED.value, EventType.WORKSPACE_DELETED.value}
 
 
@@ -30,54 +28,37 @@ _CLOSING_EVENTS = {EventType.SHARE_REVOKED.value, EventType.WORKSPACE_DELETED.va
 )
 async def workspace_events(
     workspace_id: str,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
     broker: EventBroker = Depends(get_event_broker),
 ):
-    # Authorize: any user with access (owner or readonly) may subscribe. Raises 404 if the user
-    # has no access at all, 403 if below the readonly bar (never for the default readonly min_role).
+    # Any user with access may subscribe; raises 404 if they have none.
     user_id = current_user["user"].id
     workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
     queue = broker.subscribe(workspace_id)
 
     async def event_stream():
+        # EventSourceResponse handles framing, keepalive pings, and disconnect; on disconnect it
+        # closes this generator, so the `finally` unsubscribes.
         try:
-            # Prime the connection so the client's onopen fires promptly.
-            yield ": connected\n\n"
             while True:
-                if await request.is_disconnected():
+                event = await queue.get()
+
+                if event is FORCE_RESYNC:
+                    # Queue overflowed (see EventBroker._force_resync); close so the client resyncs.
                     break
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
-                except TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
 
                 target_user_id = event.get("target_user_id")
                 if target_user_id is not None and target_user_id != user_id:
                     continue
 
-                payload = json.dumps(event, default=str)
-                yield f"event: {event['type']}\nid: {event['seq']}\ndata: {payload}\n\n"
+                yield ServerSentEvent(event=event["type"], id=str(event["seq"]), data=json.dumps(event, default=str))
 
                 if event["type"] in _CLOSING_EVENTS:
                     break
-        except asyncio.CancelledError:
-            # Client disconnected mid-await; fall through to cleanup.
-            raise
         finally:
             broker.unsubscribe(workspace_id, queue)
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            # Disable proxy buffering (e.g. nginx) so events are flushed immediately.
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return EventSourceResponse(event_stream(), ping=HEARTBEAT_SECONDS)

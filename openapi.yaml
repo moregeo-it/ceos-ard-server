@@ -27,6 +27,8 @@ tags:
     description: User authentication and session management
   - name: Workspaces
     description: Workspace CRUD operations and management
+  - name: Events
+    description: Real-time workspace change notifications delivered over Server-Sent Events (SSE)
   - name: Files
     description: File and building block operations
   - name: Previews
@@ -190,7 +192,7 @@ paths:
       description: |
         Retrieves all workspaces the authenticated user has access to - both
         workspaces they own and workspaces shared with them ("Shared with
-        me"). Each workspace's `owner` and `viewerRole` fields indicate
+        me"). Each workspace's `owner` and `viewer_role` fields indicate
         whether the caller owns it or the mode of their share.
       operationId: listWorkspaces
       tags:
@@ -403,6 +405,74 @@ paths:
                 $ref: '#/components/schemas/Error'
         '403':
           description: Forbidden - user not authorized to delete this workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/events:
+    get:
+      summary: Subscribe to real-time workspace change events (SSE)
+      description: |
+        Server-Sent Events stream of file/workspace changes, for any user
+        with access to the workspace (owner or a readonly/comment/edit
+        collaborator).
+      operationId: subscribeWorkspaceEvents
+      tags:
+        - Events
+      security:
+        - bearerAuth: []
+        - bearerQueryAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: authorization
+          in: query
+          required: false
+          description: JWT, for clients (e.g. `EventSource`) that can't send an `Authorization` header. Ignored if that header is present.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream opened; stays open until the client disconnects or the server closes it (see above).
+          headers:
+            Cache-Control:
+              description: Always `no-store` - the stream must not be cached.
+              schema:
+                type: string
+                example: no-store
+            X-Accel-Buffering:
+              description: Always `no` - disables reverse-proxy response buffering so events flush immediately.
+              schema:
+                type: string
+                example: "no"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Raw SSE frame stream (see the operation description and `WorkspaceEvent`).
+              examples:
+                fileSaved:
+                  summary: A collaborator saved a file
+                  value: |
+                    event: file.saved
+                    id: 42
+                    data: {"type":"file.saved","actor_user_id":"3f8b1e1a-2b3c-4d5e-9f6a-7b8c9d0e1f2a","path":"/glossary/ups.yaml","file":{"name":"ups.yaml","path":"/glossary/ups.yaml","is_directory":false,"status":"modified"},"seq":42,"ts":"2026-07-14T12:00:00.000000+00:00"}
+
+                shareRevoked:
+                  summary: This subscriber's access was revoked (closes the stream)
+                  value: |
+                    event: share.revoked
+                    id: 57
+                    data: {"type":"share.revoked","actor_user_id":"3f8b1e1a-2b3c-4d5e-9f6a-7b8c9d0e1f2a","path":null,"file":null,"target_user_id":"9c6d2f3b-4a5e-4b6c-8d7e-1f2a3b4c5d6e","seq":57,"ts":"2026-07-14T12:05:30.000000+00:00"}
+
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
           content:
             application/json:
               schema:
@@ -1110,6 +1180,7 @@ paths:
         - Previews
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
         - $ref: '#/components/parameters/PfsType'
       responses:
         '200':
@@ -1886,6 +1957,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: JWT token obtained from authentication endpoint
+    bearerQueryAuth:
+      type: apiKey
+      in: query
+      name: authorization
+      description: Same JWT as `bearerAuth`, as a query param. Used by `GET /workspaces/{workspaceId}/events`, whose `EventSource` clients can't set headers.
 
   parameters:
     WorkspaceId:
@@ -2182,7 +2258,7 @@ components:
         owner:
           type: string
           description: The user ID of the workspace owner
-        viewerRole:
+        viewer_role:
           type: string
           enum:
             - owner
@@ -2196,6 +2272,72 @@ components:
             Computed per-request; not stored. Always "owner" for the workspace
             creator. For collaborators, reflects their accepted share mode,
             clamped to "readonly" while the workspace is archived.
+
+    WorkspaceEventType:
+      type: string
+      enum:
+        - file.saved
+        - file.created
+        - file.deleted
+        - file.renamed
+        - file.reverted
+        - file.committed
+        - share.revoked
+        - workspace.archived
+        - workspace.deleted
+      description: |
+        Kind of `WorkspaceEvent` (also the SSE frame's `event:` field).
+
+        - `file.saved`: file overwritten via `PUT .../files/{filePath}`.
+        - `file.created`: file/folder created via `POST .../files` or a new PFS via `POST .../pfs`.
+        - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
+        - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
+        - `file.committed`: changes committed via `PUT .../diffs`.
+        - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their stream.
+        - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
+        - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the stream for everyone.
+
+    WorkspaceEvent:
+      type: object
+      description: JSON payload in the `data:` line of each SSE frame. `type`/`seq` are mirrored in the frame's `event:`/`id:` fields.
+      required:
+        - type
+        - seq
+        - ts
+        - actor_user_id
+      properties:
+        type:
+          $ref: '#/components/schemas/WorkspaceEventType'
+        seq:
+          type: integer
+          description: Monotonically increasing, unique per server process. No backlog/replay - use to detect gaps, not to request retransmission.
+        ts:
+          type: string
+          format: date-time
+          description: Server timestamp when published.
+        actor_user_id:
+          type:
+            - string
+            - "null"
+          description: User who caused the event, or `null` if system-generated. Clients typically ignore events they caused themselves.
+        path:
+          type:
+            - string
+            - "null"
+          default: null
+          description: Path of the affected file. `null` for events not scoped to a file.
+        file:
+          default: null
+          description: Snapshot of the affected file/folder. `null` for events not scoped to a file.
+          oneOf:
+            - $ref: '#/components/schemas/FileItem'
+            - type: "null"
+        target_user_id:
+          type: string
+          description: Only on `share.revoked` - the user id this event is delivered to (never broadcast to other subscribers).
+        tracked:
+          type: boolean
+          description: Only on `file.deleted` - whether the file was git-tracked (revertible) or untracked (removed permanently).
 
     FileItem:
       type: object

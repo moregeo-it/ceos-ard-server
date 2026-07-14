@@ -23,6 +23,7 @@ strictyaml = ">=1.7.3,<2"
 PyYAML = ">=6.0,<7" # todo: replace usage with strictyaml once the CLI is more library friendly
 pygit2 = ">=1.17.0,<2"
 python-dateutil = ">=2.8.2,<3"
+sse-starlette = ">=3.4.5,<4"
 
 [feature.dev.dependencies]
 ruff = ">=0.15.8,<0.16.0"

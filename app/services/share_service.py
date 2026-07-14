@@ -68,6 +68,17 @@ class ShareService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can manage sharing")
         return workspace
 
+    def _validate_expires_at(self, expires_at: datetime | None) -> None:
+        if expires_at is None:
+            return
+        if expires_at.tzinfo is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="expiresAt must include a timezone offset (e.g. suffix with 'Z' for UTC)",
+            )
+        if expires_at <= datetime.now(UTC):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expiresAt must be in the future")
+
     # --- Direct shares (invite by GitHub username) ---
 
     def list_shares(self, db: Session, workspace_id: str, user_id: str) -> list[WorkspaceShare]:
@@ -184,8 +195,7 @@ class ShareService:
     def create_share_link(self, db: Session, workspace_id: str, user: User, request: ShareLinkCreateRequest) -> WorkspaceShareLink:
         self._get_workspace_owned_by(db, workspace_id, user.id)
 
-        if request.expires_at and request.expires_at <= datetime.now(UTC):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expiresAt must be in the future")
+        self._validate_expires_at(request.expires_at)
 
         link = WorkspaceShareLink(
             workspace_id=workspace_id,
@@ -207,8 +217,7 @@ class ShareService:
         if not link:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
 
-        if request.expires_at and request.expires_at <= datetime.now(UTC):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expiresAt must be in the future")
+        self._validate_expires_at(request.expires_at)
 
         for key, value in request.model_dump(exclude_unset=True).items():
             if key in ("mode", "is_active") and value is None:
@@ -225,6 +234,10 @@ class ShareService:
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == link_id, WorkspaceShareLink.workspace_id == workspace_id).first()
         if not link:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
+
+        db.query(WorkspaceShare).filter(WorkspaceShare.share_link_id == link.id).update(
+             {WorkspaceShare.share_link_id: None}, synchronize_session=False
+         )
 
         db.delete(link)
         db.commit()

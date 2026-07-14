@@ -3,11 +3,7 @@ from typing import Any
 
 
 class EventType(str, Enum):
-    """Types of real-time workspace events broadcast to subscribers over SSE.
-
-    Phase 1 propagation is one-directional (owner -> readonly viewers). Later phases
-    (e.g. comments) add new members here without changing the transport.
-    """
+    """Real-time workspace event types broadcast to subscribers over SSE."""
 
     FILE_SAVED = "file.saved"
     FILE_CREATED = "file.created"
@@ -31,9 +27,8 @@ def build_event(
 ) -> dict[str, Any]:
     """Build a workspace event envelope for `EventBroker.publish`.
 
-    `actor_user_id` is the user who caused the change; clients echo-suppress events whose
-    actor is themselves. `target_user_id`, when set, restricts delivery to a single subscriber
-    (used for `share.revoked`). `seq`/`ts` are stamped by the broker at publish time.
+    `actor_user_id` is who caused the change (clients echo-suppress their own). `target_user_id`,
+    if set, restricts delivery to one subscriber (share.revoked). `seq`/`ts` are added on publish.
     """
     event: dict[str, Any] = {
         "type": event_type.value,

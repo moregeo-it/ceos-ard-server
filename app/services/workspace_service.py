@@ -200,6 +200,8 @@ class WorkspaceService:
 
             return workspace
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error getting user workspace: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspace: {str(e)}") from e
@@ -250,6 +252,8 @@ class WorkspaceService:
 
             return workspace
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error updating workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update workspace: {str(e)}") from e

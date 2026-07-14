@@ -6,20 +6,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Seconds between keepalive comments on an idle SSE stream (defeats proxy idle timeouts).
+# Keepalive ping interval (seconds) for idle SSE streams; defeats proxy idle timeouts.
 HEARTBEAT_SECONDS = 20
-# Per-subscriber queue bound. A backlog this deep only happens on a dead-but-not-yet-disconnected
-# socket; overflow is dropped and the client reconciles via its reconnect resync.
+# Per-subscriber queue bound; only reached by a dead-but-not-yet-disconnected socket.
 _QUEUE_MAXSIZE = 100
+
+# Enqueued when a subscriber's queue overflows: tells the consumer to close the stream so the
+# client reconnects and resyncs. Dropping events silently is unsafe - a dropped share.revoked /
+# workspace.deleted would leave an unauthorized stream open. `None` never collides with a real
+# (dict) envelope.
+FORCE_RESYNC = None
 
 
 class EventBroker:
     """In-memory pub/sub for real-time workspace events, keyed by workspace id.
 
-    Single-process only: each subscriber gets its own asyncio.Queue and events are fanned out
-    synchronously with `put_nowait`, so `publish` is safe to call without awaiting from an async
-    request handler. Horizontal scaling (multiple uvicorn workers/instances) would require a
-    shared backend (e.g. Redis) implementing this same subscribe/unsubscribe/publish surface.
+    Single-process only: each subscriber gets its own asyncio.Queue, fanned out synchronously via
+    `put_nowait` (so `publish` needs no await). Horizontal scaling would require a shared backend
+    (e.g. Redis) behind this same subscribe/unsubscribe/publish surface.
     """
 
     def __init__(self) -> None:
@@ -47,11 +51,28 @@ class EventBroker:
             try:
                 queue.put_nowait(envelope)
             except asyncio.QueueFull:
-                logger.warning(
-                    "SSE queue full for workspace %s; dropping event %s (client resyncs on reconnect)",
-                    workspace_id,
-                    event.get("type"),
-                )
+                self._force_resync(workspace_id, queue, event.get("type"))
+
+    def _force_resync(self, workspace_id: str, queue: asyncio.Queue, dropped_event_type: str | None) -> None:
+        """Drain the overflowed subscriber's backlog and enqueue FORCE_RESYNC so it reconnects.
+
+        Draining first guarantees the sentinel fits; the discarded events are superseded by the
+        client's post-reconnect resync.
+        """
+        logger.warning(
+            "SSE queue full for workspace %s; forcing subscriber to disconnect and resync (dropped %s)",
+            workspace_id,
+            dropped_event_type,
+        )
+        while not queue.empty():
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        try:
+            queue.put_nowait(FORCE_RESYNC)
+        except asyncio.QueueFull:
+            logger.error("Failed to enqueue forced-resync sentinel for workspace %s", workspace_id)
 
 
 # Module-level singleton shared across all requests in the process.
