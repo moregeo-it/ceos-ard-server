@@ -236,8 +236,8 @@ class ShareService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
 
         db.query(WorkspaceShare).filter(WorkspaceShare.share_link_id == link.id).update(
-             {WorkspaceShare.share_link_id: None}, synchronize_session=False
-         )
+            {WorkspaceShare.share_link_id: None}, synchronize_session=False
+        )
 
         db.delete(link)
         db.commit()
