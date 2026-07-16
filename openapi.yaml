@@ -1918,11 +1918,9 @@ paths:
                   - workspace
                 properties:
                   share:
-                    type:
-                      - object
-                      - "null"
-                    allOf:
+                    oneOf:
                       - $ref: '#/components/schemas/WorkspaceShare'
+                      - type: "null"
                     description: |
                       Null when the requester is the workspace owner (they
                       already have full access; no share row is created).
