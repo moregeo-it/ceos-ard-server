@@ -192,8 +192,10 @@ paths:
       description: |
         Retrieves all workspaces the authenticated user has access to - both
         workspaces they own and workspaces shared with them ("Shared with
-        me"). Each workspace's `owner` and `viewer_role` fields indicate
-        whether the caller owns it or the mode of their share.
+        me"). Each workspace's `viewer_role` field indicates whether the
+        caller owns it ("owner") or the mode of their share ("readonly"),
+        while `user_id`, `owner_username`, and `owner_full_name` identify the
+        workspace owner.
       operationId: listWorkspaces
       tags:
         - Workspaces
@@ -415,8 +417,7 @@ paths:
       summary: Subscribe to real-time workspace change events (SSE)
       description: |
         Server-Sent Events stream of file/workspace changes, for any user
-        with access to the workspace (owner or a readonly/comment/edit
-        collaborator).
+        with access to the workspace (owner or a readonly collaborator).
       operationId: subscribeWorkspaceEvents
       tags:
         - Events
@@ -590,7 +591,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - readonly/comment collaborators cannot create files or folders
+          description: Forbidden - readonly collaborators cannot create files or folders
           content:
             application/json:
               schema:
@@ -682,7 +683,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - readonly/comment collaborators cannot upload file content
+          description: Forbidden - readonly collaborators cannot upload file content
           content:
             application/json:
               schema:
@@ -728,7 +729,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - readonly/comment collaborators cannot delete files or folders
+          description: Forbidden - readonly collaborators cannot delete files or folders
           content:
             application/json:
               schema:
@@ -803,7 +804,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - readonly/comment collaborators cannot rename or revert files
+          description: Forbidden - readonly collaborators cannot rename or revert files
           content:
             application/json:
               schema:
@@ -1640,7 +1641,7 @@ paths:
   /workspaces/{workspaceId}/shares/{shareId}:
     patch:
       summary: Change a collaborator's access mode
-      description: Updates the mode (readonly/comment/edit) of an existing share. Owner only.
+      description: Updates the mode (readonly) of an existing share. Owner only.
       operationId: updateWorkspaceShare
       tags:
         - Sharing
@@ -2175,7 +2176,7 @@ components:
         - pfs
         - created
         - pr
-        - owner
+        - user_id
       properties:
         id:
           type: string
@@ -2253,15 +2254,25 @@ components:
             - null
           description: Status of the PR
           default: null
-        owner:
+        user_id:
           type: string
           description: The user ID of the workspace owner
+        owner_username:
+          type:
+            - string
+            - "null"
+          description: GitHub username of the workspace owner
+          default: null
+        owner_full_name:
+          type:
+            - string
+            - "null"
+          description: Full name of the workspace owner
+          default: null
         viewer_role:
           type: string
           enum:
             - owner
-            - edit
-            - comment
             - readonly
           readOnly: true
           description: |
@@ -2308,7 +2319,8 @@ components:
           $ref: '#/components/schemas/WorkspaceEventType'
         seq:
           type: integer
-          description: Monotonically increasing, unique per server process. No backlog/replay - use to detect gaps, not to request retransmission.
+          description: >-
+            Opaque process-wide counter (mirrored in the frame's `id:`), for ordering/debug only.
         ts:
           type: string
           format: date-time
@@ -2413,23 +2425,11 @@ components:
       type: string
       enum:
         - readonly
-        - comment
-        - edit
       description: |
         Access level granted to a collaborator.
 
         - "readonly": Can view the workspace and its files, cannot make
           changes. Equivalent to viewing an archived workspace.
-        - "comment": Same as "readonly" today; reserved for the upcoming
-          commenting feature. Enforced now so no client changes are needed
-          once commenting ships.
-        - "edit": Can read and write files, create PFS documents, revert
-          changes, but cannot commit or propose (open/update a Pull
-          Request) - only the workspace owner's GitHub credentials can push
-          to the workspace's fork, so committing and proposing always
-          happen through the owner, who reviews collaborators' staged
-          changes via the Propose view. Cannot rename/archive/delete the
-          workspace or manage other shares either - those remain owner-only.
 
     ShareStatus:
       type: string

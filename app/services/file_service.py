@@ -282,7 +282,7 @@ class FileService:
             "tracked": is_committed,
             "file_details": {
                 "name": target_path.name,
-                "is_directory": target_path.is_dir(),
+                "is_directory": ftype == "Folder",
                 "status": get_file_status(repo, target_path),
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
             },
@@ -427,7 +427,7 @@ class FileService:
         return get_repo_changes(repo)
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         relative_path_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
