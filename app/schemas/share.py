@@ -9,7 +9,7 @@ from app.schemas.workspace import WorkspaceResponse
 class ShareCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    github_usernames: list[str] = Field(..., alias="githubUsernames", min_length=1, description="GitHub usernames to grant access to")
+    github_usernames: list[str] = Field(..., alias="githubUsernames", min_length=1, max_length=50, description="GitHub usernames to grant access to")
     mode: ShareMode
 
 
