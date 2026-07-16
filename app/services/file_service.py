@@ -10,7 +10,9 @@ from yaml import safe_load as yaml_load
 
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
+from app.schemas.events import EventType, build_event
 from app.schemas.workspace import FilePatchRequest
+from app.services.events_service import EventBroker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
@@ -22,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class FileService:
-    def __init__(self):
+    def __init__(self, broker: EventBroker | None = None):
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
+        self.broker = broker
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
@@ -176,11 +179,19 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
 
         if request_data.type == "file":
-            return create_file(workspace.abs_path, request_data.name, target_path)
+            result = create_file(workspace.abs_path, request_data.name, target_path)
         elif request_data.type == "folder":
-            return create_folder(workspace.abs_path, request_data.name, target_path)
+            result = create_folder(workspace.abs_path, request_data.name, target_path)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
+
+        # Publish event when file/folder is created
+        if self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result),
+            )
+        return result
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -200,12 +211,18 @@ class FileService:
             relative_path = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
             repo.index.add(relative_path)
             repo.index.write()
-            return {
+            result = {
                 "name": file_path.name,
                 "is_directory": False,
                 "status": get_file_status(repo, file_path),
                 "path": normalize_workspace_path(file_path, workspace.abs_path),
             }
+            if self.broker:
+                self.broker.publish(
+                    workspace_id,
+                    build_event(EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result),
+                )
+            return result
         except pygit2.GitError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been stored, but it failed to be added to the repository"
@@ -277,7 +294,7 @@ class FileService:
                 # File wasn't in index, nothing to do
                 pass
 
-        return {
+        result = {
             # Tracked means the file is and was under version control, so the delete can be reverted if needed.
             "tracked": is_committed,
             "file_details": {
@@ -287,13 +304,37 @@ class FileService:
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
             },
         }
+        if self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(
+                    EventType.FILE_DELETED,
+                    actor_user_id=user_id,
+                    path=result["file_details"]["path"],
+                    file=result["file_details"],
+                    tracked=result["tracked"],
+                ),
+            )
+        return result
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if operation_request.operation == "rename":
-            return await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+            result = await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+            if self.broker:
+                self.broker.publish(
+                    workspace_id,
+                    build_event(EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result),
+                )
+            return result
         elif operation_request.operation == "revert":
-            return await self._revert_file_changes(workspace.abs_path, file_path)
+            result = await self._revert_file_changes(workspace.abs_path, file_path)
+            if self.broker:
+                self.broker.publish(
+                    workspace_id,
+                    build_event(EventType.FILE_REVERTED, actor_user_id=user_id, path=file_path, file=result),
+                )
+            return result
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
 
@@ -494,6 +535,8 @@ class FileService:
             logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
             raise
 
+        if self.broker:
+            self.broker.publish(workspace_id, build_event(EventType.FILE_COMMITTED, actor_user_id=user.id))
         return commit
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:

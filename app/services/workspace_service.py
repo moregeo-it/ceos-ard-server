@@ -14,8 +14,10 @@ from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare
+from app.schemas.events import EventType, build_event
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
+from app.services.events_service import EventBroker
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.services.share_service import ROLE_RANK, ShareService
@@ -28,11 +30,12 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceService:
-    def __init__(self):
+    def __init__(self, broker: EventBroker | None = None):
         self.git_service = GitService()
         self.build_service = BuildService()
         self.github_service = GitHubService()
         self.share_service = ShareService()
+        self.broker = broker
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user: User) -> GitWorkspace:
         if not workspace_data.title:
@@ -250,6 +253,11 @@ class WorkspaceService:
             db.commit()
             db.refresh(workspace)
 
+            # Publish event when workspace is archived
+            if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ARCHIVED.value.upper():
+                if self.broker:
+                    self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id))
+
             return workspace
 
         except HTTPException:
@@ -273,6 +281,10 @@ class WorkspaceService:
 
             db.delete(workspace)
             db.commit()
+
+            # Publish event when workspace is deleted
+            if self.broker:
+                self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_DELETED, actor_user_id=user_id))
 
             logger.info(f"Successfully deleted workspace {workspace_id} (title: {workspace.title})")
             return "Workspace deleted successfully"
@@ -407,6 +419,13 @@ class WorkspaceService:
             except pygit2.GitError as e:
                 logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
+
+            # Publish event when PFS is created
+            if self.broker:
+                self.broker.publish(
+                    workspace_id,
+                    build_event(EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details),
+                )
 
             return folder_details
         except HTTPException:

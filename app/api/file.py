@@ -6,22 +6,19 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.dependencies import get_event_broker, get_file_service
+from app.dependencies import get_file_service
 from app.schemas.error import create_error_detail
-from app.schemas.events import EventType, build_event
 from app.schemas.workspace import (
     Commit,
     CommitRequest,
     CreateFileRequest,
     FileContextResponse,
-    FilePatchOperation,
     FilePatchRequest,
     FileResponse,
     FileSearchResponse,
     ListDiffsResponse,
 )
 from app.services.auth_service import require_github_user
-from app.services.events_service import EventBroker
 from app.services.file_service import FileService
 from app.utils.git_utils import format_commit
 
@@ -66,16 +63,10 @@ async def create(
     create_file_request: CreateFileRequest,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    broker: EventBroker = Depends(get_event_broker),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        result = await file_service.create(db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id)
-        broker.publish(
-            workspace_id,
-            build_event(EventType.FILE_CREATED, actor_user_id=current_user["user"].id, path=result["path"], file=result),
-        )
-        return result
+        return await file_service.create(db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id)
     except HTTPException:
         raise
     except Exception as e:
@@ -118,22 +109,16 @@ async def store_file_content(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    broker: EventBroker = Depends(get_event_broker),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        result = await file_service.store_file_content(
+        return await file_service.store_file_content(
             db=db,
             workspace_id=workspace_id,
             file_path=file_path,
             content=await request.body(),
             user_id=current_user["user"].id,
         )
-        broker.publish(
-            workspace_id,
-            build_event(EventType.FILE_SAVED, actor_user_id=current_user["user"].id, path=result["path"], file=result),
-        )
-        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -151,22 +136,10 @@ async def delete(
     workspace_id: str,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    broker: EventBroker = Depends(get_event_broker),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
         deleted_file = await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
-
-        broker.publish(
-            workspace_id,
-            build_event(
-                EventType.FILE_DELETED,
-                actor_user_id=current_user["user"].id,
-                path=deleted_file["file_details"]["path"],
-                file=deleted_file["file_details"],
-                tracked=deleted_file["tracked"],
-            ),
-        )
 
         if deleted_file["tracked"]:
             return JSONResponse(content=deleted_file["file_details"], status_code=status.HTTP_200_OK)
@@ -192,23 +165,16 @@ async def patch_file(
     operation_request: FilePatchRequest,
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
-    broker: EventBroker = Depends(get_event_broker),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
     try:
-        result = await file_service.update_file(
+        return await file_service.update_file(
             db=db,
             file_path=file_path,
             workspace_id=workspace_id,
             operation_request=operation_request,
             user_id=current_user["user"].id,
         )
-        event_type = EventType.FILE_RENAMED if operation_request.operation == FilePatchOperation.RENAME else EventType.FILE_REVERTED
-        broker.publish(
-            workspace_id,
-            build_event(event_type, actor_user_id=current_user["user"].id, path=file_path, file=result),
-        )
-        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -274,7 +240,6 @@ async def commit_changes(
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     file_service: FileService = Depends(get_file_service),
-    broker: EventBroker = Depends(get_event_broker),
 ):
     try:
         commit = await file_service.persist_changes(
@@ -283,7 +248,6 @@ async def commit_changes(
             message=commit.message,
             user=current_user["user"],
         )
-        broker.publish(workspace_id, build_event(EventType.FILE_COMMITTED, actor_user_id=current_user["user"].id))
         return format_commit(commit)
     except HTTPException:
         raise

@@ -10,6 +10,7 @@ from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare, WorkspaceShareLink
+from app.schemas.events import EventType, build_event
 from app.schemas.share import (
     ShareCreateRequest,
     ShareLinkCreateRequest,
@@ -17,6 +18,7 @@ from app.schemas.share import (
     ShareLinkUpdateRequest,
     ShareUpdateRequest,
 )
+from app.services.events_service import EventBroker
 from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
@@ -27,8 +29,9 @@ SHARE_LINK_TOKEN_TYPE = "share_link"
 
 
 class ShareService:
-    def __init__(self):
+    def __init__(self, broker: EventBroker | None = None):
         self.github_service = GitHubService()
+        self.broker = broker
 
     def resolve_role(self, db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
         """Resolve the effective role a user has on a workspace.
@@ -189,6 +192,13 @@ class ShareService:
         share.revoked_at = datetime.now(UTC)
         db.commit()
         db.refresh(share)
+
+        # Publish event when share is revoked (only to the affected user)
+        if share.invitee_user_id and self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(EventType.SHARE_REVOKED, actor_user_id=user_id, target_user_id=share.invitee_user_id),
+            )
 
         return share
 
