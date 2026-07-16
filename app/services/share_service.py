@@ -21,8 +21,7 @@ from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
 
-# Effective-role ranking used to gate access. Phase 1 supports readonly sharing only; the owner
-# is the sole writer. Additional collaborator roles (comment, edit) are deferred to later phases.
+# Effective-role ranking used to gate access. Owner is the sole writer.
 ROLE_RANK = {ShareMode.READONLY.value: 0, "owner": 1}
 SHARE_LINK_TOKEN_TYPE = "share_link"
 
@@ -35,7 +34,7 @@ class ShareService:
         """Resolve the effective role a user has on a workspace.
 
         Returns "owner", "readonly", or None if the user has no access at all.
-        Collaborators are always readonly (the owner is the sole writer).
+        The owner is the sole writer; collaborators are readonly.
         """
         if not user_id:
             return None
@@ -86,6 +85,12 @@ class ShareService:
         return db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace_id).order_by(WorkspaceShare.created_at.desc()).all()
 
     async def create_shares(self, db: Session, workspace_id: str, user: User, request: ShareCreateRequest) -> list[WorkspaceShare]:
+        if request.mode not in settings.SHARING_MODES_ENABLED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
+            )
+
         workspace = self._get_workspace_owned_by(db, workspace_id, user.id)
 
         seen_usernames: set[str] = set()
@@ -163,6 +168,12 @@ class ShareService:
         if not share:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
 
+        if request.mode not in settings.SHARING_MODES_ENABLED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
+            )
+
         share.mode = request.mode
         db.commit()
         db.refresh(share)
@@ -193,6 +204,12 @@ class ShareService:
         return links
 
     def create_share_link(self, db: Session, workspace_id: str, user: User, request: ShareLinkCreateRequest) -> WorkspaceShareLink:
+        if request.mode not in settings.SHARING_MODES_ENABLED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
+            )
+
         self._get_workspace_owned_by(db, workspace_id, user.id)
 
         self._validate_expires_at(request.expires_at)
