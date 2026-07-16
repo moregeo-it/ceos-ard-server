@@ -232,6 +232,8 @@ async def redeem_share_link(
             preview = share_service.get_share_link_preview(db=db, token=token)
             return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=preview.model_dump(by_alias=True))
 
+        if current_user["provider"] != "github":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace share links require GitHub authentication")
         share, workspace = share_service.redeem_share_link(db=db, token=token, user=current_user["user"])
 
         return {
