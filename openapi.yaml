@@ -27,8 +27,8 @@ tags:
     description: User authentication and session management
   - name: Workspaces
     description: Workspace CRUD operations and management
-  - name: Events
-    description: Real-time workspace change notifications delivered over Server-Sent Events (SSE)
+  - name: Realtime
+    description: Real-time workspace change notifications delivered over a WebSocket connection
   - name: Files
     description: File and building block operations
   - name: Previews
@@ -412,15 +412,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /workspaces/{workspaceId}/events:
+  /workspaces/{workspaceId}/ws:
     get:
-      summary: Subscribe to real-time workspace change events (SSE)
+      summary: Real-time workspace events (WebSocket)
       description: |
-        Server-Sent Events stream of file/workspace changes, for any user
-        with access to the workspace (owner or a readonly collaborator).
+        WebSocket stream of workspace changes for any user with access. (Documented under `get`
+        because OpenAPI has no WebSocket type - the request is a protocol upgrade.)
+
+        The server pushes `WorkspaceEvent` messages plus a `{"type":"ping"}` heartbeat; a terminal
+        event (`share.revoked` for this user, or `workspace.deleted`) closes the connection. Clients
+        send nothing.
+
+        Planned: the same connection will also carry CRDT document-sync and presence frames for live
+        collaborative editing (not yet implemented).
       operationId: subscribeWorkspaceEvents
       tags:
-        - Events
+        - Realtime
       security:
         - bearerAuth: []
         - bearerQueryAuth: []
@@ -429,51 +436,20 @@ paths:
         - name: authorization
           in: query
           required: false
-          description: JWT, for clients (e.g. `EventSource`) that can't send an `Authorization` header. Ignored if that header is present.
+          description: JWT, since a browser `WebSocket` handshake can't send an `Authorization` header. Ignored if that header is present.
           schema:
             type: string
       responses:
-        '200':
-          description: SSE stream opened; stays open until the client disconnects or the server closes it (see above).
-          headers:
-            Cache-Control:
-              description: Always `no-store` - the stream must not be cached.
-              schema:
-                type: string
-                example: no-store
-            X-Accel-Buffering:
-              description: Always `no` - disables reverse-proxy response buffering so events flush immediately.
-              schema:
-                type: string
-                example: "no"
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: Raw SSE frame stream (see the operation description and `WorkspaceEvent`).
-              examples:
-                fileSaved:
-                  summary: A collaborator saved a file
-                  value: |
-                    event: file.saved
-                    id: 42
-                    data: {"type":"file.saved","actor_user_id":"3f8b1e1a-2b3c-4d5e-9f6a-7b8c9d0e1f2a","path":"/glossary/ups.yaml","file":{"name":"ups.yaml","path":"/glossary/ups.yaml","is_directory":false,"status":"modified"},"seq":42,"ts":"2026-07-14T12:00:00.000000+00:00"}
-
-                shareRevoked:
-                  summary: This subscriber's access was revoked (closes the stream)
-                  value: |
-                    event: share.revoked
-                    id: 57
-                    data: {"type":"share.revoked","actor_user_id":"3f8b1e1a-2b3c-4d5e-9f6a-7b8c9d0e1f2a","path":null,"file":null,"target_user_id":"9c6d2f3b-4a5e-4b6c-8d7e-1f2a3b4c5d6e","seq":57,"ts":"2026-07-14T12:05:30.000000+00:00"}
-
+        '101':
+          description: Handshake succeeded; the server streams `WorkspaceEvent` messages until the client disconnects or a terminal event closes the connection.
         '401':
-          description: Unauthorized
+          description: Missing or invalid token; the handshake is rejected before the upgrade.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Workspace not found
+          description: Workspace not found, or the caller has no access.
           content:
             application/json:
               schema:
@@ -1960,7 +1936,7 @@ components:
       type: apiKey
       in: query
       name: authorization
-      description: Same JWT as `bearerAuth`, as a query param. Used by `GET /workspaces/{workspaceId}/events`, whose `EventSource` clients can't set headers.
+      description: Same JWT as `bearerAuth`, as a query param. Used by the realtime WebSocket endpoint (`/workspaces/{workspaceId}/ws`), whose browser clients can't set headers on the handshake.
 
   parameters:
     WorkspaceId:
@@ -2295,20 +2271,20 @@ components:
         - workspace.archived
         - workspace.deleted
       description: |
-        Kind of `WorkspaceEvent` (also the SSE frame's `event:` field).
+        Kind of `WorkspaceEvent`.
 
         - `file.saved`: file overwritten via `PUT .../files/{filePath}`.
         - `file.created`: file/folder created via `POST .../files` or a new PFS via `POST .../pfs`.
         - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
-        - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their stream.
+        - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
-        - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the stream for everyone.
+        - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
 
     WorkspaceEvent:
       type: object
-      description: JSON payload in the `data:` line of each SSE frame. `type`/`seq` are mirrored in the frame's `event:`/`id:` fields.
+      description: JSON payload of each realtime message pushed over the workspace WebSocket connection.
       required:
         - type
         - seq
@@ -2320,7 +2296,7 @@ components:
         seq:
           type: integer
           description: >-
-            Opaque process-wide counter (mirrored in the frame's `id:`), for ordering/debug only.
+            Opaque process-wide counter, for ordering/debug only.
         ts:
           type: string
           format: date-time

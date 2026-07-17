@@ -6,7 +6,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Keepalive ping interval (seconds) for idle SSE streams; defeats proxy idle timeouts.
+# Keepalive ping interval (seconds) for idle realtime connections; defeats proxy idle timeouts.
 HEARTBEAT_SECONDS = 20
 # Per-subscriber queue bound; only reached by a dead-but-not-yet-disconnected socket.
 _QUEUE_MAXSIZE = 100
@@ -21,9 +21,11 @@ FORCE_RESYNC = None
 class EventBroker:
     """In-memory pub/sub for real-time workspace events, keyed by workspace id.
 
-    Single-process only: each subscriber gets its own asyncio.Queue, fanned out synchronously via
-    `put_nowait` (so `publish` needs no await). Horizontal scaling would require a shared backend
-    (e.g. Redis) behind this same subscribe/unsubscribe/publish surface.
+    Transport-agnostic: the realtime WebSocket gateway (app/api/collab.py) drains each subscriber's
+    queue and sends it over the socket. Single-process only: each subscriber gets its own
+    asyncio.Queue, fanned out synchronously via `put_nowait` (so `publish` needs no await).
+    Horizontal scaling would require a shared backend (e.g. Redis) behind this same
+    subscribe/unsubscribe/publish surface.
     """
 
     def __init__(self) -> None:
@@ -60,7 +62,7 @@ class EventBroker:
         client's post-reconnect resync.
         """
         logger.warning(
-            "SSE queue full for workspace %s; forcing subscriber to disconnect and resync (dropped %s)",
+            "Realtime queue full for workspace %s; forcing subscriber to disconnect and resync (dropped %s)",
             workspace_id,
             dropped_event_type,
         )

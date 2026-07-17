@@ -3,7 +3,7 @@ from typing import Any
 
 
 class EventType(str, Enum):
-    """Real-time workspace event types broadcast to subscribers over SSE."""
+    """Real-time workspace event types broadcast to subscribers over the WebSocket gateway."""
 
     FILE_SAVED = "file.saved"
     FILE_CREATED = "file.created"
