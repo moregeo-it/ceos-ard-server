@@ -9,8 +9,6 @@ from app.db.database import get_db
 from app.dependencies import get_share_service
 from app.schemas.error import create_error_detail
 from app.schemas.share import (
-    ListShareLinksResponse,
-    ListSharesResponse,
     ShareCreateRequest,
     ShareLinkCreateRequest,
     ShareLinkUpdateRequest,
@@ -30,7 +28,7 @@ router = APIRouter(tags=["Sharing"])
 @router.get(
     "/workspaces/{workspace_id}/shares",
     summary="List all shares for a workspace",
-    response_model=ListSharesResponse,
+    response_model=list[WorkspaceShareResponse],
     status_code=status.HTTP_200_OK,
 )
 async def list_workspace_shares(
@@ -40,8 +38,7 @@ async def list_workspace_shares(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        shares = share_service.list_shares(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return {"shares": shares}
+        return await share_service.list_shares(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
     except HTTPException:
         raise
     except Exception as e:
@@ -52,7 +49,7 @@ async def list_workspace_shares(
 @router.post(
     "/workspaces/{workspace_id}/shares",
     summary="Share a workspace with specific people",
-    response_model=ListSharesResponse,
+    response_model=list[WorkspaceShareResponse],
     status_code=status.HTTP_201_CREATED,
 )
 async def create_workspace_shares(
@@ -63,8 +60,7 @@ async def create_workspace_shares(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        shares = await share_service.create_shares(db=db, workspace_id=workspace_id, user=current_user["user"], request=share_data)
-        return {"shares": shares}
+        return await share_service.create_shares(db=db, workspace_id=workspace_id, user=current_user["user"], request=share_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -87,7 +83,9 @@ async def update_workspace_share(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        return share_service.update_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id, request=share_data)
+        return await share_service.update_share(
+            db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id, request=share_data
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -120,7 +118,7 @@ async def revoke_workspace_share(
 @router.get(
     "/workspaces/{workspace_id}/share-links",
     summary="List share links for a workspace",
-    response_model=ListShareLinksResponse,
+    response_model=list[WorkspaceShareLinkResponse],
     status_code=status.HTTP_200_OK,
 )
 async def list_workspace_share_links(
@@ -130,8 +128,7 @@ async def list_workspace_share_links(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        links = share_service.list_share_links(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return {"shareLinks": links}
+        return await share_service.list_share_links(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
     except HTTPException:
         raise
     except Exception as e:
@@ -153,7 +150,7 @@ async def create_workspace_share_link(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        return share_service.create_share_link(db=db, workspace_id=workspace_id, user=current_user["user"], request=link_data)
+        return await share_service.create_share_link(db=db, workspace_id=workspace_id, user=current_user["user"], request=link_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -176,7 +173,9 @@ async def update_workspace_share_link(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        return share_service.update_share_link(db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id, request=link_data)
+        return await share_service.update_share_link(
+            db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id, request=link_data
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -197,7 +196,7 @@ async def delete_workspace_share_link(
     share_service: ShareService = Depends(get_share_service),
 ):
     try:
-        share_service.delete_share_link(db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id)
+        await share_service.delete_share_link(db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
@@ -219,12 +218,12 @@ async def redeem_share_link(
 ):
     try:
         if not current_user:
-            preview = share_service.get_share_link_preview(db=db, token=token)
+            preview = await share_service.get_share_link_preview(db=db, token=token)
             return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=preview.model_dump(by_alias=True))
 
         if current_user["provider"] != "github":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace share links require GitHub authentication")
-        share, workspace = share_service.redeem_share_link(db=db, token=token, user=current_user["user"])
+        share, workspace = await share_service.redeem_share_link(db=db, token=token, user=current_user["user"])
 
         return {
             "share": WorkspaceShareResponse.model_validate(share).model_dump(by_alias=True) if share else None,

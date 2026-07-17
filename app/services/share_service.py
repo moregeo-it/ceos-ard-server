@@ -83,7 +83,7 @@ class ShareService:
 
     # --- Direct shares (invite by GitHub username) ---
 
-    def list_shares(self, db: Session, workspace_id: str, user_id: str) -> list[WorkspaceShare]:
+    async def list_shares(self, db: Session, workspace_id: str, user_id: str) -> list[WorkspaceShare]:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         return db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace_id).order_by(WorkspaceShare.created_at.desc()).all()
 
@@ -165,7 +165,7 @@ class ShareService:
 
         return shares
 
-    def update_share(self, db: Session, workspace_id: str, share_id: str, user_id: str, request: ShareUpdateRequest) -> WorkspaceShare:
+    async def update_share(self, db: Session, workspace_id: str, share_id: str, user_id: str, request: ShareUpdateRequest) -> WorkspaceShare:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         share = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id, WorkspaceShare.workspace_id == workspace_id).first()
         if not share:
@@ -182,7 +182,7 @@ class ShareService:
         db.refresh(share)
         return share
 
-    def revoke_share(self, db: Session, workspace_id: str, share_id: str, user_id: str) -> WorkspaceShare:
+    async def revoke_share(self, db: Session, workspace_id: str, share_id: str, user_id: str) -> WorkspaceShare:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         share = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id, WorkspaceShare.workspace_id == workspace_id).first()
         if not share:
@@ -204,7 +204,7 @@ class ShareService:
 
     # --- Share links ---
 
-    def list_share_links(self, db: Session, workspace_id: str, user_id: str) -> list[WorkspaceShareLink]:
+    async def list_share_links(self, db: Session, workspace_id: str, user_id: str) -> list[WorkspaceShareLink]:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         links = (
             db.query(WorkspaceShareLink).filter(WorkspaceShareLink.workspace_id == workspace_id).order_by(WorkspaceShareLink.created_at.desc()).all()
@@ -213,7 +213,7 @@ class ShareService:
             link.url = self._build_share_link_url(link)
         return links
 
-    def create_share_link(self, db: Session, workspace_id: str, user: User, request: ShareLinkCreateRequest) -> WorkspaceShareLink:
+    async def create_share_link(self, db: Session, workspace_id: str, user: User, request: ShareLinkCreateRequest) -> WorkspaceShareLink:
         if request.mode not in settings.SHARING_MODES_ENABLED:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -238,7 +238,9 @@ class ShareService:
         link.url = self._build_share_link_url(link)
         return link
 
-    def update_share_link(self, db: Session, workspace_id: str, link_id: str, user_id: str, request: ShareLinkUpdateRequest) -> WorkspaceShareLink:
+    async def update_share_link(
+        self, db: Session, workspace_id: str, link_id: str, user_id: str, request: ShareLinkUpdateRequest
+    ) -> WorkspaceShareLink:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == link_id, WorkspaceShareLink.workspace_id == workspace_id).first()
         if not link:
@@ -256,7 +258,7 @@ class ShareService:
         link.url = self._build_share_link_url(link)
         return link
 
-    def delete_share_link(self, db: Session, workspace_id: str, link_id: str, user_id: str) -> None:
+    async def delete_share_link(self, db: Session, workspace_id: str, link_id: str, user_id: str) -> None:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == link_id, WorkspaceShareLink.workspace_id == workspace_id).first()
         if not link:
@@ -299,7 +301,7 @@ class ShareService:
 
         return link
 
-    def get_share_link_preview(self, db: Session, token: str) -> ShareLinkPreview:
+    async def get_share_link_preview(self, db: Session, token: str) -> ShareLinkPreview:
         link = self._get_active_link_or_404(db, token)
         workspace = db.query(GitWorkspace).filter(GitWorkspace.id == link.workspace_id).first()
 
@@ -315,7 +317,7 @@ class ShareService:
             is_active=link.is_active,
         )
 
-    def redeem_share_link(self, db: Session, token: str, user: User) -> tuple[WorkspaceShare | None, GitWorkspace]:
+    async def redeem_share_link(self, db: Session, token: str, user: User) -> tuple[WorkspaceShare | None, GitWorkspace]:
         link = self._get_active_link_or_404(db, token)
         workspace = db.query(GitWorkspace).filter(GitWorkspace.id == link.workspace_id).first()
         if not workspace:

@@ -33,10 +33,6 @@ class WorkspaceShareResponse(BaseModel):
     revoked_at: datetime | None = Field(None, alias="revokedAt")
 
 
-class ListSharesResponse(BaseModel):
-    shares: list[WorkspaceShareResponse]
-
-
 class ShareLinkCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -63,12 +59,6 @@ class WorkspaceShareLinkResponse(BaseModel):
     created_by_user_id: str = Field(alias="createdBy")
     created_at: datetime = Field(alias="createdAt")
     expires_at: datetime | None = Field(None, alias="expiresAt")
-
-
-class ListShareLinksResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    shareLinks: list[WorkspaceShareLinkResponse] = Field(alias="shareLinks")
 
 
 class ShareLinkPreview(BaseModel):
