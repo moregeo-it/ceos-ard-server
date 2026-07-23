@@ -25,13 +25,12 @@ _workspace_service = WorkspaceService()
 
 
 async def _authorize(token: str | None, workspace_id: str) -> str:
-    """Authenticate + authorize a realtime connection using a short-lived DB session.
+    """Authenticate and authorize a realtime connection, returning the user's id.
 
-    Mirrors the gate the old SSE endpoint applied via FastAPI dependencies (`require_github_user`
-    + `get_workspace_by_id`), but called directly because a WebSocket route can't use the HTTP
-    `Depends`/`HTTPException` machinery. Returns the authenticated user's id or raises
-    ``HTTPException``. The DB session is held only for the handshake - we deliberately do NOT keep a
-    request-scoped session open for the whole socket lifetime.
+    A WebSocket route can't use FastAPI's HTTP `Depends`/`HTTPException` flow, so the same checks are
+    run directly: validate the JWT (`require_github_user`) and confirm the user has access to the
+    workspace (`get_workspace_by_id`). Raises ``HTTPException`` on failure. The DB session is opened
+    only for the handshake, not held for the socket's lifetime.
     """
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization token")
@@ -49,11 +48,11 @@ async def _authorize(token: str | None, workspace_id: str) -> str:
 
 @router.websocket("/{workspace_id}/ws")
 async def workspace_ws(websocket: WebSocket, workspace_id: str):
-    """Real-time workspace event stream over WebSocket (replaces the SSE ``/events`` endpoint).
+    """Real-time workspace event stream over WebSocket.
 
-    Carries the same lifecycle event envelopes the SSE stream did (file.saved, file.committed,
-    share.revoked, workspace.deleted, ...). The JWT is passed as the ``authorization`` query param
-    because browsers cannot set headers on a WebSocket handshake - the same mechanism SSE used.
+    Pushes lifecycle event envelopes (file.saved, file.committed, share.revoked, workspace.deleted,
+    ...) to any user with access to the workspace. The JWT is passed as the ``authorization`` query
+    param because browsers can't set headers on a WebSocket handshake.
     """
     token = websocket.query_params.get("authorization")
     try:
@@ -106,7 +105,7 @@ async def workspace_ws(websocket: WebSocket, workspace_id: str):
                 tg.cancel_scope.cancel()
 
             async def reader() -> None:
-                """Consume inbound frames only to detect disconnect. Phase-1 clients send nothing."""
+                """Consume inbound frames only to detect disconnect; clients don't send anything."""
                 try:
                     while True:
                         await websocket.receive_text()
