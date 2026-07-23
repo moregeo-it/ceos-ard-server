@@ -277,13 +277,21 @@ class FileService:
                 # File wasn't in index, nothing to do
                 pass
 
+        if ftype == "Folder":
+            # target_path no longer exists on disk (rmtree'd above): is_dir() would always be
+            # False, and get_file_status() would always be None since git never tracks directory
+            # paths directly. Use what we already know instead.
+            file_status = "deleted" if is_committed else None
+        else:
+            file_status = get_file_status(repo, target_path)
+
         return {
             # Tracked means the file is and was under version control, so the delete can be reverted if needed.
             "tracked": is_committed,
             "file_details": {
                 "name": target_path.name,
-                "is_directory": target_path.is_dir(),
-                "status": get_file_status(repo, target_path),
+                "is_directory": ftype == "Folder",
+                "status": file_status,
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
             },
         }
