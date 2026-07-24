@@ -108,15 +108,23 @@ class FileService:
 
     async def get_workspace_files(self, path: str, db: Session, workspace_id: str, user_id: str, recurse: bool = False):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        target_path = validate_workspace_path(path, workspace.abs_path, exists=True)
+        # Don't require on-disk existence: a deleted-but-tracked folder is gone from disk, but its
+        # former (now-deleted) contents can still be listed from git (see the deleted branch below).
+        target_path = validate_workspace_path(path, workspace.abs_path)
 
         repo = get_repo(workspace.abs_path)
         try:
             # Get the status of all files (e.g. to include deleted files)
             status_map = self._get_all_file_statuses(repo, target_path, workspace.abs_path)
 
-            # Get all files (without deleted files)
-            files = self.walk_files(target_path, workspace.abs_path, repo, recurse, status_map)
+            # Get all files that still exist on disk (deleted entries are added from the status map below)
+            if target_path.is_dir():
+                files = self.walk_files(target_path, workspace.abs_path, repo, recurse, status_map)
+            elif status_map.get(str(target_path)) == "deleted:folder":
+                # Deleted tracked folder: nothing on disk to walk; its deleted descendants are appended below.
+                files = []
+            else:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Path '{path}' not found in workspace")
 
             # Add deleted files and folders
             for filepath, state in status_map.items():
@@ -277,13 +285,21 @@ class FileService:
                 # File wasn't in index, nothing to do
                 pass
 
+        if ftype == "Folder":
+            # target_path no longer exists on disk (rmtree'd above): is_dir() would always be
+            # False, and get_file_status() would always be None since git never tracks directory
+            # paths directly. Use what we already know instead.
+            file_status = "deleted" if is_committed else None
+        else:
+            file_status = get_file_status(repo, target_path)
+
         return {
             # Tracked means the file is and was under version control, so the delete can be reverted if needed.
             "tracked": is_committed,
             "file_details": {
                 "name": target_path.name,
-                "is_directory": target_path.is_dir(),
-                "status": get_file_status(repo, target_path),
+                "is_directory": ftype == "Folder",
+                "status": file_status,
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
             },
         }
