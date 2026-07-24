@@ -17,7 +17,7 @@ from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
-from app.utils.git_utils import get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -324,15 +324,23 @@ class FileService:
             if self.broker:
                 self.broker.publish(
                     workspace_id,
-                    build_event(EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result),
+                    build_event(EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path),
                 )
             return result
         elif operation_request.operation == "revert":
             result = await self._revert_file_changes(workspace.abs_path, file_path)
             if self.broker:
+                # old_path is only meaningful when the revert undid a staged rename.
+                reverted_rename = result.get("path") != file_path if isinstance(result, dict) else False
                 self.broker.publish(
                     workspace_id,
-                    build_event(EventType.FILE_REVERTED, actor_user_id=user_id, path=file_path, file=result),
+                    build_event(
+                        EventType.FILE_REVERTED,
+                        actor_user_id=user_id,
+                        path=file_path,
+                        file=result,
+                        old_path=file_path if reverted_rename else None,
+                    ),
                 )
             return result
         else:
@@ -519,6 +527,14 @@ class FileService:
 
         repo = get_repo(workspace.abs_path)
 
+        # Capture the staged change list before committing - the index diff is empty afterwards.
+        # Paths from git are repo-relative; normalize them to the /-rooted form used everywhere else.
+        changes = get_repo_changes(repo)
+        for change in changes:
+            change["path"] = "/" + change["path"].lstrip("/")
+            if "source" in change:
+                change["source"] = "/" + change["source"].lstrip("/")
+
         # Commit and push changes to the repository
         commit = await self.git_service.commit_changes(repo, message, user=user)
 
@@ -536,7 +552,15 @@ class FileService:
             raise
 
         if self.broker:
-            self.broker.publish(workspace_id, build_event(EventType.FILE_COMMITTED, actor_user_id=user.id))
+            self.broker.publish(
+                workspace_id,
+                build_event(
+                    EventType.FILE_COMMITTED,
+                    actor_user_id=user.id,
+                    commit=format_commit(commit),
+                    changes=changes,
+                ),
+            )
         return commit
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
