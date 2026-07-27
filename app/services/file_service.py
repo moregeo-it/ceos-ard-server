@@ -214,6 +214,9 @@ class FileService:
         file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         repo = get_repo(workspace.abs_path)
         try:
+            # Recreate the parent directory if it was removed (e.g. its folder was deleted while
+            # the file stayed open with unsaved changes).
+            file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_bytes(content)
             # Stage the file using pygit2
             relative_path = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
