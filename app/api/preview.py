@@ -1,6 +1,4 @@
-import hashlib
 import logging
-import os
 from email.utils import formatdate
 from typing import Any
 
@@ -13,35 +11,11 @@ from app.dependencies import get_preview_service
 from app.schemas.error import create_error_detail
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
+from app.utils.http_utils import compute_file_etag, if_none_match_matches
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workspaces", tags=["Previews"])
-
-
-def _compute_file_etag(stat_result: os.stat_result) -> str:
-    """Build an ETag validator from the file's size and modification time.
-
-    Computed up front (before reading the body) so conditional requests can be answered
-    with a 304. A deleted/replaced file yields a different validator (or a 404), so a stale
-    asset can never satisfy a revalidation.
-    """
-    base = f"{stat_result.st_mtime_ns}-{stat_result.st_size}"
-    return f'"{hashlib.md5(base.encode(), usedforsecurity=False).hexdigest()}"'
-
-
-def _if_none_match_matches(if_none_match: str, etag: str) -> bool:
-    """Return True if the client's If-None-Match header covers the current ETag."""
-    if if_none_match.strip() == "*":
-        return True
-
-    def _normalize(tag: str) -> str:
-        tag = tag.strip()
-        # Ignore the weak-validator prefix when comparing.
-        return tag[2:] if tag.startswith("W/") else tag
-
-    normalized_etag = _normalize(etag)
-    return any(_normalize(candidate) == normalized_etag for candidate in if_none_match.split(","))
 
 
 @router.get(
@@ -96,7 +70,7 @@ async def get_preview_static_file(
         file = await preview_service.get_preview_static_file(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         stat_result = file.stat()
-        etag = _compute_file_etag(stat_result)
+        etag = compute_file_etag(stat_result)
         cache_headers = {
             "ETag": etag,
             "Last-Modified": formatdate(stat_result.st_mtime, usegmt=True),
@@ -107,7 +81,7 @@ async def get_preview_static_file(
         }
 
         if_none_match = request.headers.get("if-none-match")
-        if if_none_match and _if_none_match_matches(if_none_match, etag):
+        if if_none_match and if_none_match_matches(if_none_match, etag):
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=cache_headers)
 
         return FileResponse(str(file), headers=cache_headers)
