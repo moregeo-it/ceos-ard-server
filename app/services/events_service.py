@@ -22,10 +22,15 @@ class EventBroker:
     """In-memory pub/sub for real-time workspace events, keyed by workspace id.
 
     Transport-agnostic: the realtime WebSocket gateway (app/api/collab.py) drains each subscriber's
-    queue and sends it over the socket. Single-process only: each subscriber gets its own
-    asyncio.Queue, fanned out synchronously via `put_nowait` (so `publish` needs no await).
-    Horizontal scaling would require a shared backend (e.g. Redis) behind this same
-    subscribe/unsubscribe/publish surface.
+    queue and sends it over the socket. Each subscriber gets its own asyncio.Queue, fanned out
+    synchronously via `put_nowait` (so `publish` needs no await).
+
+    DEPLOYMENT CONSTRAINT — run a SINGLE worker process. The subscriber registry lives only in this
+    process's memory, so an event published by one worker is never delivered to clients connected to a
+    different worker. Running multiple workers (`uvicorn --workers N`, gunicorn `-w N`) or multiple
+    replicas therefore *silently* drops cross-worker events and leaves those viewers stale until they
+    reconnect. To scale horizontally, replace this fan-out with a shared backend (e.g. Redis pub/sub)
+    behind the same subscribe/unsubscribe/publish surface. See the deployment note in README.md.
     """
 
     def __init__(self) -> None:
