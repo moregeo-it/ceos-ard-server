@@ -1061,14 +1061,29 @@ paths:
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/PfsType'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: File content
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Last-Modified:
+              $ref: '#/components/headers/LastModified'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
           content:
             '*/*':
               schema:
                 type: string
                 format: binary
+        '304':
+          description: Cached copy is still current; no body is returned.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
         '404':
           description: File not found
           content:
@@ -1426,6 +1441,34 @@ components:
         enum:
           - pdf
           - docx
+
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: Cached ETag to revalidate; if it still matches, the server returns 304 instead of the asset.
+      schema:
+        type: string
+      example: '"5d41402abc4b2a76b9719d911017c592"'
+
+  headers:
+    ETag:
+      description: Asset validator; send it in If-None-Match to revalidate.
+      schema:
+        type: string
+      example: '"5d41402abc4b2a76b9719d911017c592"'
+
+    LastModified:
+      description: When the asset was last modified.
+      schema:
+        type: string
+      example: 'Mon, 27 Jul 2026 10:00:00 GMT'
+
+    CacheControl:
+      description: Always no-cache; store but revalidate before reuse.
+      schema:
+        type: string
+      example: 'no-cache'
 
   schemas:
     Error:
