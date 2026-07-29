@@ -515,9 +515,7 @@ class FileService:
             # The working tree is clean right after the commit, so merge the remote
             # changes and push again instead of leaving the user in a dead end.
             try:
-                sync_result = self.git_service.sync_with_origin(
-                    repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id
-                )
+                sync_result = self.git_service.sync_with_origin(repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id)
             except HTTPException:
                 self._revert_commit(repo, workspace_id)
                 raise push_error from None

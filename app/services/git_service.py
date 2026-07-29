@@ -296,9 +296,7 @@ class GitService:
                     conflicting_files = sorted({entry.path for conflict in repo.index.conflicts for entry in conflict if entry is not None})
                     repo.reset(local_oid, pygit2.GIT_RESET_HARD)
                     repo.state_cleanup()
-                    return SyncResult(
-                        status=SyncStatus.CONFLICT, ahead_commits=ahead, behind_commits=behind, conflicting_files=conflicting_files
-                    )
+                    return SyncResult(status=SyncStatus.CONFLICT, ahead_commits=ahead, behind_commits=behind, conflicting_files=conflicting_files)
 
                 signature = pygit2.Signature(user.full_name or user.username, user.email)
                 tree_id = repo.index.write_tree()
