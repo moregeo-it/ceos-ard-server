@@ -1,8 +1,12 @@
+from fastapi import Depends
+
 from app.services.build_service import BuildService
+from app.services.events_service import EventBroker, event_broker
 from app.services.file_service import FileService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
 from app.services.preview_service import PreviewService
+from app.services.share_service import ShareService
 from app.services.token_refresh_service import TokenRefreshService
 from app.services.workspace_service import WorkspaceService
 
@@ -19,16 +23,24 @@ def get_github_service() -> GitHubService:
     return GitHubService()
 
 
-def get_workspace_service() -> WorkspaceService:
-    return WorkspaceService()
+def get_event_broker() -> EventBroker:
+    return event_broker
 
 
-def get_file_service() -> FileService:
-    return FileService()
+def get_workspace_service(broker: EventBroker = Depends(get_event_broker)) -> WorkspaceService:
+    return WorkspaceService(broker=broker)
+
+
+def get_file_service(broker: EventBroker = Depends(get_event_broker)) -> FileService:
+    return FileService(broker=broker)
 
 
 def get_preview_service() -> PreviewService:
     return PreviewService()
+
+
+def get_share_service(broker: EventBroker = Depends(get_event_broker)) -> ShareService:
+    return ShareService(broker=broker)
 
 
 def get_token_refresh_service() -> TokenRefreshService:

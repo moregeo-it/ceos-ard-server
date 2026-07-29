@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import shutil
 from pathlib import Path
@@ -19,6 +20,22 @@ class GitService:
         self.workspaces_root.mkdir(parents=True, exist_ok=True)
 
     async def clone_repository(
+        self,
+        user: User,
+        clone_url: str,
+        workspace_path: Path,
+        branch_name: str,
+        upstream_owner: str,
+        upstream_repo: str,
+        upstream_branch: str = "main",
+    ) -> bool:
+        # Cloning is blocking pygit2 network + disk I/O; run it in a worker thread so it doesn't stall
+        # the asyncio event loop (shared with the realtime WebSocket gateway in app/api/collab.py).
+        return await asyncio.to_thread(
+            self._clone_repository_sync, user, clone_url, workspace_path, branch_name, upstream_owner, upstream_repo, upstream_branch
+        )
+
+    def _clone_repository_sync(
         self,
         user: User,
         clone_url: str,
@@ -54,8 +71,8 @@ class GitService:
             repo.create_branch(branch_name, upstream_commit)
             repo.checkout(f"refs/heads/{branch_name}")
 
-            # Push to origin and set upstream tracking
-            await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
+            # Push to origin and set upstream tracking (already on the worker thread)
+            self._push_sync(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
 
             logger.info(f"Successfully cloned repository to {workspace_path}")
 
@@ -178,11 +195,17 @@ class GitService:
         """
         Push changes with user-specific credentials.
 
+        The pygit2 push/fetch are blocking network calls, so they run in a worker thread to keep the
+        asyncio event loop (and the realtime WebSocket gateway that shares it) responsive.
+
         Args:
             repo: pygit2 Repository instance
             branch_name: Branch to push to
             user: User object with username and access_token for authentication
         """
+        await asyncio.to_thread(self._push_sync, repo, branch_name, user, set_upstream)
+
+    def _push_sync(self, repo: pygit2.Repository, branch_name: str, user: User, set_upstream: bool = False) -> None:
         try:
             origin = repo.remotes["origin"]
             callbacks = UserPassCredentials(user.username, user.access_token)

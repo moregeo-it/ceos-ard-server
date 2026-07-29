@@ -10,21 +10,24 @@ from yaml import safe_load as yaml_load
 
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
+from app.schemas.events import EventType, build_event
 from app.schemas.workspace import FilePatchRequest
+from app.services.events_service import EventBroker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
-from app.utils.git_utils import get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
 
 class FileService:
-    def __init__(self):
+    def __init__(self, broker: EventBroker | None = None):
         self.git_service = GitService()
         self.workspace_service = WorkspaceService()
+        self.broker = broker
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
@@ -175,7 +178,7 @@ class FileService:
         elif request_data.type not in ["file", "folder"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         name = validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
 
@@ -184,11 +187,19 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
 
         if request_data.type == "file":
-            return create_file(workspace.abs_path, request_data.name, target_path)
+            result = create_file(workspace.abs_path, request_data.name, target_path)
         elif request_data.type == "folder":
-            return create_folder(workspace.abs_path, request_data.name, target_path)
+            result = create_folder(workspace.abs_path, request_data.name, target_path)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
+
+        # Publish event when file/folder is created
+        if self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result),
+            )
+        return result
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -199,7 +210,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         repo = get_repo(workspace.abs_path)
         try:
@@ -211,12 +222,18 @@ class FileService:
             relative_path = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
             repo.index.add(relative_path)
             repo.index.write()
-            return {
+            result = {
                 "name": file_path.name,
                 "is_directory": False,
                 "status": get_file_status(repo, file_path),
                 "path": normalize_workspace_path(file_path, workspace.abs_path),
             }
+            if self.broker:
+                self.broker.publish(
+                    workspace_id,
+                    build_event(EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result),
+                )
+            return result
         except pygit2.GitError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been stored, but it failed to be added to the repository"
@@ -228,7 +245,7 @@ class FileService:
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
         relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
         repo = get_repo(workspace.abs_path)
@@ -296,7 +313,7 @@ class FileService:
         else:
             file_status = get_file_status(repo, target_path)
 
-        return {
+        result = {
             # Tracked means the file is and was under version control, so the delete can be reverted if needed.
             "tracked": is_committed,
             "file_details": {
@@ -306,13 +323,45 @@ class FileService:
                 "path": normalize_workspace_path(target_path, workspace.abs_path),
             },
         }
+        if self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(
+                    EventType.FILE_DELETED,
+                    actor_user_id=user_id,
+                    path=result["file_details"]["path"],
+                    file=result["file_details"],
+                    tracked=result["tracked"],
+                ),
+            )
+        return result
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if operation_request.operation == "rename":
-            return await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+            result = await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+            if self.broker:
+                self.broker.publish(
+                    workspace_id,
+                    build_event(EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path),
+                )
+            return result
         elif operation_request.operation == "revert":
-            return await self._revert_file_changes(workspace.abs_path, file_path)
+            result = await self._revert_file_changes(workspace.abs_path, file_path)
+            if self.broker:
+                # old_path is only meaningful when the revert undid a staged rename.
+                reverted_rename = result.get("path") != file_path if isinstance(result, dict) else False
+                self.broker.publish(
+                    workspace_id,
+                    build_event(
+                        EventType.FILE_REVERTED,
+                        actor_user_id=user_id,
+                        path=file_path,
+                        file=result,
+                        old_path=file_path if reverted_rename else None,
+                    ),
+                )
+            return result
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
 
@@ -440,12 +489,13 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from e
 
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        # The changed-files list is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         repo = get_repo(workspace.abs_path)
         return get_repo_changes(repo)
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         relative_path_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
@@ -484,7 +534,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
     async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> pygit2.Commit:
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot commit changes for an archived workspace")
@@ -495,6 +545,14 @@ class FileService:
             )
 
         repo = get_repo(workspace.abs_path)
+
+        # Capture the staged change list before committing - the index diff is empty afterwards.
+        # Paths from git are repo-relative; normalize them to the /-rooted form used everywhere else.
+        changes = get_repo_changes(repo)
+        for change in changes:
+            change["path"] = "/" + change["path"].lstrip("/")
+            if "source" in change:
+                change["source"] = "/" + change["source"].lstrip("/")
 
         # Commit and push changes to the repository
         commit = await self.git_service.commit_changes(repo, message, user=user)
@@ -512,6 +570,16 @@ class FileService:
             logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
             raise
 
+        if self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(
+                    EventType.FILE_COMMITTED,
+                    actor_user_id=user.id,
+                    commit=format_commit(commit),
+                    changes=changes,
+                ),
+            )
         return commit
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:

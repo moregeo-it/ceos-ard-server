@@ -27,12 +27,16 @@ tags:
     description: User authentication and session management
   - name: Workspaces
     description: Workspace CRUD operations and management
+  - name: Realtime
+    description: Real-time workspace change notifications delivered over a WebSocket connection
   - name: Files
     description: File and building block operations
   - name: Previews
     description: Preview generation and management
   - name: PFS
     description: Product Family Specification management
+  - name: Sharing
+    description: Workspace sharing, collaborator management, and invitations
 
 paths:
   /pfs:
@@ -185,7 +189,13 @@ paths:
   /workspaces:
     get:
       summary: List all workspaces
-      description: Retrieves all workspaces for the authenticated user
+      description: |
+        Retrieves all workspaces the authenticated user has access to - both
+        workspaces they own and workspaces shared with them ("Shared with
+        me"). Each workspace's `viewer_role` field indicates whether the
+        caller owns it ("owner") or the mode of their share ("readonly"),
+        while `user_id`, `owner_username`, and `owner_full_name` identify the
+        workspace owner.
       operationId: listWorkspaces
       tags:
         - Workspaces
@@ -402,6 +412,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/ws:
+    get:
+      summary: Real-time workspace events (WebSocket)
+      description: |
+        WebSocket stream of workspace changes for any user with access. (Documented under `get`
+        because OpenAPI has no WebSocket type - the request is a protocol upgrade.)
+
+        The server pushes `WorkspaceEvent` messages plus a `{"type":"ping"}` heartbeat; a terminal
+        event (`share.revoked` for this user, or `workspace.deleted`) closes the connection. Clients
+        send nothing.
+
+        Planned: the same connection will also carry CRDT document-sync and presence frames for live
+        collaborative editing (not yet implemented).
+      operationId: subscribeWorkspaceEvents
+      tags:
+        - Realtime
+      security:
+        - bearerAuth: []
+        - bearerQueryAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: authorization
+          in: query
+          required: false
+          description: JWT, since a browser `WebSocket` handshake can't send an `Authorization` header. Ignored if that header is present.
+          schema:
+            type: string
+      responses:
+        '101':
+          description: Handshake succeeded; the server streams `WorkspaceEvent` messages until the client disconnects or a terminal event closes the connection.
+        '401':
+          description: Missing or invalid token; the handshake is rejected before the upgrade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found, or the caller has no access.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /workspaces/{workspaceId}/files:
     get:
       summary: List files in workspace
@@ -513,6 +566,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly collaborators cannot create files or folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/files/{filePath}:
     get:
@@ -599,6 +658,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly collaborators cannot upload file content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
     delete:
       summary: Delete file
@@ -635,6 +700,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly collaborators cannot delete files or folders
           content:
             application/json:
               schema:
@@ -704,6 +775,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - readonly collaborators cannot rename or revert files
           content:
             application/json:
               schema:
@@ -797,7 +874,10 @@ paths:
   /workspaces/{workspaceId}/diffs:
     get:
       summary: Get list of changed files
-      description: Retrieves a list of files that are not unchanged (including added, deleted, modified, etc.) according to git
+      description: |
+        Retrieves a list of files that are not unchanged (including added, deleted, modified, etc.) according to git.
+
+        Surfaced exclusively in the Propose view - owner only, even for collaborators with "edit" access.
       operationId: getChangedFiles
       tags:
         - Files
@@ -810,43 +890,13 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - files
                 properties:
                   files:
                     type: array
                     items:
-                      type: object
-                      required:
-                        - path
-                        - status
-                      properties:
-                        path:
-                          type: string
-                          description: Absolute path to the file starting from the workspace root
-                        status:
-                          type: string
-                          enum:
-                            - A
-                            - M
-                            - D
-                            - R
-                          description: |-
-                            Status of the file
-
-                            - A=Added
-                            - M=Modified
-                            - D=Deleted
-                            - R=Renamed
-                      if:
-                        properties:
-                          status:
-                            const: R
-                      then:
-                        required:
-                          - source
-                        properties:
-                          source:
-                            type: string
-                            description: Old path (for renamed files)
+                      $ref: '#/components/schemas/CommitChange'
         '404':
           description: Workspace not found
           content:
@@ -859,10 +909,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view the changed-files list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
     put:
       summary: Create a commit of the changes
-      description: Creates a new git commit for all current workspace changes.
+      description: |
+        Creates a new git commit for all current workspace changes.
+
+        Owner only, even for collaborators with "edit" access - only the
+        owner's GitHub credentials can push to the workspace's fork.
+        Collaborators' staged changes are committed and pushed by the owner.
       operationId: commitChanges
       tags:
         - Files
@@ -902,6 +963,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can commit changes
           content:
             application/json:
               schema:
@@ -1060,6 +1127,7 @@ paths:
         - Previews
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
         - $ref: '#/components/parameters/PfsType'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
@@ -1141,6 +1209,9 @@ paths:
 
         This endpoint returns the current state of the PR including title, description, draft status,
         and whether the PR has been closed or merged.
+
+        Owner only - the Propose view (and this data) is not exposed to collaborators at all,
+        even in read-only form.
       operationId: getProposal
       tags:
         - Workspaces
@@ -1163,6 +1234,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view the proposal
           content:
             application/json:
               schema:
@@ -1247,11 +1324,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can propose changes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/commits:
     get:
       summary: List workspace commits
-      description: Retrieves the list of git commits in the workspace
+      description: |
+        Retrieves the list of git commits in the workspace.
+
+        Owner only - surfaced exclusively in the Propose view, which is not exposed to collaborators.
       operationId: listWorkspaceCommits
       tags:
         - Workspaces
@@ -1277,6 +1363,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view commits
           content:
             application/json:
               schema:
@@ -1391,6 +1483,433 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/shares:
+    get:
+      summary: List all shares for a workspace
+      description: |
+        Retrieves everyone with access to the workspace - both direct grants
+        and users who joined via a share link - along with their mode and
+        status. Owner only.
+      operationId: listWorkspaceShares
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: List of workspace shares
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shares:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceShare'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Share a workspace with specific people
+      description: |
+        Grants one or more GitHub users access to the workspace at the given
+        mode. Owner only.
+
+        - If a given username already belongs to an onboarded CEOS-ARD user,
+          that person has access right away; it appears next time they view
+          their workspaces ("Shared with me").
+        - If a given username hasn't onboarded yet, the grant is recorded as
+          `pending` and activates automatically the moment that person signs
+          in with GitHub for the first time.
+        - Re-sharing to a username that already has a share on this
+          workspace updates the existing share's mode (and reactivates it if
+          it was previously `revoked`) rather than creating a duplicate.
+      operationId: createWorkspaceShares
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareCreateRequest'
+      responses:
+        '201':
+          description: Shares created or updated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shares:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceShare'
+        '400':
+          description: |
+            Invalid request data.
+
+            Possible errors:
+            - `githubUsernames` empty or missing
+            - Invalid mode
+            - Owner's own username included in `githubUsernames`
+            - One or more `githubUsernames` do not correspond to a real GitHub user (validated
+              against the GitHub API; the response names exactly which ones failed). This check
+              runs before any shares are created - the whole request is rejected atomically if
+              any username is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can share it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/shares/{shareId}:
+    patch:
+      summary: Change a collaborator's access mode
+      description: Updates the mode (readonly) of an existing share. Owner only.
+      operationId: updateWorkspaceShare
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareUpdateRequest'
+      responses:
+        '200':
+          description: Share updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShare'
+        '404':
+          description: Workspace or share not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Revoke a collaborator's access
+      description: |
+        Revokes a person's access to the workspace, direct share or share link.
+        Takes effect immediately on their next request. Revocation is sticky:
+        if they still hold a share link for this workspace, re-opening it will
+        not restore access - the owner must explicitly re-share. Owner only.
+      operationId: revokeWorkspaceShare
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareId'
+      responses:
+        '204':
+          description: Share revoked successfully
+        '404':
+          description: Workspace or share not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/share-links:
+    get:
+      summary: List share links for a workspace
+      description: Retrieves all share links (active and inactive) for a workspace. Owner only.
+      operationId: listWorkspaceShareLinks
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: List of share links
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shareLinks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceShareLink'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create a share link
+      description: |
+        Generates a signed, mode-bound share link for the workspace. Anyone
+        who opens the link is granted access with this mode once they're
+        authenticated.
+
+        The link's mode and active state are looked up on every use, so the
+        owner can change the mode without needing to reissue a new
+        URL. Deactivating a link is reversible - the same URL works again
+        once `isActive` is set back to `true`. Deleting a link is permanent,
+        so restoring access means creating a brand-new link.
+        Changing an active link's mode does not retroactively change the mode
+        already granted to people who joined earlier through it.
+      operationId: createWorkspaceShareLink
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareLinkCreateRequest'
+      responses:
+        '201':
+          description: Share link created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShareLink'
+        '400':
+          description: Invalid mode or expiresAt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can create share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/share-links/{linkId}:
+    patch:
+      summary: Update a share link
+      description: |
+        Changes a share link's mode, active state, and/or expiry. Owner only.
+        Setting `isActive: false` immediately stops the link from granting
+        new access (existing collaborators who already joined through it are
+        unaffected - revoke them individually via
+        `DELETE /workspaces/{workspaceId}/shares/{shareId}` if needed).
+      operationId: updateWorkspaceShareLink
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareLinkId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareLinkUpdateRequest'
+      responses:
+        '200':
+          description: Share link updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceShareLink'
+        '404':
+          description: Workspace or share link not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete a share link
+      description: |
+        Permanently deletes a share link. The URL stops working immediately
+        and is not reversible - sharing again means creating a new link,
+        which produces a new URL. Owner only.
+      operationId: deleteWorkspaceShareLink
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ShareLinkId'
+      responses:
+        '204':
+          description: Share link deleted successfully
+        '404':
+          description: Workspace or share link not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /share-links/{token}/redeem:
+    post:
+      summary: Redeem a share link
+      description: |
+        Grants the currently authenticated user access to the shared
+        workspace with the appropriate mode.
+      operationId: redeemShareLink
+      tags:
+        - Sharing
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/ShareLinkToken'
+      responses:
+        '200':
+          description: Access granted (or already held); returns the resulting share and workspace
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - share
+                  - workspace
+                properties:
+                  share:
+                    oneOf:
+                      - $ref: '#/components/schemas/WorkspaceShare'
+                      - type: "null"
+                    description: |
+                      Null when the requester is the workspace owner (they
+                      already have full access; no share row is created).
+                  workspace:
+                    $ref: '#/components/schemas/Workspace'
+        '401':
+          description: |
+            Not authenticated yet. Body is a share link preview, not a
+            generic error - use it to render context before redirecting to
+            login/onboarding, then call this same endpoint again afterward.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLinkPreview'
+        '403':
+          description: This user's access to the workspace was previously revoked by the owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Invalid, inactive, expired, or deleted share link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1398,6 +1917,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: JWT token obtained from authentication endpoint
+    bearerQueryAuth:
+      type: apiKey
+      in: query
+      name: authorization
+      description: Same JWT as `bearerAuth`, as a query param. Used by the realtime WebSocket endpoint (`/workspaces/{workspaceId}/ws`), whose browser clients can't set headers on the handshake.
 
   parameters:
     WorkspaceId:
@@ -1441,6 +1965,36 @@ components:
         enum:
           - pdf
           - docx
+
+    ShareId:
+      name: shareId
+      in: path
+      required: true
+      description: Unique identifier of the workspace share
+      schema:
+        type: string
+        format: uuid
+
+    ShareLinkId:
+      name: linkId
+      in: path
+      required: true
+      description: Unique identifier of the share link
+      schema:
+        type: string
+        format: uuid
+
+    ShareLinkToken:
+      name: token
+      in: path
+      required: true
+      description: |
+        Signed, mode-bound share link token from `{clientUrl}/share/{token}`.
+        Invitee-agnostic - not tied to any specific identity, and not a
+        session/JWT access token. Grants no access by itself; only
+        `POST /share-links/{token}/redeem` (as an authenticated user) does.
+      schema:
+        type: string
 
     IfNoneMatch:
       name: If-None-Match
@@ -1611,7 +2165,7 @@ components:
         - pfs
         - created
         - pr
-        - owner
+        - user_id
       properties:
         id:
           type: string
@@ -1689,9 +2243,331 @@ components:
             - null
           description: Status of the PR
           default: null
-        owner:
+        user_id:
           type: string
           description: The user ID of the workspace owner
+        owner_username:
+          type:
+            - string
+            - "null"
+          description: GitHub username of the workspace owner
+          default: null
+        owner_full_name:
+          type:
+            - string
+            - "null"
+          description: Full name of the workspace owner
+          default: null
+        viewer_role:
+          type: string
+          enum:
+            - owner
+            - readonly
+          readOnly: true
+          description: |
+            The current authenticated user's effective role on this workspace.
+
+            Computed per-request; not stored. Always "owner" for the workspace
+            creator. For collaborators, reflects their accepted share mode,
+            clamped to "readonly" while the workspace is archived.
+
+    WorkspaceEventType:
+      type: string
+      enum:
+        - file.saved
+        - file.created
+        - file.deleted
+        - file.renamed
+        - file.reverted
+        - file.committed
+        - share.revoked
+        - workspace.archived
+        - workspace.deleted
+      description: |
+        Kind of `WorkspaceEvent`.
+
+        - `file.saved`: file overwritten via `PUT .../files/{filePath}`.
+        - `file.created`: file/folder created via `POST .../files` or a new PFS via `POST .../pfs`.
+        - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
+        - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
+        - `file.committed`: changes committed via `PUT .../diffs`.
+        - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their connection.
+        - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
+        - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
+
+    WorkspaceEvent:
+      description: |
+        JSON payload of each realtime message pushed over the workspace WebSocket connection.
+
+        Contract rules:
+        - Every event embeds the response body of the REST operation that caused it, unmodified,
+          under a stable key: `file` for FileItem-shaped bodies, `commit` for the Commit body.
+          Envelope fields (`path`, `old_path`, `tracked`, `changes`, `target_user_id`) add context
+          but never rename or reshape REST fields. Known exception: `file.deleted` of an untracked
+          file responds `204 No Content` on REST while the event still carries the `file` snapshot.
+        - Deleting or renaming a folder produces a single event for the folder itself - no
+          per-child events. Affected children are implied by the path prefix.
+        - `seq` is an in-memory counter and resets when the server restarts; use it for
+          ordering/debugging only.
+
+        This envelope is also the event format of the client-side event bus in ceos-ard-editor
+        (`src/services/events.js`), which adds a client-only `source: local|remote` field and
+        client-only `realtime.*` event types that never appear on the wire. Should this WebSocket
+        ever carry more than these notification events (e.g. the planned CRDT/presence frames),
+        consider splitting the realtime contract into an AsyncAPI document.
+
+        The Python source of truth is `app/schemas/events.py`; `scripts/check_event_contract.py`
+        (pre-commit) keeps the two in sync.
+      oneOf:
+        - $ref: '#/components/schemas/WorkspaceEventFileSaved'
+        - $ref: '#/components/schemas/WorkspaceEventFileCreated'
+        - $ref: '#/components/schemas/WorkspaceEventFileDeleted'
+        - $ref: '#/components/schemas/WorkspaceEventFileRenamed'
+        - $ref: '#/components/schemas/WorkspaceEventFileReverted'
+        - $ref: '#/components/schemas/WorkspaceEventFileCommitted'
+        - $ref: '#/components/schemas/WorkspaceEventShareRevoked'
+        - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
+        - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
+      discriminator:
+        propertyName: type
+        mapping:
+          file.saved: '#/components/schemas/WorkspaceEventFileSaved'
+          file.created: '#/components/schemas/WorkspaceEventFileCreated'
+          file.deleted: '#/components/schemas/WorkspaceEventFileDeleted'
+          file.renamed: '#/components/schemas/WorkspaceEventFileRenamed'
+          file.reverted: '#/components/schemas/WorkspaceEventFileReverted'
+          file.committed: '#/components/schemas/WorkspaceEventFileCommitted'
+          share.revoked: '#/components/schemas/WorkspaceEventShareRevoked'
+          workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
+          workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
+
+    WorkspaceEventBase:
+      type: object
+      description: Fields shared by all realtime workspace events.
+      required:
+        - type
+        - seq
+        - ts
+        - actor_user_id
+      properties:
+        type:
+          $ref: '#/components/schemas/WorkspaceEventType'
+        seq:
+          type: integer
+          description: >-
+            Opaque process-wide counter, for ordering/debug only. Resets on server restart.
+        ts:
+          type: string
+          format: date-time
+          description: Server timestamp when published.
+        actor_user_id:
+          type:
+            - string
+            - "null"
+          description: User who caused the event, or `null` if system-generated. Clients typically ignore events they caused themselves.
+        path:
+          type:
+            - string
+            - "null"
+          default: null
+          description: Path of the affected file. `null` for events not scoped to a file.
+        file:
+          default: null
+          description: Snapshot of the affected file/folder. `null` for events not scoped to a file.
+          oneOf:
+            - $ref: '#/components/schemas/FileItem'
+            - type: "null"
+
+    WorkspaceEventFileSaved:
+      description: File overwritten via `PUT .../files/{filePath}`. `file` equals the REST response body; `path` equals `file.path`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - file
+          properties:
+            type:
+              const: file.saved
+            path:
+              type: string
+            file:
+              $ref: '#/components/schemas/FileItem'
+
+    WorkspaceEventFileCreated:
+      description: File/folder created via `POST .../files`, or a new PFS folder via `POST .../pfs`. `file` equals the REST response body; `path` equals `file.path`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - file
+          properties:
+            type:
+              const: file.created
+            path:
+              type: string
+            file:
+              $ref: '#/components/schemas/FileItem'
+
+    WorkspaceEventFileDeleted:
+      description: |
+        File/folder deleted via `DELETE .../files/{filePath}`. Deleting a folder produces this
+        single event; its contents are implied by the path prefix. Unlike the REST response
+        (which is `204 No Content` for untracked deletes), the event always carries `file`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - file
+            - tracked
+          properties:
+            type:
+              const: file.deleted
+            path:
+              type: string
+              description: Path of the deleted file/folder.
+            file:
+              $ref: '#/components/schemas/FileItem'
+            tracked:
+              type: boolean
+              description: Whether the file was git-tracked (delete is revertible, the entry keeps a `deleted` status) or untracked (removed permanently).
+
+    WorkspaceEventFileRenamed:
+      description: |
+        File/folder renamed via `PATCH .../files/{filePath}` with `operation: rename`. Renaming a
+        folder produces this single event; its contents are implied by the path prefix.
+        `file` equals the REST response body (the renamed item, `file.path` is the new path).
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - old_path
+            - file
+          properties:
+            type:
+              const: file.renamed
+            path:
+              type: string
+              description: The pre-rename path (legacy semantics; equals `old_path`). The new path is `file.path`.
+            old_path:
+              type: string
+              description: The pre-rename path.
+            file:
+              $ref: '#/components/schemas/FileItem'
+
+    WorkspaceEventFileReverted:
+      description: |
+        File reverted via `PATCH .../files/{filePath}` with `operation: revert`. `file` equals the
+        REST response body. `old_path` is present only when the revert undid a staged rename
+        (i.e. `file.path` differs from the requested path).
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - file
+          properties:
+            type:
+              const: file.reverted
+            path:
+              type: string
+              description: The path the revert was requested for.
+            old_path:
+              type: string
+              description: Present when the revert undid a staged rename; equals `path`.
+            file:
+              $ref: '#/components/schemas/FileItem'
+
+    WorkspaceEventFileCommitted:
+      description: |
+        Changes committed (and pushed) via `PUT .../diffs`. `commit` equals the REST response
+        body. Not scoped to a single file (`path`/`file` are `null`); the committed files are
+        listed in `changes` with /-rooted paths.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - commit
+            - changes
+          properties:
+            type:
+              const: file.committed
+            commit:
+              $ref: '#/components/schemas/Commit'
+            changes:
+              type: array
+              items:
+                $ref: '#/components/schemas/CommitChange'
+              description: The changes included in the commit. Paths start from the workspace root (leading `/`).
+
+    WorkspaceEventShareRevoked:
+      description: |
+        Access revoked via `DELETE .../shares/{shareId}`. Delivered only to the affected user
+        (see `target_user_id`) and closes their connection - terminal event.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - target_user_id
+          properties:
+            type:
+              const: share.revoked
+            target_user_id:
+              type: string
+              description: The user id this event is delivered to (never broadcast to other subscribers).
+
+    WorkspaceEventWorkspaceArchived:
+      description: |
+        Workspace archived via `PATCH .../{workspaceId}`. Deliberately carries no workspace
+        payload: the Workspace resource contains the per-viewer `viewer_role` (computed per
+        request and clamped while archived), so a single broadcast body would be wrong for some
+        subscribers - clients refetch the workspace instead.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          properties:
+            type:
+              const: workspace.archived
+
+    WorkspaceEventWorkspaceDeleted:
+      description: |
+        Workspace deleted via `DELETE .../{workspaceId}`. Closes the connection for every
+        subscriber - terminal event. Carries no payload.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          properties:
+            type:
+              const: workspace.deleted
+
+    CommitChange:
+      type: object
+      description: |
+        A single changed file, as pending in the workspace (`GET .../diffs`) or as included in a
+        commit (`file.committed` event). Note the path form differs: the `GET .../diffs` response
+        uses repo-relative paths (no leading slash), while the `file.committed` event uses
+        /-rooted paths consistent with `FileItem.path`.
+      required:
+        - path
+        - status
+      properties:
+        path:
+          type: string
+          description: Path of the changed file.
+        status:
+          type: string
+          enum:
+            - added
+            - modified
+            - deleted
+            - renamed
+          description: Git status of the change.
+        source:
+          type: string
+          description: Previous path of the file; only present when `status` is `renamed`.
 
     FileItem:
       type: object
@@ -1764,3 +2640,238 @@ components:
       description: PFS type identifier
       pattern: ^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$
       example: NRB
+
+    ShareMode:
+      type: string
+      enum:
+        - readonly
+      description: |
+        Access level granted to a collaborator.
+
+        - "readonly": Can view the workspace and its files, cannot make
+          changes. Equivalent to viewing an archived workspace.
+
+    ShareStatus:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - revoked
+      description: |
+        Lifecycle status of a share.
+
+        - "pending": Granted by GitHub username to someone who hasn't
+          onboarded to CEOS-ARD yet. Resolves to "accepted" automatically
+          the moment they first sign in with GitHub.
+        - "accepted": Active access, either granted immediately (existing
+          user, or via a redeemed share link) or auto-resolved from
+          "pending".
+        - "revoked": Owner removed access. Sticky: reusing a share link the
+          person still holds does not restore it.
+
+    WorkspaceShare:
+      type: object
+      description: |
+        A single collaborator's access grant on a workspace, however it was
+        created - a direct share by username, or a redeemed share link (see
+        `shareLinkId`). There is no separate "invitation" object: this row
+        *is* the grant, from the moment it's created.
+      required:
+        - id
+        - workspaceId
+        - mode
+        - status
+        - invitedGithubUsername
+        - invitedBy
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier of the share
+        workspaceId:
+          type: string
+          format: uuid
+          description: ID of the workspace this share belongs to
+        shareLinkId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: |
+            ID of the share link this grant was created through, if any.
+            Null for shares created directly by username. Provenance only -
+            does not affect permission evaluation.
+          default: null
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        status:
+          $ref: '#/components/schemas/ShareStatus'
+        invitedGithubUsername:
+          type: string
+          description: GitHub username this share was granted to
+        invitedUserId:
+          type:
+            - string
+            - "null"
+          description: |
+            User ID of the collaborator, once resolved.
+
+            Set immediately for shares granted to an existing CEOS-ARD user,
+            or on redeeming a share link. Null while `status` is "pending"
+            (username not yet onboarded).
+          default: null
+        invitedBy:
+          type: string
+          description: User ID of the workspace owner who granted this share
+        createdAt:
+          type: string
+          format: date-time
+          description: When the share was created
+        acceptedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the share became active (immediately, or upon the invitee's first login if it started "pending")
+          default: null
+        revokedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the owner revoked this share, if applicable
+          default: null
+
+    ShareCreateRequest:
+      type: object
+      description: |
+        Grant one or more GitHub users access to a workspace. Access takes
+        effect immediately (or automatically upon the invitee's next login,
+        if they haven't onboarded yet).
+      required:
+        - githubUsernames
+        - mode
+      properties:
+        githubUsernames:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: GitHub usernames to grant access to
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+
+    ShareUpdateRequest:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+
+    WorkspaceShareLink:
+      type: object
+      description: |
+        A shareable, mode-bound, invitee-agnostic link for a workspace.
+        Mode and active state are resolved live from this record on every
+        use, not baked into the token, so they can be changed without
+        reissuing the link.
+      required:
+        - id
+        - workspaceId
+        - mode
+        - isActive
+        - createdBy
+        - createdAt
+        - url
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier of the share link
+        workspaceId:
+          type: string
+          format: uuid
+          description: ID of the workspace this link grants access to
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        isActive:
+          type: boolean
+          description: Whether this link currently grants access. Owner-toggleable.
+        url:
+          type: string
+          format: uri
+          description: The full shareable URL (`{clientUrl}/share/{token}`)
+        createdBy:
+          type: string
+          description: User ID of the workspace owner who created the link
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Optional expiry. Null means the link does not expire.
+          default: null
+        revokedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          default: null
+
+    ShareLinkCreateRequest:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Optional expiry. Omit or set null for a link that does not expire.
+
+    ShareLinkUpdateRequest:
+      type: object
+      description: All fields optional; only supplied fields are changed.
+      properties:
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        isActive:
+          type: boolean
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+
+    ShareLinkPreview:
+      type: object
+      description: |
+        Public, unauthenticated preview of a share link. Contains no
+        sensitive workspace data - used by the client to render the share
+        landing page and decide whether to prompt login or onboarding
+        before the link can be redeemed.
+      required:
+        - workspaceTitle
+        - ownerDisplayName
+        - mode
+        - isActive
+      properties:
+        workspaceTitle:
+          type: string
+          description: Title of the shared workspace
+        ownerDisplayName:
+          type: string
+          description: Display name of the workspace owner
+        mode:
+          $ref: '#/components/schemas/ShareMode'
+        isActive:
+          type: boolean
+          description: Whether this link currently grants access

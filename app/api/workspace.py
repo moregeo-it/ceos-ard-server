@@ -61,7 +61,7 @@ async def get_user_workspaces(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["user"].access_token)
+        return workspace_service.get_user_workspaces(db=db, user=current_user["user"])
     except HTTPException:
         raise
     except Exception as e:
@@ -123,7 +123,8 @@ async def delete_workspace(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
     except Exception as e:

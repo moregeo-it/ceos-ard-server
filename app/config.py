@@ -57,6 +57,8 @@ class Settings:
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI", f"{SERVER_URL}/auth/callback")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 
+    SHARING_MODES_ENABLED: list[str] = os.getenv("SHARING_MODES_ENABLED", "readonly").split(",")
+
     CLIENT_URL: str = CLIENT_URL
     AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT", f"{CLIENT_URL}/auth/callback")
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import IdentityProvider, User
+from app.models.workspace_share import ShareStatus, WorkspaceShare
 from app.services.jwt_service import JWTService
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
+            _activate_pending_shares(db, existing_user)
             return existing_user
         else:
             new_user = User(
@@ -128,6 +130,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             db.refresh(new_user)
 
             logger.info(f"Created new {provider} user: {new_user.username}")
+            _activate_pending_shares(db, new_user)
             return new_user
 
     except SQLAlchemyError as e:
@@ -137,3 +140,34 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create or update user for {provider}",
         ) from e
+
+
+def _activate_pending_shares(db: Session, user: User) -> None:
+    """Activate any workspace shares that were granted by GitHub username before this user existed.
+
+    Matches case-insensitively since GitHub usernames are case-insensitive.
+    """
+    if user.identity_provider != IdentityProvider.github:
+        return
+
+    try:
+        pending_shares = (
+            db.query(WorkspaceShare)
+            .filter(WorkspaceShare.invitee_github_username.ilike(user.username), WorkspaceShare.status == ShareStatus.PENDING)
+            .all()
+        )
+
+        if not pending_shares:
+            return
+
+        now = datetime.now(UTC)
+        for share in pending_shares:
+            share.invitee_user_id = user.id
+            share.status = ShareStatus.ACCEPTED
+            share.accepted_at = now
+
+        db.commit()
+        logger.info(f"Activated {len(pending_shares)} pending workspace share(s) for user {user.username}")
+    except SQLAlchemyError as e:
+        logger.error(f"Failed to activate pending workspace shares for user {user.username}: {e}")
+        db.rollback()
