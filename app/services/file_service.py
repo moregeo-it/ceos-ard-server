@@ -10,7 +10,7 @@ from yaml import safe_load as yaml_load
 
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
-from app.schemas.workspace import FilePatchRequest
+from app.schemas.workspace import FilePatchRequest, SyncStatus
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
@@ -483,7 +483,15 @@ class FileService:
             logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
-    async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> pygit2.Commit:
+    def _revert_commit(self, repo: pygit2.Repository, workspace_id: str):
+        # Reset to parent commit (soft reset keeps files staged)
+        if not repo.head_is_unborn:
+            parent = repo.head.peel().parents[0] if repo.head.peel().parents else None
+            if parent:
+                repo.reset(parent.id, pygit2.GIT_RESET_SOFT)
+        logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
+
+    async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> tuple[pygit2.Commit, bool]:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
@@ -498,21 +506,40 @@ class FileService:
 
         # Commit and push changes to the repository
         commit = await self.git_service.commit_changes(repo, message, user=user)
+        merged_remote = False
 
-        # Try to push, revert commit on failure
         try:
             await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
-        except HTTPException:
-            # Push failed - revert the commit but keep changes staged
-            # Reset to parent commit (soft reset keeps files staged)
-            if not repo.head_is_unborn:
-                parent = repo.head.peel().parents[0] if repo.head.peel().parents else None
-                if parent:
-                    repo.reset(parent.id, pygit2.GIT_RESET_SOFT)
-            logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
-            raise
+        except HTTPException as push_error:
+            # The push is typically rejected because the branch on GitHub moved ahead.
+            # The working tree is clean right after the commit, so merge the remote
+            # changes and push again instead of leaving the user in a dead end.
+            try:
+                sync_result = self.git_service.sync_with_origin(
+                    repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id
+                )
+            except HTTPException:
+                self._revert_commit(repo, workspace_id)
+                raise push_error from None
 
-        return commit
+            if sync_result.status == SyncStatus.MERGED:
+                merged_remote = True
+                await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
+            elif sync_result.status == SyncStatus.CONFLICT:
+                self._revert_commit(repo, workspace_id)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": "Changes on GitHub conflict with your changes. The conflict must be resolved manually.",
+                        "conflicting_files": sync_result.conflicting_files,
+                    },
+                ) from None
+            else:
+                # Push failed for a reason other than being behind the remote
+                self._revert_commit(repo, workspace_id)
+                raise push_error from None
+
+        return commit, merged_remote
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
         """

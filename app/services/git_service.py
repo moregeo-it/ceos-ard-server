@@ -1,5 +1,7 @@
 import logging
 import shutil
+import threading
+from collections import defaultdict
 from pathlib import Path
 
 import pygit2
@@ -7,10 +9,15 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 from app.models.user import User
-from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, sanitize_git_error
+from app.schemas.workspace import SyncResult, SyncStatus
+from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, get_repo_changes, sanitize_git_error
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
+
+# Serializes concurrent syncs of the same workspace within this process (routes run in the
+# threadpool). A multi-process deployment would need a filesystem lock instead.
+_sync_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
 class GitService:
@@ -207,6 +214,121 @@ class GitService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to send changes to GitHub, please try again. Error: {error_msg}"
             ) from None  # don't raise e to avoid leaking sensitive information
+
+    def sync_with_origin(self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str) -> SyncResult:
+        """
+        Fetch the fork remote and merge remote branch changes into the local branch when safe.
+
+        Fast-forwards when possible, creates a merge commit when histories diverged but merge
+        cleanly, and aborts (restoring the repository) when the merge would conflict. The
+        working tree is never left in a mid-merge state.
+
+        Args:
+            repo: pygit2 Repository instance
+            user: User object with username and access_token for authentication
+            branch_name: The workspace branch to sync with its origin counterpart
+            workspace_id: Workspace id, used to serialize concurrent syncs
+        """
+        with _sync_locks[workspace_id]:
+            callbacks = UserPassCredentials(user.username, user.access_token)
+            origin = repo.remotes["origin"]
+
+            # Fetch with default refspecs and pruning, so a branch deleted on the fork is
+            # detectable (an explicit refspec for a deleted branch errors instead of pruning)
+            try:
+                origin.fetch(callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
+            except Exception as e:
+                error_msg = sanitize_git_error(e, user.username, user.access_token)
+                logger.error(f"Unable to fetch origin for workspace {workspace_id}: {error_msg}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch updates from GitHub. Error: {error_msg}"
+                ) from None  # don't raise e to avoid leaking sensitive information
+
+            # Best-effort upstream refresh so commits ahead of upstream are computed against a
+            # current baseline; never fails the sync
+            try:
+                repo.remotes["upstream"].fetch([settings.CEOS_ARD_BRANCH])
+            except Exception as e:
+                logger.warning(f"Could not refresh upstream for workspace {workspace_id}: {e}")
+
+            remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
+            if remote_ref is None:
+                return SyncResult(status=SyncStatus.REMOTE_MISSING)
+
+            remote_oid = remote_ref.target
+            local_oid = repo.head.target
+            ahead, behind = repo.ahead_behind(local_oid, remote_oid)
+
+            if get_repo_changes(repo):
+                return SyncResult(status=SyncStatus.DIRTY, ahead_commits=ahead, behind_commits=behind)
+
+            if behind == 0:
+                if ahead > 0:
+                    # Best-effort push of local commits the fork is missing (e.g. a merge
+                    # commit whose push failed earlier), so local and remote converge
+                    try:
+                        origin.push([f"refs/heads/{branch_name}"], callbacks=callbacks)
+                    except Exception as e:
+                        error_msg = sanitize_git_error(e, user.username, user.access_token)
+                        logger.warning(f"Could not push local commits for workspace {workspace_id}: {error_msg}")
+                return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
+
+            analysis, _ = repo.merge_analysis(remote_oid)
+
+            if analysis & pygit2.GIT_MERGE_ANALYSIS_UP_TO_DATE:
+                return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
+
+            if analysis & pygit2.GIT_MERGE_ANALYSIS_FASTFORWARD:
+                # Tree is verified clean above, so a hard reset atomically moves the branch
+                # ref, index, and working tree without touching anything of the user's
+                repo.reset(remote_oid, pygit2.GIT_RESET_HARD)
+                return SyncResult(status=SyncStatus.UPDATED, behind_commits=behind, pulled_commits=behind)
+
+            if not analysis & pygit2.GIT_MERGE_ANALYSIS_NORMAL:
+                logger.warning(f"Unexpected merge analysis {analysis} for workspace {workspace_id}")
+                return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
+
+            try:
+                repo.merge(remote_oid)
+
+                if repo.index.conflicts is not None:
+                    # Collect paths before resetting — the reset clears the conflict entries
+                    conflicting_files = sorted({entry.path for conflict in repo.index.conflicts for entry in conflict if entry is not None})
+                    repo.reset(local_oid, pygit2.GIT_RESET_HARD)
+                    repo.state_cleanup()
+                    return SyncResult(
+                        status=SyncStatus.CONFLICT, ahead_commits=ahead, behind_commits=behind, conflicting_files=conflicting_files
+                    )
+
+                signature = pygit2.Signature(user.full_name or user.username, user.email)
+                tree_id = repo.index.write_tree()
+                repo.create_commit(
+                    "HEAD",
+                    signature,
+                    signature,
+                    f"Merge remote changes from origin/{branch_name}",
+                    tree_id,
+                    [local_oid, remote_oid],
+                )
+                repo.state_cleanup()
+            except Exception as e:
+                try:
+                    repo.reset(local_oid, pygit2.GIT_RESET_HARD)
+                    repo.state_cleanup()
+                except Exception as cleanup_error:
+                    logger.error(f"Failed to restore workspace {workspace_id} after merge error: {cleanup_error}")
+                logger.error(f"Error merging remote changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to merge remote changes") from e
+
+            # Best-effort push of the merge commit; on failure the merge stays local and the
+            # next commit's push fast-forwards the remote and carries it along
+            try:
+                origin.push([f"refs/heads/{branch_name}"], callbacks=callbacks)
+            except Exception as e:
+                error_msg = sanitize_git_error(e, user.username, user.access_token)
+                logger.warning(f"Could not push merge commit for workspace {workspace_id}: {error_msg}")
+
+            return SyncResult(status=SyncStatus.MERGED, behind_commits=behind, pulled_commits=behind)
 
     def get_commits(
         self,

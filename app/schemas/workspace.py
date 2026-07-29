@@ -16,18 +16,21 @@ class WorkspaceStatus(str, Enum):
     ARCHIVED = "archived"
 
 
-class GitStatusFile(BaseModel):
-    path: str
-    status: str
+class SyncStatus(str, Enum):
+    UP_TO_DATE = "up_to_date"
+    UPDATED = "updated"  # fast-forwarded to remote
+    MERGED = "merged"  # merge commit created (and best-effort pushed)
+    CONFLICT = "conflict"  # merge aborted, repository fully restored
+    DIRTY = "dirty"  # uncommitted local changes, merge skipped
+    REMOTE_MISSING = "remote_missing"  # branch no longer exists on the fork
 
 
-class GitStatus(BaseModel):
-    branch: str
-    is_clean: bool
-    ahead_commits: int
-    behind_commits: int
-    modified_files: list[GitStatusFile]
-    untracked_files: list[str]
+class SyncResult(BaseModel):
+    status: SyncStatus
+    ahead_commits: int = 0
+    behind_commits: int = 0
+    pulled_commits: int = 0
+    conflicting_files: list[str] = []
 
 
 class WorkspaceCreate(BaseModel):
@@ -81,6 +84,11 @@ class Commit(BaseModel):
     message: str
     timestamp: datetime
     author: str
+
+
+class CommitResult(Commit):
+    # True when remote changes from the fork were merged into the workspace as part of the commit
+    merged_remote: bool = False
 
 
 class Proposal(BaseModel):

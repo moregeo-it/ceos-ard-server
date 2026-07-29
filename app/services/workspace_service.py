@@ -13,7 +13,7 @@ from yaml import load as yaml_load
 from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, WorkspaceCreate, WorkspaceUpdate
+from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.git_service import GitService
 from app.services.github_service import GitHubService
@@ -122,6 +122,16 @@ class WorkspaceService:
         except Exception as e:
             logger.error(f"Error getting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
+
+    def sync_git(self, db: Session, workspace_id: str, user: User) -> SyncResult:
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id)
+
+        if workspace.status == WorkspaceStatus.ARCHIVED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot sync an archived workspace")
+
+        repo = get_repo(workspace.abs_path)
+
+        return self.git_service.sync_with_origin(repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id)
 
     async def sync_workspace(self, db: Session, user_id: str, workspace_id: str, access_token: str) -> GitWorkspace | None:
         try:
