@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from sqlalchemy import or_
 
 import jwt
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -332,13 +332,14 @@ class ShareService:
             workspace.owner_full_name = user.full_name
             return None, workspace
 
-        share = db.query(WorkspaceShare).filter(
-            WorkspaceShare.workspace_id == workspace.id,
-            or_(
-                WorkspaceShare.invitee_user_id == user.id,
-                WorkspaceShare.invitee_github_username.ilike(user.username)
+        share = (
+            db.query(WorkspaceShare)
+            .filter(
+                WorkspaceShare.workspace_id == workspace.id,
+                or_(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.invitee_github_username.ilike(user.username)),
             )
-        ).first()
+            .first()
+        )
 
         if share and share.status == ShareStatus.REVOKED:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
