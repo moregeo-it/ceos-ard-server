@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
+from sqlalchemy import or_
 
 import jwt
 from fastapi import HTTPException, status
@@ -93,9 +94,9 @@ class ShareService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
             )
-
+        # Validate that the workspace exists and is owned by the current user before proceeding.
         workspace = self._get_workspace_owned_by(db, workspace_id, user.id)
-
+        # Deduplicate and clean the GitHub usernames, ignoring empty strings and duplicates (case-insensitive).
         seen_usernames: set[str] = set()
         usernames: list[str] = []
         for raw_username in request.github_usernames:
@@ -222,7 +223,8 @@ class ShareService:
 
         self._get_workspace_owned_by(db, workspace_id, user.id)
 
-        self._validate_expires_at(request.expires_at)
+        if request.expires_at:
+            self._validate_expires_at(request.expires_at)
 
         link = WorkspaceShareLink(
             workspace_id=workspace_id,
@@ -246,7 +248,8 @@ class ShareService:
         if not link:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
 
-        self._validate_expires_at(request.expires_at)
+        if request.expires_at:
+            self._validate_expires_at(request.expires_at)
 
         for key, value in request.model_dump(exclude_unset=True).items():
             if key in ("mode", "is_active") and value is None:
@@ -329,14 +332,13 @@ class ShareService:
             workspace.owner_full_name = user.full_name
             return None, workspace
 
-        share = db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_user_id == user.id).first()
-        if not share:
-            # Defensive fallback: a share may still be keyed by username only (not yet linked to this user_id).
-            share = (
-                db.query(WorkspaceShare)
-                .filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_github_username.ilike(user.username))
-                .first()
+        share = db.query(WorkspaceShare).filter(
+            WorkspaceShare.workspace_id == workspace.id,
+            or_(
+                WorkspaceShare.invitee_user_id == user.id,
+                WorkspaceShare.invitee_github_username.ilike(user.username)
             )
+        ).first()
 
         if share and share.status == ShareStatus.REVOKED:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
