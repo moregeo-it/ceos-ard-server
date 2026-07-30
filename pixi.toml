@@ -40,5 +40,5 @@ default = { solve-group = "default" }
 dev = { features = ["dev"], solve-group = "default" }
 
 [pypi-dependencies]
-ceos-ard-cli = ">=0.5.8, <0.6"
+ceos-ard-cli = ">=0.5.9, <0.6"
 bibtexparser = "==2.0.0b9"
