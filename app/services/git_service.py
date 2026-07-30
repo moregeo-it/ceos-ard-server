@@ -1,6 +1,6 @@
+import asyncio
 import logging
 import shutil
-import threading
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,9 +15,9 @@ from app.utils.validation import normalize_workspace_path, validate_workspace_pa
 
 logger = logging.getLogger(__name__)
 
-# Serializes concurrent syncs of the same workspace within this process (routes run in the
-# threadpool). A multi-process deployment would need a filesystem lock instead.
-_sync_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+# One lock per workspace: prevents concurrent syncs of the same repository.
+# A multi-process deployment would need a filesystem lock instead.
+_sync_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class GitService:
@@ -215,13 +215,14 @@ class GitService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to send changes to GitHub, please try again. Error: {error_msg}"
             ) from None  # don't raise e to avoid leaking sensitive information
 
-    def sync_with_origin(self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str) -> SyncResult:
+    async def sync_with_origin(self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str) -> SyncResult:
         """
         Fetch the fork remote and merge remote branch changes into the local branch when safe.
 
         Fast-forwards when possible, creates a merge commit when histories diverged but merge
         cleanly, and aborts (restoring the repository) when the merge would conflict. The
-        working tree is never left in a mid-merge state.
+        working tree is never left in a mid-merge state. Network calls run in worker threads;
+        repository mutation stays on the event loop.
 
         Args:
             repo: pygit2 Repository instance
@@ -229,14 +230,13 @@ class GitService:
             branch_name: The workspace branch to sync with its origin counterpart
             workspace_id: Workspace id, used to serialize concurrent syncs
         """
-        with _sync_locks[workspace_id]:
+        async with _sync_locks[workspace_id]:
             callbacks = UserPassCredentials(user.username, user.access_token)
             origin = repo.remotes["origin"]
 
-            # Fetch with default refspecs and pruning, so a branch deleted on the fork is
-            # detectable (an explicit refspec for a deleted branch errors instead of pruning)
+            # Prune so a branch deleted on the fork is detectable
             try:
-                origin.fetch(callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
+                await asyncio.to_thread(origin.fetch, callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
             except Exception as e:
                 error_msg = sanitize_git_error(e, user.username, user.access_token)
                 logger.error(f"Unable to fetch origin for workspace {workspace_id}: {error_msg}")
@@ -244,13 +244,14 @@ class GitService:
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch updates from GitHub. Error: {error_msg}"
                 ) from None  # don't raise e to avoid leaking sensitive information
 
-            # Best-effort upstream refresh so commits ahead of upstream are computed against a
-            # current baseline; never fails the sync
+            # Best-effort upstream refresh; keeps the get_commits baseline current
             try:
-                repo.remotes["upstream"].fetch([settings.CEOS_ARD_BRANCH])
+                await asyncio.to_thread(repo.remotes["upstream"].fetch, [settings.CEOS_ARD_BRANCH])
             except Exception as e:
                 logger.warning(f"Could not refresh upstream for workspace {workspace_id}: {e}")
 
+            # No awaits from here through the merge: keeps the dirty check and the
+            # reset/merge atomic with concurrent file-editing requests
             remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
             if remote_ref is None:
                 return SyncResult(status=SyncStatus.REMOTE_MISSING)
@@ -264,10 +265,9 @@ class GitService:
 
             if behind == 0:
                 if ahead > 0:
-                    # Best-effort push of local commits the fork is missing (e.g. a merge
-                    # commit whose push failed earlier), so local and remote converge
+                    # Best-effort push of local commits the fork is missing
                     try:
-                        origin.push([f"refs/heads/{branch_name}"], callbacks=callbacks)
+                        await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
                     except Exception as e:
                         error_msg = sanitize_git_error(e, user.username, user.access_token)
                         logger.warning(f"Could not push local commits for workspace {workspace_id}: {error_msg}")
@@ -279,8 +279,7 @@ class GitService:
                 return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
 
             if analysis & pygit2.GIT_MERGE_ANALYSIS_FASTFORWARD:
-                # Tree is verified clean above, so a hard reset atomically moves the branch
-                # ref, index, and working tree without touching anything of the user's
+                # Tree is clean (checked above), so a hard reset is a safe fast-forward
                 repo.reset(remote_oid, pygit2.GIT_RESET_HARD)
                 return SyncResult(status=SyncStatus.UPDATED, behind_commits=behind, pulled_commits=behind)
 
@@ -318,10 +317,9 @@ class GitService:
                 logger.error(f"Error merging remote changes for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to merge remote changes") from e
 
-            # Best-effort push of the merge commit; on failure the merge stays local and the
-            # next commit's push fast-forwards the remote and carries it along
+            # Best-effort push of the merge commit; if it fails, the next push or sync delivers it
             try:
-                origin.push([f"refs/heads/{branch_name}"], callbacks=callbacks)
+                await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
             except Exception as e:
                 error_msg = sanitize_git_error(e, user.username, user.access_token)
                 logger.warning(f"Could not push merge commit for workspace {workspace_id}: {error_msg}")

@@ -228,14 +228,14 @@ def get_workspace_commits(
     description="Fetches the fork remote and merges remote branch changes into the local workspace when safe. "
     "Conflict and dirty outcomes are reported in the response body, not as HTTP errors.",
 )
-def sync_workspace_repository(
+async def sync_workspace_repository(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return workspace_service.sync_git(db=db, workspace_id=workspace_id, user=current_user["user"])
+        return await workspace_service.sync_git(db=db, workspace_id=workspace_id, user=current_user["user"])
     except HTTPException:
         raise
     except Exception as e:

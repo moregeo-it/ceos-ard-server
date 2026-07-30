@@ -511,18 +511,30 @@ class FileService:
         try:
             await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
         except HTTPException as push_error:
-            # The push is typically rejected because the branch on GitHub moved ahead.
-            # The working tree is clean right after the commit, so merge the remote
-            # changes and push again instead of leaving the user in a dead end.
+            # A rejected push usually means the branch on GitHub moved ahead:
+            # merge the remote changes and push again
             try:
-                sync_result = self.git_service.sync_with_origin(repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id)
-            except HTTPException:
+                sync_result = await self.git_service.sync_with_origin(
+                    repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id
+                )
+            except Exception as sync_error:
+                # Any failure here must revert the commit and restore the staged changes
+                logger.error(f"Sync failed while recovering from a rejected push for workspace {workspace_id}: {sync_error}")
                 self._revert_commit(repo, workspace_id)
                 raise push_error from None
 
             if sync_result.status == SyncStatus.MERGED:
                 merged_remote = True
-                await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
+                try:
+                    await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
+                except HTTPException:
+                    # No revert: a soft reset across the merge commit would stage the remote
+                    # changes as the user's. The next push or sync delivers the local commits.
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Your changes were merged with the changes from GitHub but could not be sent yet. "
+                        "They will be sent automatically with your next commit or when reopening the workspace.",
+                    ) from None
             elif sync_result.status == SyncStatus.CONFLICT:
                 self._revert_commit(repo, workspace_id)
                 raise HTTPException(

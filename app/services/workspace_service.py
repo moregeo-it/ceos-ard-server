@@ -123,7 +123,7 @@ class WorkspaceService:
             logger.error(f"Error getting workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace: {str(e)}") from e
 
-    def sync_git(self, db: Session, workspace_id: str, user: User) -> SyncResult:
+    async def sync_git(self, db: Session, workspace_id: str, user: User) -> SyncResult:
         workspace = self.get_workspace_by_id(db, workspace_id, user.id)
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
@@ -131,7 +131,7 @@ class WorkspaceService:
 
         repo = get_repo(workspace.abs_path)
 
-        return self.git_service.sync_with_origin(repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id)
+        return await self.git_service.sync_with_origin(repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id)
 
     async def sync_workspace(self, db: Session, user_id: str, workspace_id: str, access_token: str) -> GitWorkspace | None:
         try:
