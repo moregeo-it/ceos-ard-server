@@ -544,8 +544,13 @@ class FileService:
                         "conflicting_files": sync_result.conflicting_files,
                     },
                 ) from None
+            elif self.git_service.is_commit_on_origin(repo, workspace.branch_name, commit.id):
+                # The commit is on GitHub after all: the failed push was applied there, or the
+                # sync pushed it. Reverting it now would commit the same changes twice.
+                # A fast-forward on top of it also brought remote changes into the workspace.
+                merged_remote = sync_result.status == SyncStatus.UPDATED
             else:
-                # Push failed for a reason other than being behind the remote
+                # The commit did not reach GitHub: undo it, leaving the changes staged
                 self._revert_commit(repo, workspace_id)
                 raise push_error from None
 

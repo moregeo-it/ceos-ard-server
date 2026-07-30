@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from app.config import settings
 from app.models.user import User
 from app.schemas.workspace import SyncResult, SyncStatus
-from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, get_repo_changes, sanitize_git_error
+from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, sanitize_git_error
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
@@ -215,6 +215,24 @@ class GitService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to send changes to GitHub, please try again. Error: {error_msg}"
             ) from None  # don't raise e to avoid leaking sensitive information
 
+    def is_commit_on_origin(self, repo: pygit2.Repository, branch_name: str, commit_id: pygit2.Oid) -> bool:
+        """
+        Whether the branch on the fork contains the given commit as of the last fetch.
+
+        Args:
+            repo: pygit2 Repository instance
+            branch_name: The workspace branch to look up on the fork
+            commit_id: The commit to look for
+        """
+        remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
+        if remote_ref is None:
+            return False
+        try:
+            return remote_ref.target == commit_id or repo.descendant_of(remote_ref.target, commit_id)
+        except pygit2.GitError as e:
+            logger.warning(f"Could not compare the commit with origin/{branch_name}: {e}")
+            return False
+
     async def sync_with_origin(self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str) -> SyncResult:
         """
         Fetch the fork remote and merge remote branch changes into the local branch when safe.
@@ -260,7 +278,9 @@ class GitService:
             local_oid = repo.head.target
             ahead, behind = repo.ahead_behind(local_oid, remote_oid)
 
-            if get_repo_changes(repo):
+            # Any entry means uncommitted work, conflicts included. Left unguarded on purpose: if
+            # the status cannot be read, the sync must fail instead of resetting an unknown tree.
+            if repo.status():
                 return SyncResult(status=SyncStatus.DIRTY, ahead_commits=ahead, behind_commits=behind)
 
             if behind == 0:
