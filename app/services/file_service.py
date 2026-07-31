@@ -483,13 +483,15 @@ class FileService:
             logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
-    def _revert_commit(self, repo: pygit2.Repository, workspace_id: str):
-        # Reset to parent commit (soft reset keeps files staged)
+    def _revert_commit(self, repo: pygit2.Repository, workspace_id: str, reason: str):
+        """Soft-reset HEAD to its parent, so the commit's changes go back to being staged."""
         if not repo.head_is_unborn:
-            parent = repo.head.peel().parents[0] if repo.head.peel().parents else None
-            if parent:
-                repo.reset(parent.id, pygit2.GIT_RESET_SOFT)
-        logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
+            head = repo.head.peel()
+            if head.parents:
+                repo.reset(head.parents[0].id, pygit2.GIT_RESET_SOFT)
+                logger.warning(f"Reverted commit for workspace {workspace_id}: {reason}")
+                return
+        logger.warning(f"No parent commit to revert to for workspace {workspace_id} ({reason})")
 
     async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> tuple[pygit2.Commit, bool]:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
@@ -509,7 +511,14 @@ class FileService:
         merged_remote = False
 
         try:
-            await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
+            # Recreates the fork first if it has been deleted on GitHub, then retries. Anything
+            # it cannot repair falls through to the rejected-push handling below.
+            await self.workspace_service.with_remote_recovery(
+                db,
+                workspace,
+                user,
+                lambda: self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user),
+            )
         except HTTPException as push_error:
             # A rejected push usually means the branch on GitHub moved ahead:
             # merge the remote changes and push again
@@ -520,7 +529,7 @@ class FileService:
             except Exception as sync_error:
                 # Any failure here must revert the commit and restore the staged changes
                 logger.error(f"Sync failed while recovering from a rejected push for workspace {workspace_id}: {sync_error}")
-                self._revert_commit(repo, workspace_id)
+                self._revert_commit(repo, workspace_id, reason="the sync recovering from the rejected push failed")
                 raise push_error from None
 
             if sync_result.status == SyncStatus.MERGED:
@@ -536,7 +545,7 @@ class FileService:
                         "They will be sent automatically with your next commit or when reopening the workspace.",
                     ) from None
             elif sync_result.status == SyncStatus.CONFLICT:
-                self._revert_commit(repo, workspace_id)
+                self._revert_commit(repo, workspace_id, reason="remote changes conflict with the committed changes")
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
@@ -551,7 +560,7 @@ class FileService:
                 merged_remote = sync_result.status == SyncStatus.UPDATED
             else:
                 # The commit did not reach GitHub: undo it, leaving the changes staged
-                self._revert_commit(repo, workspace_id)
+                self._revert_commit(repo, workspace_id, reason="the push was rejected and the commit never reached GitHub")
                 raise push_error from None
 
         return commit, merged_remote

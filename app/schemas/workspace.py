@@ -23,6 +23,7 @@ class SyncStatus(str, Enum):
     CONFLICT = "conflict"  # merge aborted, repository fully restored
     DIRTY = "dirty"  # uncommitted local changes, merge skipped
     REMOTE_MISSING = "remote_missing"  # branch no longer exists on the fork
+    REMOTE_RESTORED = "remote_restored"  # branch was missing on the fork and was pushed back
 
 
 class SyncResult(BaseModel):
@@ -31,6 +32,8 @@ class SyncResult(BaseModel):
     behind_commits: int = 0
     pulled_commits: int = 0
     conflicting_files: list[str] = []
+    # True when the fork itself was missing on GitHub and had to be recreated before the sync
+    repaired: bool = False
 
 
 class WorkspaceCreate(BaseModel):
@@ -98,6 +101,9 @@ class Proposal(BaseModel):
     state: str
     draft: bool
     description: str
+    # True when the fork this was opened from has been deleted. GitHub closed the pull request
+    # and it can never be reopened, so proposing again opens a new one instead.
+    detached: bool = False
 
 
 class CreateFileRequest(BaseModel):

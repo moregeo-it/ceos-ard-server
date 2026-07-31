@@ -1643,10 +1643,22 @@ components:
             Current state of the PR.
 
             - "open": PR is open and can receive commits/updates
-            - "closed": PR was closed without merging (withdrawn)
+            - "closed": PR was closed without merging (withdrawn), or closed by GitHub
+              because the fork was deleted (see "detached")
             - "merged": PR was merged into the main branch
         draft:
           $ref: '#/components/schemas/ProposalDraft'
+        detached:
+          type: boolean
+          default: false
+          description: |
+            True when the fork this PR was opened from has been deleted on GitHub.
+
+            GitHub closes such a PR and permanently unlinks it from the head repository, so it
+            can never be reopened: a re-fork is a new repository and there is no way to
+            repoint a PR's head. Clients must not offer a reopen action for these. Proposing
+            again opens a new PR carrying the title and description across, with a link back
+            to this one so its review comments remain reachable.
 
     Commit:
       type: object
@@ -1693,6 +1705,7 @@ components:
             - conflict
             - dirty
             - remote_missing
+            - remote_restored
           description: |
             Outcome of the sync.
 
@@ -1702,6 +1715,8 @@ components:
             - "conflict": remote changes conflict with local changes; repository left untouched
             - "dirty": uncommitted local changes present; merge skipped
             - "remote_missing": the workspace branch no longer exists on the fork
+            - "remote_restored": the workspace branch was missing on the fork and was pushed
+              back from the local history
         ahead_commits:
           type: integer
           default: 0
@@ -1720,6 +1735,14 @@ components:
             type: string
           default: []
           description: Paths of conflicting files when status is "conflict"
+        repaired:
+          type: boolean
+          default: false
+          description: |
+            True when the fork itself was missing on GitHub and had to be recreated before the
+            sync could run. The workspace branch is pushed back from the local history, so no
+            work is lost, but any open pull request was permanently closed by GitHub and must
+            be submitted again as a new one.
 
     Workspace:
       type: object

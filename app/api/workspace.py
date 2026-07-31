@@ -102,7 +102,7 @@ async def update_workspace(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
+        return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user=current_user["user"], update_data=update_data)
     except HTTPException:
         raise
     except Exception as e:
