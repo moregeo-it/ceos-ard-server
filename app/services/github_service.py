@@ -272,7 +272,6 @@ class GitHubService:
         try:
             return await self._make_github_request("PATCH", url, access_token, json_data=pr_data, timeout=60.0)
         except HTTPException as e:
-            print(f"Error updating pull request {number} for {owner}/{repo}: {e}")
             if e.status_code == 404:
                 logger.info(f"Pull request {number} not found for {owner}/{repo}")
                 return None
