@@ -35,7 +35,7 @@ class GitWorkspace(Base):
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)
-    pull_request_number = Column(String, nullable=True)
+    pull_request_number = Column(String, nullable=True)  # Todo: Change from String to Integer when moving to a stricter DB eg. PostgresSQL
     pull_request_status_last_updated_at = Column(UTCDateTime, nullable=True)
     pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
     status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)
