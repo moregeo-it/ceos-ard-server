@@ -484,10 +484,13 @@ class FileService:
             logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
-    def _revert_commit(self, repo: pygit2.Repository, workspace_id: str, reason: str):
+    def _revert_commit(self, repo: pygit2.Repository, workspace_id: str, commit_id: str, reason: str):
         """Soft-reset HEAD to its parent, so the commit's changes go back to being staged."""
         if not repo.head_is_unborn:
             head = repo.head.peel()
+            if head.id != commit_id:
+                logger.warning(f"HEAD commit {head.id} does not match the expected commit {commit_id} for workspace {workspace_id} ({reason})")
+                return
             if head.parents:
                 repo.reset(head.parents[0].id, pygit2.GIT_RESET_SOFT)
                 logger.warning(f"Reverted commit for workspace {workspace_id}: {reason}")
@@ -546,7 +549,7 @@ class FileService:
                         "They will be sent automatically with your next commit or when reopening the workspace.",
                     ) from None
             elif sync_result.status == SyncStatus.CONFLICT:
-                self._revert_commit(repo, workspace_id, reason="remote changes conflict with the committed changes")
+                self._revert_commit(repo, workspace_id, commit.id, reason="remote changes conflict with the committed changes")
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
@@ -561,7 +564,7 @@ class FileService:
                 merged_remote = sync_result.status == SyncStatus.UPDATED
             else:
                 # The commit did not reach GitHub: undo it, leaving the changes staged
-                self._revert_commit(repo, workspace_id, reason="the push was rejected and the commit never reached GitHub")
+                self._revert_commit(repo, workspace_id, commit.id, reason="the push was rejected and the commit never reached GitHub")
                 raise push_error from None
 
         return commit, merged_remote
