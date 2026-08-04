@@ -139,9 +139,9 @@ class GitHubService:
         headers = self._get_auth_headers(token, auth_type)
 
         try:
-            # Follow redirects: a renamed or transferred repository answers 301, and without
-            # this it is indistinguishable from an outage.
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            # A renamed or transferred repository answers 301. GET follows it transparently;
+            # writes must not, because httpx replays a redirected POST as a GET.
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=(method == "GET")) as client:
                 response = await client.request(method, url, headers=headers, params=params, json=json_data)
         except httpx.TimeoutException as e:
             logger.error(f"Timeout requesting GitHub API: {url}")
@@ -174,6 +174,10 @@ class GitHubService:
         if response.status_code == 422:
             detail, errors = self._describe_validation_error(self._parse_json(response))
             raise GitHubAPIError(status.HTTP_422_UNPROCESSABLE_ENTITY, f"GitHub API validation error: {detail}", errors=errors)
+
+        if response.status_code in (301, 302, 307, 308):
+            # A redirected write: the repository was renamed or transferred.
+            raise GitHubAPIError(status.HTTP_502_BAD_GATEWAY, "GitHub repository has been moved or renamed. Please update the repository reference.")
 
         raise GitHubAPIError(status.HTTP_502_BAD_GATEWAY, f"GitHub API returned status {response.status_code}")
 
