@@ -326,16 +326,15 @@ class WorkspaceService:
         """
         workspace.pull_request_status_last_updated_at = datetime.now(UTC)
 
-        if head_repo_missing(pull_request):
+        if pull_request_is_merged(pull_request):
+            workspace.pull_request_status = PullRequestStatus.MERGED
+        elif head_repo_missing(pull_request):
             # GitHub closed this pull request because the fork was deleted, not because anyone
             # decided anything about the work. It can never be reopened, so leave the workspace
             # active and let the next push recreate the fork; propose() opens a fresh one.
             workspace.pull_request_status = PullRequestStatus.UNKNOWN
             logger.info(f"Pull request {workspace.pull_request_number} is detached: its fork was deleted on GitHub")
             return
-
-        if pull_request_is_merged(pull_request):
-            workspace.pull_request_status = PullRequestStatus.MERGED
         elif pull_request.get("state") == "open":
             workspace.pull_request_status = PullRequestStatus.OPEN
         else:
