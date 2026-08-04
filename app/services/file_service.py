@@ -533,7 +533,7 @@ class FileService:
             except Exception as sync_error:
                 # Any failure here must revert the commit and restore the staged changes
                 logger.error(f"Sync failed while recovering from a rejected push for workspace {workspace_id}: {sync_error}")
-                self._revert_commit(repo, workspace_id, reason="the sync recovering from the rejected push failed")
+                self._revert_commit(repo, workspace_id, commit.id, reason="the sync recovering from the rejected push failed")
                 raise push_error from None
 
             if sync_result.status == SyncStatus.MERGED:
