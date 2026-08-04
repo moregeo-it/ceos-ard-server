@@ -282,16 +282,16 @@ class WorkspaceService:
         workspaces = db.query(GitWorkspace).filter(GitWorkspace.user_id == user_id).all()
 
         for workspace in workspaces:
+            if workspace.abs_path.exists():
+                try:
+                    self.git_service.set_origin_url(get_repo(workspace.abs_path), clone_url)
+                except Exception as e:
+                    # Leave DB reference pointing at the old fork so _realign_renamed_fork retries on next push
+                    logger.error(f"Could not update origin for workspace {workspace.id}: {e}")
+                    continue
+
             workspace.fork_repo_owner = owner
             workspace.fork_repo_name = name
-
-            if not workspace.abs_path.exists():
-                continue
-            try:
-                self.git_service.set_origin_url(get_repo(workspace.abs_path), clone_url)
-            except Exception as e:
-                # One unrepointable clone is not a reason to abandon the rest
-                logger.error(f"Could not update origin for workspace {workspace.id}: {e}")
 
         db.commit()
         logger.info(f"Repointed {len(workspaces)} workspace(s) of user {user_id} at {owner}/{name}")
