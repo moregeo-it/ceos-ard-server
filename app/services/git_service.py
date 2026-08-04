@@ -55,7 +55,7 @@ class GitService:
 
             # Clone with full history (no depth limit) to preserve upstream history
             callbacks = UserPassCredentials(user.username, user.access_token)
-            repo = pygit2.clone_repository(clone_url, str(workspace_path), callbacks=callbacks)
+            repo = await asyncio.to_thread(pygit2.clone_repository, clone_url, str(workspace_path), callbacks=callbacks)
 
             # Add upstream remote
             upstream_url = f"https://github.com/{upstream_owner}/{upstream_repo}"
@@ -63,7 +63,7 @@ class GitService:
 
             # Fetch from upstream with full history
             upstream_remote = repo.remotes["upstream"]
-            upstream_remote.fetch([upstream_branch])
+            await asyncio.to_thread(upstream_remote.fetch, [upstream_branch])
 
             # Get the upstream branch commit
             upstream_ref = repo.references.get(f"refs/remotes/upstream/{upstream_branch}")
@@ -235,15 +235,15 @@ class GitService:
 
             if set_upstream:
                 # Push with upstream tracking
-                origin.push([f"{ref}:{ref}"], callbacks=callbacks)
+                await asyncio.to_thread(origin.push, [f"{ref}:{ref}"], callbacks=callbacks)
                 # Fetch to update remote refs
-                origin.fetch(callbacks=callbacks)
+                await asyncio.to_thread(origin.fetch, callbacks=callbacks)
                 # Set tracking branch
                 branch = repo.branches.get(branch_name)
                 if branch:
                     branch.upstream = repo.branches.remote.get(f"origin/{branch_name}")
             else:
-                origin.push([ref], callbacks=callbacks)
+                await asyncio.to_thread(origin.push, [ref], callbacks=callbacks)
 
             logger.info(f"Pushed changes to remote branch {branch_name}")
         except HTTPException:

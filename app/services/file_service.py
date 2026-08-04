@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import shutil
@@ -115,7 +116,7 @@ class FileService:
         repo = get_repo(workspace.abs_path)
         try:
             # Get the status of all files (e.g. to include deleted files)
-            status_map = self._get_all_file_statuses(repo, target_path, workspace.abs_path)
+            status_map = await asyncio.to_thread(self._get_all_file_statuses, repo, target_path, workspace.abs_path)
 
             # Get all files that still exist on disk (deleted entries are added from the status map below)
             if target_path.is_dir():
