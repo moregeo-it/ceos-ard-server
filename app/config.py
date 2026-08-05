@@ -58,7 +58,6 @@ class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     BUILD_CONCURRENCY: int = int(os.getenv("BUILD_CONCURRENCY", "2"))
 
-
     CLIENT_URL: str = CLIENT_URL
     AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT", f"{CLIENT_URL}/auth/callback")
 
