@@ -200,7 +200,7 @@ async def propose(
     summary="List workspace commits",
     description="Retrieves the list of git commits in the workspace that are ahead of the upstream branch",
 )
-def get_workspace_commits(
+async def get_workspace_commits(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),

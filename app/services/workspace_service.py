@@ -20,19 +20,17 @@ from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
-from app.utils.locks import KeyedLocks
+from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
 from app.utils.validation import validate_pathname
+from app.utils.yaml_cache import load_yaml_cached
 
 logger = logging.getLogger(__name__)
 
-# One lock per user, guarding fork repair: GitHub allows one fork per account per upstream, so
-# all of a user's workspaces share it and recreating it is a per-user operation.
-#
-# ORDERING: acquire OUTSIDE git_service's per-workspace sync lock, never the reverse. That
-# holds today only because repair runs after sync_with_origin has released its lock, on the way
-# out via RemoteAccessError; reversing it anywhere deadlocks the event loop.
-fork_lock = KeyedLocks()
+# ORDERING (see app/utils/locks.py): fork_locks is only ever acquired INSIDE a workspace lock
+# — every _repair_fork call path holds one — and nothing holding fork_locks may acquire a
+# workspace lock; in particular _repair_fork must keep pushing through the lock-free
+# git_service.push.
 
 # How long to wait for GitHub to finish creating a fork, which POST /forks does asynchronously.
 # Short on purpose: telling the caller to retry beats holding a request open.
@@ -41,10 +39,15 @@ FORK_READY_POLL_SECONDS = 2
 
 
 class WorkspaceService:
-    def __init__(self):
-        self.git_service = GitService()
-        self.build_service = BuildService()
-        self.github_service = GitHubService()
+    def __init__(
+        self,
+        git_service: GitService | None = None,
+        build_service: BuildService | None = None,
+        github_service: GitHubService | None = None,
+    ):
+        self.git_service = git_service or GitService()
+        self.build_service = build_service or BuildService()
+        self.github_service = github_service or GitHubService()
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user: User) -> GitWorkspace:
         if not workspace_data.title:
@@ -67,31 +70,36 @@ class WorkspaceService:
                 fork_repo_name=fork_repo["name"],
                 status=WorkspaceStatus.ACTIVE,
             )
+            # Committing before the clone is deliberate: a write transaction held across a
+            # multi-second clone would block every other SQLite writer.
             db.add(workspace)
             db.commit()
             db.refresh(workspace)
 
-            # Clone the forked repository into the workspace directory
-            success = await self.git_service.clone_repository(
-                user=user,
-                clone_url=fork_repo["clone_url"],
-                workspace_path=workspace.abs_path,
-                branch_name=workspace.branch_name,
-                upstream_repo=settings.CEOS_ARD_REPO,
-                upstream_owner=settings.CEOS_ARD_ORG,
-                upstream_branch=settings.CEOS_ARD_BRANCH,
-            )
+            # Under the workspace lock so nothing can operate on the half-cloned tree
+            async def transaction():
+                success = await self.git_service.clone_repository(
+                    user=user,
+                    clone_url=fork_repo["clone_url"],
+                    workspace_path=workspace.abs_path,
+                    branch_name=workspace.branch_name,
+                    upstream_repo=settings.CEOS_ARD_REPO,
+                    upstream_owner=settings.CEOS_ARD_ORG,
+                    upstream_branch=settings.CEOS_ARD_BRANCH,
+                )
 
-            if success:
-                db.commit()
-                db.refresh(workspace)
+                if success:
+                    db.commit()
+                    db.refresh(workspace)
 
-                logger.info(f"Successfully setup workspace {workspace.id}")
-            else:
-                db.rollback()
-                raise Exception("Failed to setup workspace")
+                    logger.info(f"Successfully setup workspace {workspace.id}")
+                else:
+                    db.rollback()
+                    raise Exception("Failed to setup workspace")
 
-            return workspace
+                return workspace
+
+            return await run_exclusive(workspace.id, transaction)
 
         except HTTPException:
             if workspace:
@@ -108,13 +116,7 @@ class WorkspaceService:
             if not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-            workspaces = (
-                db.query(GitWorkspace)
-                .filter(GitWorkspace.user_id == user_id)
-                .order_by(GitWorkspace.created_at.desc())
-                .with_for_update(of=GitWorkspace)
-                .all()
-            )
+            workspaces = db.query(GitWorkspace).filter(GitWorkspace.user_id == user_id).order_by(GitWorkspace.created_at.desc()).all()
 
             return workspaces
 
@@ -180,8 +182,11 @@ class WorkspaceService:
         True means something was repaired and retrying the failed operation is worth it; False
         means the fork was fine and the failure had another cause. Safe to re-run: the local
         clone keeps every commit, and GitHub returns the existing fork rather than a second one.
+
+        Every call path holds a workspace lock (run_exclusive) around this — fork_locks is the
+        inner lock of the pair, see app/utils/locks.py.
         """
-        async with fork_lock(user.id):
+        async with fork_locks(user.id):
             # Check the token before reading anything into a 404: GitHub answers 404 for "you
             # cannot see this" too, so a revoked token would look exactly like a deleted fork
             # and trigger a re-fork instead of a re-login.
@@ -254,23 +259,31 @@ class WorkspaceService:
         repo = get_repo(workspace.abs_path)
         restore_branch = self._can_restore_branch(workspace)
 
+        # Release the read transaction before the fetch/merge/push network work below
+        db.commit()
+
         async def sync():
             return await self.git_service.sync_with_origin(
                 repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, restore_branch=restore_branch
             )
 
-        try:
-            return await sync()
-        except RemoteAccessError as e:
-            logger.info(f"Sync failed for workspace {workspace_id}; checking whether the fork still exists")
-            if not await self._repair_fork(db, workspace, user):
-                raise
-            # Sync again rather than returning early: repair only restored the fork and branch,
-            # the ahead/behind/conflict answer still has to be computed.
-            logger.info(f"Recovered workspace {workspace_id} from a deleted fork after a failed {e.operation}")
-            result = await sync()
-            result.repaired = True
-            return result
+        # One transaction under the workspace lock, fork repair and retry included:
+        # releasing the lock between them would expose the half-repaired state.
+        async def transaction():
+            try:
+                return await sync()
+            except RemoteAccessError as e:
+                logger.info(f"Sync failed for workspace {workspace_id}; checking whether the fork still exists")
+                if not await self._repair_fork(db, workspace, user):
+                    raise
+                # Sync again rather than returning early: repair only restored the fork and branch,
+                # the ahead/behind/conflict answer still has to be computed.
+                logger.info(f"Recovered workspace {workspace_id} from a deleted fork after a failed {e.operation}")
+                result = await sync()
+                result.repaired = True
+                return result
+
+        return await run_exclusive(workspace.id, transaction)
 
     def _update_fork_reference(self, db: Session, user_id: str, owner: str, name: str, clone_url: str = None) -> None:
         """
@@ -356,6 +369,10 @@ class WorkspaceService:
         if not workspace.pull_request_number:
             return workspace
 
+        # Don't hold the read transaction open across the GitHub round trip:
+        # an open transaction blocks every SQLite writer for the duration.
+        db.commit()
+
         try:
             pull_request = await self.github_service.get_pull_request(
                 access_token=access_token,
@@ -436,6 +453,8 @@ class WorkspaceService:
             workspace = self.get_workspace_by_id(db, workspace_id, user.id)
 
             if workspace.status == WorkspaceStatus.ARCHIVED and update_data.status == WorkspaceStatus.ACTIVE:
+                # Release the read transaction before the GitHub round trip below
+                db.commit()
                 blocked_reason = await self._reactivation_blocked_reason(workspace, user.access_token)
                 if blocked_reason:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_reason)
@@ -484,23 +503,31 @@ class WorkspaceService:
         if workspace.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
 
-        try:
-            if workspace.abs_path.exists():
-                shutil.rmtree(workspace.abs_path)
-                logger.info(f"Deleted workspace files at {workspace.abs_path}")
-            else:
-                logger.warning(f"Workspace path does not exist: {workspace.abs_path}")
+        # Under the workspace lock so an in-flight commit/push/sync finishes before its tree
+        # disappears; requests queued behind the delete then 404 at the workspace read.
+        async def transaction():
+            try:
+                if workspace.abs_path.exists():
+                    await asyncio.to_thread(shutil.rmtree, workspace.abs_path)
+                    logger.info(f"Deleted workspace files at {workspace.abs_path}")
+                else:
+                    logger.warning(f"Workspace path does not exist: {workspace.abs_path}")
 
-            db.delete(workspace)
-            db.commit()
+                db.delete(workspace)
+                db.commit()
 
-            logger.info(f"Successfully deleted workspace {workspace_id} (title: {workspace.title})")
-            return "Workspace deleted successfully"
+                logger.info(f"Successfully deleted workspace {workspace_id} (title: {workspace.title})")
+                return "Workspace deleted successfully"
 
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error deleting workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error deleting workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
+
+        result = await run_exclusive(workspace_id, transaction)
+        # Best-effort: the workspace is gone, so its cross-process lock file is dead weight
+        workspace_lock_file(workspace_id).unlink(missing_ok=True)
+        return result
 
     def get_workspace_commits(self, db: Session, workspace_id: str, user_id: str) -> list[pygit2.Commit]:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
@@ -532,7 +559,8 @@ class WorkspaceService:
                     continue
 
                 try:
-                    document = yaml_load(pfs_document_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
+                    # Cached (read-only use): parsed on the loop on every /pfs request
+                    document = load_yaml_cached(pfs_document_path, PlainStringSafeLoader)
                     if not isinstance(document, dict):
                         logger.error(f"Invalid PFS document format in {pfs_document_path}")
                         continue
@@ -560,86 +588,97 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
         workspace = self.get_workspace_by_id(db, workspace_id, user.id)
-        repo = get_repo(workspace.abs_path)
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)
         pfs_path = pfs_container / pfs_id
-        if pfs_path.exists():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
 
-        folder_details = create_folder(workspace.abs_path, pfs_id, pfs_path)
+        # One transaction under the workspace lock: existence check, tree copy and bulk
+        # staging must not interleave with other mutations of the repository.
+        async def transaction():
+            repo = get_repo(workspace.abs_path)
+            if pfs_path.exists():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
 
-        documents_path = pfs_path / "document.yaml"
-        pfs_schema = PFS_DOCUMENT(file=documents_path.name, base_path=workspace.abs_path)
+            folder_details = create_folder(workspace.abs_path, pfs_id, pfs_path)
 
-        try:
-            data = None
-            if request_data.base:
-                base_pfs_path = pfs_container / validate_pathname(request_data.base)
-                if not base_pfs_path.exists():
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
-
-                shutil.copytree(base_pfs_path, pfs_path, dirs_exist_ok=True)
-
-                if documents_path.exists():
-                    try:
-                        data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
-                        # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
-                        # This means we will loose e.g. comments in the document.yaml file.
-                        # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
-                        # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
-                    except YAMLValidationError as ye:
-                        raise HTTPException(
-                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
-                        ) from ye
-
-                    data.update(request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True))
-
-            if not isinstance(data, dict):
-                data = build_default_pfs_document(
-                    **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
-                    author_username=user.full_name or user.username,
-                )
-
-            # Set default values if any is None
-            default_document = build_default_pfs_document()
-            for key, value in data.items():
-                if value is None and key in default_document:
-                    data[key] = default_document[key]
+            documents_path = pfs_path / "document.yaml"
+            pfs_schema = PFS_DOCUMENT(file=documents_path.name, base_path=workspace.abs_path)
 
             try:
-                yaml_content = as_document(data, pfs_schema)
-                documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
+                data = None
+                if request_data.base:
+                    base_pfs_path = pfs_container / validate_pathname(request_data.base)
+                    if not base_pfs_path.exists():
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
 
-                logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
-            except YAMLValidationError as ye:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}") from ye
+                    # In a thread: heavy filesystem work, safe under the workspace lock
+                    await asyncio.to_thread(shutil.copytree, base_pfs_path, pfs_path, dirs_exist_ok=True)
 
-            # Add changes to the repository
-            try:
-                # Add all files in the new PFS directory
-                for file_path in pfs_path.rglob("*"):
-                    if file_path.is_file():
-                        rel_file = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
-                        repo.index.add(rel_file)
-                repo.index.write()
-            except pygit2.GitError as e:
-                logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
+                    if documents_path.exists():
+                        try:
+                            data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
+                            # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
+                            # This means we will loose e.g. comments in the document.yaml file.
+                            # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
+                            # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
+                        except YAMLValidationError as ye:
+                            raise HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
+                            ) from ye
 
-            return folder_details
-        except HTTPException:
-            shutil.rmtree(pfs_path, ignore_errors=True)
-            raise
-        except Exception as e:
-            shutil.rmtree(pfs_path, ignore_errors=True)
-            logger.error(f"Error creating PFS {pfs_id} for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
+                        data.update(request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True))
+
+                if not isinstance(data, dict):
+                    data = build_default_pfs_document(
+                        **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
+                        author_username=user.full_name or user.username,
+                    )
+
+                # Set default values if any is None
+                default_document = build_default_pfs_document()
+                for key, value in data.items():
+                    if value is None and key in default_document:
+                        data[key] = default_document[key]
+
+                try:
+                    yaml_content = as_document(data, pfs_schema)
+                    documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
+
+                    logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
+                except YAMLValidationError as ye:
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}") from ye
+
+                # Add changes to the repository
+                try:
+                    # Add all files in the new PFS directory
+                    for file_path in pfs_path.rglob("*"):
+                        if file_path.is_file():
+                            rel_file = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
+                            repo.index.add(rel_file)
+                    repo.index.write()
+                except pygit2.GitError as e:
+                    logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
+
+                return folder_details
+            except HTTPException:
+                await asyncio.to_thread(shutil.rmtree, pfs_path, ignore_errors=True)
+                raise
+            except Exception as e:
+                await asyncio.to_thread(shutil.rmtree, pfs_path, ignore_errors=True)
+                logger.error(f"Error creating PFS {pfs_id} for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
+
+        return await run_exclusive(workspace_id, transaction)
 
     async def get_proposal(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> Proposal | None:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id)
         if not workspace.pull_request_number:
             return None
+
+        # Don't hold the read transaction open across the GitHub round trip:
+        # an open transaction blocks every SQLite writer for the duration.
+        db.commit()
 
         try:
             pull_request = await self.github_service.get_pull_request(
@@ -679,63 +718,77 @@ class WorkspaceService:
         )
 
     async def propose(self, db: Session, workspace_id: str, user: User, data: ProposalRequest) -> Proposal:
-        workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token)
+        # One transaction under the workspace lock — state read, branch push, pull request
+        # create/update, DB write: two concurrent proposals would otherwise both see
+        # "no pull request yet" and open two pull requests upstream.
+        async def transaction():
+            workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token)
 
-        if workspace.pull_request_status == PullRequestStatus.MERGED:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Pull request is already merged, cannot propose further changes. Please create a new workspace.",
-            )
-
-        if data.state != "open":
-            if workspace.status == WorkspaceStatus.ARCHIVED:
+            if workspace.pull_request_status == PullRequestStatus.MERGED:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot make changes to an archived workspace. Please reactivate it first."
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Pull request is already merged, cannot propose further changes. Please create a new workspace.",
                 )
 
-            if workspace.pull_request_status == PullRequestStatus.CLOSED:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Pull request has been closed. Please reopen it before making further changes."
-                )
+            if data.state != "open":
+                if workspace.status == WorkspaceStatus.ARCHIVED:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot make changes to an archived workspace. Please reactivate it first."
+                    )
 
-        repo = get_repo(workspace.abs_path)
-        try:
-            # Everything but a withdrawal needs the branch to genuinely be on the fork first:
-            # GitHub refuses a pull request whose head is missing, and the local
-            # remote-tracking ref is not evidence that it is there. Withdrawing touches only
-            # the pull request API, and is the one action worth allowing when the fork is not.
-            if data.state != "closed":
-                await self.with_remote_recovery(
-                    db,
-                    workspace,
-                    user,
-                    lambda: self.git_service.ensure_branch_pushed(repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id),
-                )
+                if workspace.pull_request_status == PullRequestStatus.CLOSED:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Pull request has been closed. Please reopen it before making further changes.",
+                    )
 
-            pr_response = await self._handle_pull_request(
-                propose_data=data,
-                access_token=user.access_token,
-                head_branch_name=workspace.branch_name,
-                head_repo_owner=workspace.fork_repo_owner,
-                workspace=workspace,
-            )
+            repo = get_repo(workspace.abs_path)
 
-            if data.state == "open":
-                workspace.archived_at = None
-                workspace.status = WorkspaceStatus.ACTIVE
-
-            # String column: bind a string so this keeps working on a stricter database
-            workspace.pull_request_number = str(pr_response["number"])
-            self._apply_pull_request_state(workspace, pr_response)
+            # sync_workspace above may have returned without committing (no pull request yet);
+            # release the read transaction before the git-network and GitHub calls below.
             db.commit()
 
-            return self._to_proposal(pr_response)
+            try:
+                # Everything but a withdrawal needs the branch to genuinely be on the fork first:
+                # GitHub refuses a pull request whose head is missing, and the local
+                # remote-tracking ref is not evidence that it is there. Withdrawing touches only
+                # the pull request API, and is the one action worth allowing when the fork is not.
+                if data.state != "closed":
+                    await self.with_remote_recovery(
+                        db,
+                        workspace,
+                        user,
+                        lambda: self.git_service.ensure_branch_pushed(
+                            repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id
+                        ),
+                    )
 
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
+                pr_response = await self._handle_pull_request(
+                    propose_data=data,
+                    access_token=user.access_token,
+                    head_branch_name=workspace.branch_name,
+                    head_repo_owner=workspace.fork_repo_owner,
+                    workspace=workspace,
+                )
+
+                if data.state == "open":
+                    workspace.archived_at = None
+                    workspace.status = WorkspaceStatus.ACTIVE
+
+                # String column: bind a string so this keeps working on a stricter database
+                workspace.pull_request_number = str(pr_response["number"])
+                self._apply_pull_request_state(workspace, pr_response)
+                db.commit()
+
+                return self._to_proposal(pr_response)
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
+
+        return await run_exclusive(workspace_id, transaction)
 
     @staticmethod
     def _is_unreopenable(error: GitHubAPIError) -> bool:

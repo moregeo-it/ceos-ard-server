@@ -200,6 +200,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
         raise
     finally:
         db.close()
+        await github_service.aclose()
 
 
 if __name__ == "__main__":

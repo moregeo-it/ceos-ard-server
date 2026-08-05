@@ -51,9 +51,29 @@ class GitHubAPIError(HTTPException):
 
 
 class GitHubService:
-    def __init__(self):
+    def __init__(self, client: httpx.AsyncClient | None = None):
         self.base_url = settings.GITHUB_API_BASE_URL
         self.default_headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "CEOS-ARD-Editor"}
+        self._client = client
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """
+        The shared HTTP client: reuses connections instead of a TLS handshake per call.
+        Lazy so scripts and tests can construct the service without an event loop; closed
+        via aclose() on app shutdown.
+        """
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                # Connect-phase retries only: safe for POST/PATCH, since nothing was sent yet
+                transport=httpx.AsyncHTTPTransport(retries=2),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
 
     def _get_auth_headers(self, token: str, auth_type: str = "Bearer") -> dict[str, str]:
         """Create headers with authorization token.
@@ -141,8 +161,9 @@ class GitHubService:
         try:
             # A renamed or transferred repository answers 301. GET follows it transparently;
             # writes must not, because httpx replays a redirected POST as a GET.
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=(method == "GET")) as client:
-                response = await client.request(method, url, headers=headers, params=params, json=json_data)
+            response = await self.client.request(
+                method, url, headers=headers, params=params, json=json_data, timeout=timeout, follow_redirects=(method == "GET")
+            )
         except httpx.TimeoutException as e:
             logger.error(f"Timeout requesting GitHub API: {url}")
             raise GitHubAPIError(status.HTTP_504_GATEWAY_TIMEOUT, "GitHub API request timed out") from e
@@ -173,7 +194,7 @@ class GitHubService:
 
         if response.status_code == 422:
             detail, errors = self._describe_validation_error(self._parse_json(response))
-            raise GitHubAPIError(status.HTTP_422_UNPROCESSABLE_ENTITY, f"GitHub API validation error: {detail}", errors=errors)
+            raise GitHubAPIError(status.HTTP_422_UNPROCESSABLE_CONTENT, f"GitHub API validation error: {detail}", errors=errors)
 
         if response.status_code in (301, 302, 307, 308):
             # A redirected write: the repository was renamed or transferred.

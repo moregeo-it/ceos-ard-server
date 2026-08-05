@@ -1,15 +1,17 @@
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 import tomllib
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Bounds concurrent builds: a pandoc/Playwright document build takes tens of seconds, and an
+# unbounded burst of preview requests would otherwise run one build per request.
+_run_semaphore = asyncio.Semaphore(settings.BUILD_CONCURRENCY)
 
 
 def load_project_info() -> tuple[str, str]:
@@ -21,24 +23,29 @@ def load_project_info() -> tuple[str, str]:
     return name, version
 
 
-def _run_subprocess(*args, timeout=60) -> subprocess.CompletedProcess:
-    """Run a command in the pixi environment synchronously."""
-    return subprocess.run(
-        ["pixi", "run", "--", *args],
-        capture_output=True,
-        timeout=timeout,
-    )
+async def run(*args, timeout=60) -> subprocess.CompletedProcess:
+    """
+    Run a command in the pixi environment as a native async subprocess.
 
-
-async def run(*args, **kwargs) -> subprocess.CompletedProcess:
-    """Run a command in the pixi environment asynchronously."""
-    return await asyncio.to_thread(_run_subprocess, *args, **kwargs)
-
-
-@asynccontextmanager
-async def fastapi_run_checks(app: FastAPI):
-    await run_checks()
-    yield
+    Occupies no worker thread while it waits; the child is killed on timeout or cancellation
+    (client disconnect) instead of running on unattended.
+    """
+    async with _run_semaphore:
+        process = await asyncio.create_subprocess_exec(
+            "pixi",
+            "run",
+            "--",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        except (TimeoutError, asyncio.CancelledError):
+            process.kill()
+            await process.communicate()
+            raise
+        return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
 
 async def run_checks():

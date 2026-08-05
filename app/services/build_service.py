@@ -38,6 +38,3 @@ class BuildService:
                 "message": "Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).",
                 "output_file": str(output_file),
             }
-
-
-build_service = BuildService()

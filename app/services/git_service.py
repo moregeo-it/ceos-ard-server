@@ -10,14 +10,19 @@ from app.config import settings
 from app.models.user import User
 from app.schemas.workspace import SyncResult, SyncStatus
 from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, sanitize_git_error
-from app.utils.locks import KeyedLocks
+from app.utils.locks import workspace_locks
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
-# One lock per workspace: prevents concurrent syncs of the same repository.
-# A multi-process deployment would need a filesystem lock instead.
-sync_lock = KeyedLocks()
+
+def _require_workspace_lock(workspace_id: str, operation: str) -> None:
+    """
+    Tripwire: repository-mutating operations must run inside run_exclusive (app/utils/locks.py),
+    which serializes them per workspace. Failing loudly here beats silently racing a sync.
+    """
+    if not workspace_locks.held(workspace_id):
+        raise RuntimeError(f"{operation} requires the caller to hold the workspace lock (use run_exclusive)")
 
 
 class RemoteAccessError(HTTPException):
@@ -86,7 +91,8 @@ class GitService:
             logger.error(f"Invalid git repository: {clone_url}")
 
             if workspace_path.exists():
-                shutil.rmtree(workspace_path)
+                # In a thread: deleting a partial clone is heavy filesystem work
+                await asyncio.to_thread(shutil.rmtree, workspace_path)
 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
         except Exception as e:
@@ -96,7 +102,7 @@ class GitService:
             logger.error(f"Error cloning repository: {error_msg}")
 
             if workspace_path.exists():
-                shutil.rmtree(workspace_path)
+                await asyncio.to_thread(shutil.rmtree, workspace_path)
 
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clone repository: {error_msg}"
@@ -121,6 +127,9 @@ class GitService:
         logger.info(f"Set origin of {repo.workdir} to {url}")
 
     async def revert_file_changes(self, workspace_path: Path, file_path: str):
+        # The workspace directory is named after the workspace id (GitWorkspace.abs_path)
+        _require_workspace_lock(workspace_path.name, "revert_file_changes")
+
         target_file_path = validate_workspace_path(file_path, workspace_path)
         relative_file_str = normalize_workspace_path(target_file_path, workspace_path, absolute=False)
 
@@ -282,131 +291,133 @@ class GitService:
 
         Fast-forwards when possible, creates a merge commit when histories diverged but merge
         cleanly, and aborts (restoring the repository) when the merge would conflict. The
-        working tree is never left in a mid-merge state. Network calls run in worker threads;
-        repository mutation stays on the event loop.
+        working tree is never left in a mid-merge state.
+
+        The caller must hold the workspace lock (run_exclusive): it is what makes the dirty
+        check and the reset/merge atomic against concurrent file-editing requests, which all
+        mutate under the same lock. Lock-free readers may observe intermediate states at the
+        awaits below; every such state is a consistent tree.
 
         Args:
             repo: pygit2 Repository instance
             user: User object with username and access_token for authentication
             branch_name: The workspace branch to sync with its origin counterpart
-            workspace_id: Workspace id, used to serialize concurrent syncs
+            workspace_id: Workspace id, for the lock assertion and log lines
             restore_branch: Push the branch back when it is missing on the fork. Only for an
                 active workspace whose pull request is not merged or closed, since otherwise
                 the deletion was probably deliberate.
         """
-        async with sync_lock(workspace_id):
-            callbacks = UserPassCredentials(user.username, user.access_token)
-            origin = self.get_origin(repo)
+        _require_workspace_lock(workspace_id, "sync_with_origin")
 
-            # Prune so a branch deleted on the fork is detectable
-            try:
-                await asyncio.to_thread(origin.fetch, callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
-            except Exception as e:
-                error_msg = sanitize_git_error(e, user.username, user.access_token)
-                logger.error(f"Unable to fetch origin for workspace {workspace_id}: {error_msg}")
-                raise RemoteAccessError(
-                    f"Failed to fetch updates from GitHub. Error: {error_msg}",
-                    operation="fetch",
-                ) from None  # don't raise e to avoid leaking sensitive information
+        callbacks = UserPassCredentials(user.username, user.access_token)
+        origin = self.get_origin(repo)
 
-            # Best-effort upstream refresh; keeps the get_commits baseline current
-            try:
-                await asyncio.to_thread(repo.remotes["upstream"].fetch, [settings.CEOS_ARD_BRANCH])
-            except KeyError:
-                logger.warning(f"Workspace {workspace_id} has no upstream remote; commit history will be incomplete")
-            except Exception as e:
-                logger.warning(f"Could not refresh upstream for workspace {workspace_id}: {e}")
+        # Prune so a branch deleted on the fork is detectable
+        try:
+            await asyncio.to_thread(origin.fetch, callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
+        except Exception as e:
+            error_msg = sanitize_git_error(e, user.username, user.access_token)
+            logger.error(f"Unable to fetch origin for workspace {workspace_id}: {error_msg}")
+            raise RemoteAccessError(
+                f"Failed to fetch updates from GitHub. Error: {error_msg}",
+                operation="fetch",
+            ) from None  # don't raise e to avoid leaking sensitive information
 
-            remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
+        # Best-effort upstream refresh; keeps the get_commits baseline current
+        try:
+            await asyncio.to_thread(repo.remotes["upstream"].fetch, [settings.CEOS_ARD_BRANCH])
+        except KeyError:
+            logger.warning(f"Workspace {workspace_id} has no upstream remote; commit history will be incomplete")
+        except Exception as e:
+            logger.warning(f"Could not refresh upstream for workspace {workspace_id}: {e}")
 
-            # The branch is gone from the fork. Handled before the merge path, which has no
-            # remote commit to compare against, and after the fetch, so an unreachable fork is
-            # never mistaken for a deleted branch. Each arm returns, so the merge below still
-            # runs without an intervening await.
-            if remote_ref is None:
-                if not restore_branch:
-                    return SyncResult(status=SyncStatus.REMOTE_MISSING)
-                if repo.status():
-                    # Never restore from a tree with uncommitted work: the branch on GitHub
-                    # would not match what the user has in front of them
-                    return SyncResult(status=SyncStatus.DIRTY)
-                await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
-                logger.info(f"Restored branch {branch_name} on the fork for workspace {workspace_id}")
-                return SyncResult(status=SyncStatus.REMOTE_RESTORED)
+        remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
 
-            # No awaits from here through the merge: keeps the dirty check and the
-            # reset/merge atomic with concurrent file-editing requests
-            remote_oid = remote_ref.target
-            local_oid = repo.head.target
-            ahead, behind = repo.ahead_behind(local_oid, remote_oid)
-
-            # Any entry means uncommitted work, conflicts included. Left unguarded on purpose: if
-            # the status cannot be read, the sync must fail instead of resetting an unknown tree.
+        # The branch is gone from the fork. Handled before the merge path, which has no
+        # remote commit to compare against, and after the fetch, so an unreachable fork is
+        # never mistaken for a deleted branch.
+        if remote_ref is None:
+            if not restore_branch:
+                return SyncResult(status=SyncStatus.REMOTE_MISSING)
             if repo.status():
-                return SyncResult(status=SyncStatus.DIRTY, ahead_commits=ahead, behind_commits=behind)
+                # Never restore from a tree with uncommitted work: the branch on GitHub
+                # would not match what the user has in front of them
+                return SyncResult(status=SyncStatus.DIRTY)
+            await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
+            logger.info(f"Restored branch {branch_name} on the fork for workspace {workspace_id}")
+            return SyncResult(status=SyncStatus.REMOTE_RESTORED)
 
-            if behind == 0:
-                if ahead > 0:
-                    # Best-effort push of local commits the fork is missing
-                    try:
-                        await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
-                    except Exception as e:
-                        error_msg = sanitize_git_error(e, user.username, user.access_token)
-                        logger.warning(f"Could not push local commits for workspace {workspace_id}: {error_msg}")
-                return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
+        remote_oid = remote_ref.target
+        local_oid = repo.head.target
+        ahead, behind = repo.ahead_behind(local_oid, remote_oid)
 
-            analysis, _ = repo.merge_analysis(remote_oid)
+        # Any entry means uncommitted work, conflicts included. Left unguarded on purpose: if
+        # the status cannot be read, the sync must fail instead of resetting an unknown tree.
+        if repo.status():
+            return SyncResult(status=SyncStatus.DIRTY, ahead_commits=ahead, behind_commits=behind)
 
-            if analysis & pygit2.GIT_MERGE_ANALYSIS_UP_TO_DATE:
-                return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
-
-            if analysis & pygit2.GIT_MERGE_ANALYSIS_FASTFORWARD:
-                # Tree is clean (checked above), so a hard reset is a safe fast-forward
-                repo.reset(remote_oid, pygit2.GIT_RESET_HARD)
-                return SyncResult(status=SyncStatus.UPDATED, behind_commits=behind, pulled_commits=behind)
-
-            if not analysis & pygit2.GIT_MERGE_ANALYSIS_NORMAL:
-                logger.warning(f"Unexpected merge analysis {analysis} for workspace {workspace_id}")
-                return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
-
-            try:
-                repo.merge(remote_oid)
-
-                if repo.index.conflicts is not None:
-                    # Collect paths before resetting — the reset clears the conflict entries
-                    conflicting_files = sorted({entry.path for conflict in repo.index.conflicts for entry in conflict if entry is not None})
-                    repo.reset(local_oid, pygit2.GIT_RESET_HARD)
-                    repo.state_cleanup()
-                    return SyncResult(status=SyncStatus.CONFLICT, ahead_commits=ahead, behind_commits=behind, conflicting_files=conflicting_files)
-
-                signature = pygit2.Signature(user.full_name or user.username, user.email)
-                tree_id = repo.index.write_tree()
-                repo.create_commit(
-                    "HEAD",
-                    signature,
-                    signature,
-                    f"Merge remote changes from origin/{branch_name}",
-                    tree_id,
-                    [local_oid, remote_oid],
-                )
-                repo.state_cleanup()
-            except Exception as e:
+        if behind == 0:
+            if ahead > 0:
+                # Best-effort push of local commits the fork is missing
                 try:
-                    repo.reset(local_oid, pygit2.GIT_RESET_HARD)
-                    repo.state_cleanup()
-                except Exception as cleanup_error:
-                    logger.error(f"Failed to restore workspace {workspace_id} after merge error: {cleanup_error}")
-                logger.error(f"Error merging remote changes for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to merge remote changes") from e
+                    await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
+                except Exception as e:
+                    error_msg = sanitize_git_error(e, user.username, user.access_token)
+                    logger.warning(f"Could not push local commits for workspace {workspace_id}: {error_msg}")
+            return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
 
-            # Best-effort push of the merge commit; if it fails, the next push or sync delivers it
+        analysis, _ = repo.merge_analysis(remote_oid)
+
+        if analysis & pygit2.GIT_MERGE_ANALYSIS_UP_TO_DATE:
+            return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
+
+        if analysis & pygit2.GIT_MERGE_ANALYSIS_FASTFORWARD:
+            # Tree is clean (checked above), so a hard reset is a safe fast-forward
+            repo.reset(remote_oid, pygit2.GIT_RESET_HARD)
+            return SyncResult(status=SyncStatus.UPDATED, behind_commits=behind, pulled_commits=behind)
+
+        if not analysis & pygit2.GIT_MERGE_ANALYSIS_NORMAL:
+            logger.warning(f"Unexpected merge analysis {analysis} for workspace {workspace_id}")
+            return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
+
+        try:
+            repo.merge(remote_oid)
+
+            if repo.index.conflicts is not None:
+                # Collect paths before resetting — the reset clears the conflict entries
+                conflicting_files = sorted({entry.path for conflict in repo.index.conflicts for entry in conflict if entry is not None})
+                repo.reset(local_oid, pygit2.GIT_RESET_HARD)
+                repo.state_cleanup()
+                return SyncResult(status=SyncStatus.CONFLICT, ahead_commits=ahead, behind_commits=behind, conflicting_files=conflicting_files)
+
+            signature = pygit2.Signature(user.full_name or user.username, user.email)
+            tree_id = repo.index.write_tree()
+            repo.create_commit(
+                "HEAD",
+                signature,
+                signature,
+                f"Merge remote changes from origin/{branch_name}",
+                tree_id,
+                [local_oid, remote_oid],
+            )
+            repo.state_cleanup()
+        except Exception as e:
             try:
-                await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
-            except Exception as e:
-                error_msg = sanitize_git_error(e, user.username, user.access_token)
-                logger.warning(f"Could not push merge commit for workspace {workspace_id}: {error_msg}")
+                repo.reset(local_oid, pygit2.GIT_RESET_HARD)
+                repo.state_cleanup()
+            except Exception as cleanup_error:
+                logger.error(f"Failed to restore workspace {workspace_id} after merge error: {cleanup_error}")
+            logger.error(f"Error merging remote changes for workspace {workspace_id}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to merge remote changes") from e
 
-            return SyncResult(status=SyncStatus.MERGED, behind_commits=behind, pulled_commits=behind)
+        # Best-effort push of the merge commit; if it fails, the next push or sync delivers it
+        try:
+            await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
+        except Exception as e:
+            error_msg = sanitize_git_error(e, user.username, user.access_token)
+            logger.warning(f"Could not push merge commit for workspace {workspace_id}: {error_msg}")
+
+        return SyncResult(status=SyncStatus.MERGED, behind_commits=behind, pulled_commits=behind)
 
     async def ensure_branch_pushed(self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str) -> bool:
         """
@@ -418,40 +429,44 @@ class GitService:
         Callers that need the branch to really be there — creating or reopening a pull request
         — otherwise send a head that does not exist.
 
+        The caller must hold the workspace lock (run_exclusive), which serializes this against
+        syncs and other mutations of the same repository.
+
         Args:
             repo: pygit2 Repository instance
             user: User object with username and access_token for authentication
             branch_name: The workspace branch that must exist on the fork
-            workspace_id: Workspace id, used to serialize against concurrent syncs
+            workspace_id: Workspace id, for the lock assertion and log lines
         """
-        async with sync_lock(workspace_id):
-            callbacks = UserPassCredentials(user.username, user.access_token)
-            origin = self.get_origin(repo)
+        _require_workspace_lock(workspace_id, "ensure_branch_pushed")
 
-            try:
-                await asyncio.to_thread(origin.fetch, callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
-            except Exception as e:
-                error_msg = sanitize_git_error(e, user.username, user.access_token)
-                logger.error(f"Unable to fetch origin for workspace {workspace_id}: {error_msg}")
-                raise RemoteAccessError(
-                    f"Failed to reach GitHub. Error: {error_msg}",
-                    operation="fetch",
-                ) from None  # don't raise e to avoid leaking sensitive information
+        callbacks = UserPassCredentials(user.username, user.access_token)
+        origin = self.get_origin(repo)
 
-            remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
+        try:
+            await asyncio.to_thread(origin.fetch, callbacks=callbacks, prune=pygit2.GIT_FETCH_PRUNE)
+        except Exception as e:
+            error_msg = sanitize_git_error(e, user.username, user.access_token)
+            logger.error(f"Unable to fetch origin for workspace {workspace_id}: {error_msg}")
+            raise RemoteAccessError(
+                f"Failed to reach GitHub. Error: {error_msg}",
+                operation="fetch",
+            ) from None  # don't raise e to avoid leaking sensitive information
 
-            if remote_ref is None:
-                await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
-                logger.info(f"Restored branch {branch_name} on the fork for workspace {workspace_id}")
-                return True
+        remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
 
-            ahead, _ = repo.ahead_behind(repo.head.target, remote_ref.target)
-            if ahead == 0:
-                return False
-
-            await self.push(repo=repo, branch_name=branch_name, user=user)
-            logger.info(f"Pushed {ahead} commit(s) to {branch_name} for workspace {workspace_id}")
+        if remote_ref is None:
+            await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
+            logger.info(f"Restored branch {branch_name} on the fork for workspace {workspace_id}")
             return True
+
+        ahead, _ = repo.ahead_behind(repo.head.target, remote_ref.target)
+        if ahead == 0:
+            return False
+
+        await self.push(repo=repo, branch_name=branch_name, user=user)
+        logger.info(f"Pushed {ahead} commit(s) to {branch_name} for workspace {workspace_id}")
+        return True
 
     def get_commits(
         self,

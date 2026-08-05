@@ -13,6 +13,7 @@ Options:
 """
 
 import logging
+import os
 import shutil
 import sys
 from datetime import UTC, datetime
@@ -28,12 +29,17 @@ from app.db.database import SessionLocal  # noqa: E402
 # Import User first to register it with SQLAlchemy before GitWorkspace
 from app.models.user import User  # noqa: E402, F401
 from app.models.workspace import GitWorkspace, WorkspaceStatus  # noqa: E402
+from app.utils.locks import acquire_workspace_file_lock, workspace_lock_file  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# How long to wait for the server to finish an in-flight transaction on a workspace before
+# skipping it. Generous against a slow push, small against the daily schedule.
+LOCK_TIMEOUT_SECONDS = 60
 
 
 def cleanup_archived_workspaces(dry_run: bool = False):
@@ -79,17 +85,32 @@ def cleanup_archived_workspaces(dry_run: bool = False):
                         f"archived: {workspace.archived_at}, deletion: {workspace.deletion_at})"
                     )
                 else:
-                    # Delete workspace files if they exist
-                    if workspace.abs_path.exists():
-                        shutil.rmtree(workspace.abs_path)
-                        logger.info(f"Deleted workspace files for {workspace.id} at {workspace.abs_path}")
-                    else:
-                        logger.warning(f"Workspace {workspace.id} path does not exist: {workspace.abs_path}")
-                    # Delete database record
-                    db.delete(workspace)
-                    db.commit()
-                    logger.info(f"Deleted workspace {workspace.id} (title: {workspace.title}) from database")
-                    deleted_count += 1
+                    # The same per-workspace flock the server holds around every mutating
+                    # transaction (app/utils/locks.py) — the server's asyncio locks mean
+                    # nothing in this process, and an unguarded rmtree could pull the
+                    # repository out from under an in-flight commit/push.
+                    try:
+                        lock_fd = acquire_workspace_file_lock(workspace.id, timeout=LOCK_TIMEOUT_SECONDS)
+                    except TimeoutError:
+                        logger.warning(f"Workspace {workspace.id} is busy in the server; skipping until the next run")
+                        error_count += 1
+                        continue
+
+                    try:
+                        # Delete workspace files if they exist
+                        if workspace.abs_path.exists():
+                            shutil.rmtree(workspace.abs_path)
+                            logger.info(f"Deleted workspace files for {workspace.id} at {workspace.abs_path}")
+                        else:
+                            logger.warning(f"Workspace {workspace.id} path does not exist: {workspace.abs_path}")
+                        # Delete database record
+                        db.delete(workspace)
+                        db.commit()
+                        logger.info(f"Deleted workspace {workspace.id} (title: {workspace.title}) from database")
+                        deleted_count += 1
+                    finally:
+                        os.close(lock_fd)
+                        workspace_lock_file(workspace.id).unlink(missing_ok=True)
 
             except Exception as e:
                 db.rollback()
