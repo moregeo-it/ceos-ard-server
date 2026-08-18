@@ -15,6 +15,7 @@ from app.schemas.workspace import (
     PFSTypesResponse,
     Proposal,
     ProposalRequest,
+    SyncResult,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
@@ -101,7 +102,7 @@ async def update_workspace(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
     try:
-        return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, update_data=update_data)
+        return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user=current_user["user"], update_data=update_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -199,7 +200,7 @@ async def propose(
     summary="List workspace commits",
     description="Retrieves the list of git commits in the workspace that are ahead of the upstream branch",
 )
-def get_workspace_commits(
+async def get_workspace_commits(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
@@ -217,6 +218,29 @@ def get_workspace_commits(
     except Exception as e:
         logger.error(f"Error getting workspace commits: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace commits", e)) from e
+
+
+@router.post(
+    "/{workspace_id}/sync",
+    response_model=SyncResult,
+    status_code=status.HTTP_200_OK,
+    summary="Sync workspace with remote changes",
+    description="Fetches the fork remote and merges remote branch changes into the local workspace when safe. "
+    "Conflict and dirty outcomes are reported in the response body, not as HTTP errors.",
+)
+async def sync_workspace_repository(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+):
+    try:
+        return await workspace_service.sync_git(db=db, workspace_id=workspace_id, user=current_user["user"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing workspace: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("sync workspace", e)) from e
 
 
 @router.get(

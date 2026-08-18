@@ -16,18 +16,24 @@ class WorkspaceStatus(str, Enum):
     ARCHIVED = "archived"
 
 
-class GitStatusFile(BaseModel):
-    path: str
-    status: str
+class SyncStatus(str, Enum):
+    UP_TO_DATE = "up_to_date"
+    UPDATED = "updated"  # fast-forwarded to remote
+    MERGED = "merged"  # merge commit created (and best-effort pushed)
+    CONFLICT = "conflict"  # merge aborted, repository fully restored
+    DIRTY = "dirty"  # uncommitted local changes, merge skipped
+    REMOTE_MISSING = "remote_missing"  # branch no longer exists on the fork
+    REMOTE_RESTORED = "remote_restored"  # branch was missing on the fork and was pushed back
 
 
-class GitStatus(BaseModel):
-    branch: str
-    is_clean: bool
-    ahead_commits: int
-    behind_commits: int
-    modified_files: list[GitStatusFile]
-    untracked_files: list[str]
+class SyncResult(BaseModel):
+    status: SyncStatus
+    ahead_commits: int = 0
+    behind_commits: int = 0
+    pulled_commits: int = 0
+    conflicting_files: list[str] = []
+    # True when the fork itself was missing on GitHub and had to be recreated before the sync
+    repaired: bool = False
 
 
 class WorkspaceCreate(BaseModel):
@@ -83,6 +89,11 @@ class Commit(BaseModel):
     author: str
 
 
+class CommitResult(Commit):
+    # True when remote changes from the fork were merged into the workspace as part of the commit
+    merged_remote: bool = False
+
+
 class Proposal(BaseModel):
     number: int
     url: str
@@ -90,6 +101,9 @@ class Proposal(BaseModel):
     state: str
     draft: bool
     description: str
+    # True when the fork this was opened from has been deleted. GitHub closed the pull request
+    # and it can never be reopened, so proposing again opens a new one instead.
+    detached: bool = False
 
 
 class CreateFileRequest(BaseModel):

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import shutil
@@ -6,25 +7,27 @@ from pathlib import Path
 import pygit2
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from yaml import safe_load as yaml_load
 
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
-from app.schemas.workspace import FilePatchRequest
+from app.schemas.workspace import FilePatchRequest, SyncStatus
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.locks import run_exclusive
+from app.utils.pfs_utils import PlainStringSafeLoader
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
+from app.utils.yaml_cache import load_yaml_cached
 
 logger = logging.getLogger(__name__)
 
 
 class FileService:
-    def __init__(self):
-        self.git_service = GitService()
-        self.workspace_service = WorkspaceService()
+    def __init__(self, git_service: GitService | None = None, workspace_service: WorkspaceService | None = None):
+        self.git_service = git_service or GitService()
+        self.workspace_service = workspace_service or WorkspaceService()
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
@@ -114,7 +117,8 @@ class FileService:
 
         repo = get_repo(workspace.abs_path)
         try:
-            # Get the status of all files (e.g. to include deleted files)
+            # Get the status of all files (e.g. to include deleted files). On the loop on purpose:
+            # pygit2 holds the GIL through the scan, so a thread only adds a race with index writes.
             status_map = self._get_all_file_statuses(repo, target_path, workspace.abs_path)
 
             # Get all files that still exist on disk (deleted entries are added from the status map below)
@@ -152,7 +156,13 @@ class FileService:
             status = {}
         all_files = []
 
-        for file in target_path.iterdir():
+        try:
+            entries = list(target_path.iterdir())
+        except (FileNotFoundError, NotADirectoryError):
+            # A locked writer can remove a directory while this lock-free reader walks it
+            return all_files
+
+        for file in entries:
             if ignore_file_path(file, file.relative_to(workspace_path), IGNORE_ROOT_PATHS):
                 continue
 
@@ -178,17 +188,22 @@ class FileService:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         name = validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
-
         target_path = folder / name
-        if target_path.exists():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists")
 
-        if request_data.type == "file":
-            return create_file(workspace.abs_path, request_data.name, target_path)
-        elif request_data.type == "folder":
-            return create_folder(workspace.abs_path, request_data.name, target_path)
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
+        async def transaction():
+            if target_path.exists():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"{'Directory' if target_path.is_dir() else 'File'} already exists"
+                )
+
+            if request_data.type == "file":
+                return create_file(workspace.abs_path, request_data.name, target_path)
+            elif request_data.type == "folder":
+                return create_folder(workspace.abs_path, request_data.name, target_path)
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
+
+        return await run_exclusive(workspace_id, transaction)
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -200,119 +215,128 @@ class FileService:
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        file_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
-        repo = get_repo(workspace.abs_path)
-        try:
-            # Recreate the parent directory if it was removed (e.g. its folder was deleted while
-            # the file stayed open with unsaved changes).
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_bytes(content)
-            # Stage the file using pygit2
-            relative_path = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
-            repo.index.add(relative_path)
-            repo.index.write()
-            return {
-                "name": file_path.name,
-                "is_directory": False,
-                "status": get_file_status(repo, file_path),
-                "path": normalize_workspace_path(file_path, workspace.abs_path),
-            }
-        except pygit2.GitError as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been stored, but it failed to be added to the repository"
-            ) from e
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
+        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+
+        async def transaction():
+            repo = get_repo(workspace.abs_path)
+            try:
+                # Recreate the parent directory if it was removed (e.g. its folder was deleted while
+                # the file stayed open with unsaved changes).
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(content)
+                # Stage the file using pygit2
+                relative_path = str(target_path.relative_to(workspace.abs_path)).replace("\\", "/")
+                repo.index.add(relative_path)
+                repo.index.write()
+                return {
+                    "name": target_path.name,
+                    "is_directory": False,
+                    "status": get_file_status(repo, target_path),
+                    "path": normalize_workspace_path(target_path, workspace.abs_path),
+                }
+            except pygit2.GitError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file has been stored, but it failed to be added to the repository"
+                ) from e
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
+
+        return await run_exclusive(workspace_id, transaction)
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
-        relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
-        repo = get_repo(workspace.abs_path)
 
-        if target_path.is_file():
-            ftype = "File"
-            try:
-                target_path.unlink()
-            except Exception as e:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete file. Please try again.") from e
-        elif target_path.is_dir():
-            ftype = "Folder"
-            try:
-                shutil.rmtree(target_path)
-            except Exception as e:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete folder. Please try again.") from e
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is neither a file nor a folder.")
+        async def transaction():
+            target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
+            relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+            repo = get_repo(workspace.abs_path)
 
-        # Check if file exists in HEAD (has git history)
-        is_committed = False
-        try:
-            if not repo.head_is_unborn:
-                head_commit = repo.head.peel()
+            if target_path.is_file():
+                ftype = "File"
                 try:
-                    head_commit.tree[relative_path]
-                    is_committed = True
-                except KeyError:
-                    is_committed = False
-        except pygit2.GitError:
+                    target_path.unlink()
+                except Exception as e:
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete file. Please try again.") from e
+            elif target_path.is_dir():
+                ftype = "Folder"
+                try:
+                    # In a thread: heavy filesystem work, safe under the workspace lock
+                    await asyncio.to_thread(shutil.rmtree, target_path)
+                except Exception as e:
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete folder. Please try again.") from e
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is neither a file nor a folder.")
+
+            # Check if file exists in HEAD (has git history)
             is_committed = False
-
-        if is_committed:
-            # File/folder is in git history - stage the deletion
             try:
-                if ftype == "Folder":
-                    # For directories, remove all files within the directory from the index
-                    repo.index.remove_all([f"{relative_path}/**"])
-                else:
-                    repo.index.remove(relative_path)
-                repo.index.write()
-            except pygit2.GitError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"{ftype} deleted successfully, but failed to make the changes in the repository",
-                ) from e
-        else:
-            # File/folder not in git history - remove from index if staged
-            try:
-                if ftype == "Folder":
-                    # For directories, remove all files within the directory from the index
-                    repo.index.remove_all([f"{relative_path}/**"])
-                else:
-                    repo.index.remove(relative_path)
-                repo.index.write()
+                if not repo.head_is_unborn:
+                    head_commit = repo.head.peel()
+                    try:
+                        head_commit.tree[relative_path]
+                        is_committed = True
+                    except KeyError:
+                        is_committed = False
             except pygit2.GitError:
-                # File wasn't in index, nothing to do
-                pass
+                is_committed = False
 
-        if ftype == "Folder":
-            # target_path no longer exists on disk (rmtree'd above): is_dir() would always be
-            # False, and get_file_status() would always be None since git never tracks directory
-            # paths directly. Use what we already know instead.
-            file_status = "deleted" if is_committed else None
-        else:
-            file_status = get_file_status(repo, target_path)
+            if is_committed:
+                # File/folder is in git history - stage the deletion
+                try:
+                    if ftype == "Folder":
+                        # For directories, remove all files within the directory from the index
+                        repo.index.remove_all([f"{relative_path}/**"])
+                    else:
+                        repo.index.remove(relative_path)
+                    repo.index.write()
+                except pygit2.GitError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"{ftype} deleted successfully, but failed to make the changes in the repository",
+                    ) from e
+            else:
+                # File/folder not in git history - remove from index if staged
+                try:
+                    if ftype == "Folder":
+                        # For directories, remove all files within the directory from the index
+                        repo.index.remove_all([f"{relative_path}/**"])
+                    else:
+                        repo.index.remove(relative_path)
+                    repo.index.write()
+                except pygit2.GitError:
+                    # File wasn't in index, nothing to do
+                    pass
 
-        return {
-            # Tracked means the file is and was under version control, so the delete can be reverted if needed.
-            "tracked": is_committed,
-            "file_details": {
-                "name": target_path.name,
-                "is_directory": ftype == "Folder",
-                "status": file_status,
-                "path": normalize_workspace_path(target_path, workspace.abs_path),
-            },
-        }
+            if ftype == "Folder":
+                # target_path no longer exists on disk (rmtree'd above): is_dir() would always be
+                # False, and get_file_status() would always be None since git never tracks directory
+                # paths directly. Use what we already know instead.
+                file_status = "deleted" if is_committed else None
+            else:
+                file_status = get_file_status(repo, target_path)
+
+            return {
+                # Tracked means the file is and was under version control, so the delete can be reverted if needed.
+                "tracked": is_committed,
+                "file_details": {
+                    "name": target_path.name,
+                    "is_directory": ftype == "Folder",
+                    "status": file_status,
+                    "path": normalize_workspace_path(target_path, workspace.abs_path),
+                },
+            }
+
+        return await run_exclusive(workspace_id, transaction)
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         if operation_request.operation == "rename":
-            return await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+            return await run_exclusive(workspace_id, lambda: self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target))
         elif operation_request.operation == "revert":
-            return await self._revert_file_changes(workspace.abs_path, file_path)
+            return await run_exclusive(workspace_id, lambda: self._revert_file_changes(workspace.abs_path, file_path))
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
 
@@ -394,50 +418,54 @@ class FileService:
         try:
             files = await self.get_workspace_files("/", db, workspace_id, user_id, recurse=True)
 
-            search_results = []
-            pattern = search_query.lower()
-            # Traverse the directory tree
-            for file in files:
-                filepath = workspace.abs_path / file["path"].lstrip("/")
-
-                # Ignore directories
-                if file["is_directory"]:
-                    continue
-                # Ignore deleted files
-                if file["status"] == "deleted":
-                    continue
-                # Ignore non-searchable file extensions
-                if filepath.suffix not in self.searchable_file_extensions:
-                    continue
-
-                # Check if search query matches filename
-                if pattern in filepath.name.lower():
-                    file["type"] = "filename"
-                    search_results.append(file)
-                    continue
-
-                # Search within file content
-                try:
-                    with filepath.open(encoding="utf-8", errors="ignore") as f:
-                        for i, line in enumerate(f):
-                            start = line.lower().find(pattern)
-                            if start >= 0:
-                                file.update(
-                                    {
-                                        "type": "content",
-                                        "line": i + 1,
-                                        "column": start + 1,
-                                        "excerpt": get_excerpt(line, pattern, start),
-                                    }
-                                )
-                                search_results.append(file)
-                                break  # todo: shall we return all results from within a file?
-                except (UnicodeDecodeError, FileNotFoundError) as e:
-                    logger.warning(f"Could not read file '{file['path']}': {str(e)}")
-
-            return search_results
+            # In a thread: reads every searchable file. Deliberately lock-free — a racing save
+            # yields at worst a stale hit, and the per-file error handling covers deletions.
+            return await asyncio.to_thread(self._search_file_contents, files, workspace.abs_path, search_query.lower())
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from e
+
+    def _search_file_contents(self, files: list[dict], workspace_path: Path, pattern: str) -> list[dict]:
+        search_results = []
+        # Traverse the directory tree
+        for file in files:
+            filepath = workspace_path / file["path"].lstrip("/")
+
+            # Ignore directories
+            if file["is_directory"]:
+                continue
+            # Ignore deleted files
+            if file["status"] == "deleted":
+                continue
+            # Ignore non-searchable file extensions
+            if filepath.suffix not in self.searchable_file_extensions:
+                continue
+
+            # Check if search query matches filename
+            if pattern in filepath.name.lower():
+                file["type"] = "filename"
+                search_results.append(file)
+                continue
+
+            # Search within file content
+            try:
+                with filepath.open(encoding="utf-8", errors="ignore") as f:
+                    for i, line in enumerate(f):
+                        start = line.lower().find(pattern)
+                        if start >= 0:
+                            file.update(
+                                {
+                                    "type": "content",
+                                    "line": i + 1,
+                                    "column": start + 1,
+                                    "excerpt": get_excerpt(line, pattern, start),
+                                }
+                            )
+                            search_results.append(file)
+                            break  # todo: shall we return all results from within a file?
+            except (UnicodeDecodeError, FileNotFoundError) as e:
+                logger.warning(f"Could not read file '{file['path']}': {str(e)}")
+
+        return search_results
 
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -472,8 +500,10 @@ class FileService:
                     if patch.delta.old_file.path == info.get("source") or patch.delta.new_file.path == relative_path_str:
                         return patch.text
 
-            # If file not found in staged diff, check working directory changes
-            diff_workdir = repo.diff(repo.index, None)
+            # If file not found in staged diff, check working directory changes. The no-argument
+            # form diffs index-to-workdir; passing the Index object is not a valid overload on
+            # pygit2 1.19 and raises TypeError, which escaped the GitError handler below as a 500.
+            diff_workdir = repo.diff()
             for patch in diff_workdir:
                 if patch.delta.new_file.path == relative_path_str:
                     return patch.text
@@ -483,7 +513,20 @@ class FileService:
             logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
 
-    async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> pygit2.Commit:
+    def _revert_commit(self, repo: pygit2.Repository, workspace_id: str, commit_id: str, reason: str):
+        """Soft-reset HEAD to its parent, so the commit's changes go back to being staged."""
+        if not repo.head_is_unborn:
+            head = repo.head.peel()
+            if head.id != commit_id:
+                logger.warning(f"HEAD commit {head.id} does not match the expected commit {commit_id} for workspace {workspace_id} ({reason})")
+                return
+            if head.parents:
+                repo.reset(head.parents[0].id, pygit2.GIT_RESET_SOFT)
+                logger.warning(f"Reverted commit for workspace {workspace_id}: {reason}")
+                return
+        logger.warning(f"No parent commit to revert to for workspace {workspace_id} ({reason})")
+
+    async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> tuple[pygit2.Commit, bool]:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
@@ -494,25 +537,77 @@ class FileService:
                 detail=f"Pull request is already {workspace.pull_request_status.value}; cannot commit changes",
             )
 
-        repo = get_repo(workspace.abs_path)
+        # Don't hold the read transaction open while waiting on the lock and pushing:
+        # an open transaction blocks every SQLite writer for the duration.
+        db.commit()
 
-        # Commit and push changes to the repository
-        commit = await self.git_service.commit_changes(repo, message, user=user)
+        # One transaction under the workspace lock, from the commit through the push, the
+        # recovery sync and any revert: a concurrent sync slipping in between would either
+        # fast-forward over the fresh commit (committing cleans the tree, so the DIRTY guard
+        # does not fire) or move HEAD so the revert undoes someone else's commit.
+        async def transaction():
+            repo = get_repo(workspace.abs_path)
 
-        # Try to push, revert commit on failure
-        try:
-            await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
-        except HTTPException:
-            # Push failed - revert the commit but keep changes staged
-            # Reset to parent commit (soft reset keeps files staged)
-            if not repo.head_is_unborn:
-                parent = repo.head.peel().parents[0] if repo.head.peel().parents else None
-                if parent:
-                    repo.reset(parent.id, pygit2.GIT_RESET_SOFT)
-            logger.warning(f"Push failed, reverted commit for workspace {workspace_id}")
-            raise
+            # Commit and push changes to the repository
+            commit = await self.git_service.commit_changes(repo, message, user=user)
+            merged_remote = False
 
-        return commit
+            try:
+                # Recreates the fork first if it has been deleted on GitHub, then retries. Anything
+                # it cannot repair falls through to the rejected-push handling below.
+                await self.workspace_service.with_remote_recovery(
+                    db,
+                    workspace,
+                    user,
+                    lambda: self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user),
+                )
+            except HTTPException as push_error:
+                # A rejected push usually means the branch on GitHub moved ahead:
+                # merge the remote changes and push again
+                try:
+                    sync_result = await self.git_service.sync_with_origin(
+                        repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id
+                    )
+                except Exception as sync_error:
+                    # Any failure here must revert the commit and restore the staged changes
+                    logger.error(f"Sync failed while recovering from a rejected push for workspace {workspace_id}: {sync_error}")
+                    self._revert_commit(repo, workspace_id, commit.id, reason="the sync recovering from the rejected push failed")
+                    raise push_error from None
+
+                if sync_result.status == SyncStatus.MERGED:
+                    merged_remote = True
+                    try:
+                        await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
+                    except HTTPException:
+                        # No revert: a soft reset across the merge commit would stage the remote
+                        # changes as the user's. The next push or sync delivers the local commits.
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Your changes were merged with the changes from GitHub but could not be sent yet. "
+                            "They will be sent automatically with your next commit or when reopening the workspace.",
+                        ) from None
+                elif sync_result.status == SyncStatus.CONFLICT:
+                    self._revert_commit(repo, workspace_id, commit.id, reason="remote changes conflict with the committed changes")
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "message": "Changes on GitHub conflict with your changes. The conflict must be resolved manually.",
+                            "conflicting_files": sync_result.conflicting_files,
+                        },
+                    ) from None
+                elif self.git_service.is_commit_on_origin(repo, workspace.branch_name, commit.id):
+                    # The commit is on GitHub after all: the failed push was applied there, or the
+                    # sync pushed it. Reverting it now would commit the same changes twice.
+                    # A fast-forward on top of it also brought remote changes into the workspace.
+                    merged_remote = sync_result.status == SyncStatus.UPDATED
+                else:
+                    # The commit did not reach GitHub: undo it, leaving the changes staged
+                    self._revert_commit(repo, workspace_id, commit.id, reason="the push was rejected and the commit never reached GitHub")
+                    raise push_error from None
+
+            return commit, merged_remote
+
+        return await run_exclusive(workspace_id, transaction)
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
         """
@@ -548,7 +643,8 @@ class FileService:
                 continue
 
             try:
-                document = yaml_load(requirements_file.read_text(encoding="utf-8"))
+                # Cached (read-only use): parsed on the loop on every /context request
+                document = load_yaml_cached(requirements_file, PlainStringSafeLoader)
                 categories = document.get("requirements", [])
             except Exception as e:
                 logger.warning(f"Could not read or parse requirements file for {pfs_folder.name}: {e}")
@@ -585,6 +681,3 @@ class FileService:
             "path": rel_file_path,
             "usage": usage,
         }
-
-
-file_service = FileService()

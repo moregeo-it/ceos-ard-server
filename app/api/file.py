@@ -9,8 +9,8 @@ from app.db.database import get_db
 from app.dependencies import get_file_service
 from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
-    Commit,
     CommitRequest,
+    CommitResult,
     CreateFileRequest,
     FileContextResponse,
     FilePatchRequest,
@@ -229,10 +229,12 @@ async def get_changed_files(
 
 @router.put(
     "/{workspace_id}/diffs",
-    response_model=Commit,
+    response_model=CommitResult,
     status_code=status.HTTP_200_OK,
     summary="Create a commit of the changes",
-    description="Creates a new git commit for all current workspace changes.",
+    description="Creates a new git commit for all current workspace changes and pushes it to GitHub. "
+    "When the branch on GitHub moved ahead, the remote changes are merged into the workspace automatically; "
+    "if they conflict with the committed changes, a 409 with the conflicting files is returned instead.",
 )
 async def commit_changes(
     workspace_id: str,
@@ -242,13 +244,13 @@ async def commit_changes(
     file_service: FileService = Depends(get_file_service),
 ):
     try:
-        commit = await file_service.persist_changes(
+        commit, merged_remote = await file_service.persist_changes(
             db=db,
             workspace_id=workspace_id,
             message=commit.message,
             user=current_user["user"],
         )
-        return format_commit(commit)
+        return {**format_commit(commit), "merged_remote": merged_remote}
     except HTTPException:
         raise
     except Exception as e:

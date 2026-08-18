@@ -35,7 +35,7 @@ from app.db.database import SessionLocal  # noqa: E402
 # Import User first to register it with SQLAlchemy before GitWorkspace
 from app.models.user import User  # noqa: E402, F401
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus  # noqa: E402
-from app.services.github_service import GitHubService  # noqa: E402
+from app.services.github_service import GitHubService, head_repo_missing, pull_request_is_merged  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -114,10 +114,15 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                 # GitHub PR state is 'open' or 'closed'
                 # For closed PRs, check if it was merged
                 pr_state = pr["state"]  # 'open' or 'closed'
-                is_merged = pr.get("merged_at") is not None
 
-                if is_merged:
+                if pull_request_is_merged(pr):
                     new_status = PullRequestStatus.MERGED
+                elif head_repo_missing(pr):
+                    # GitHub closed this PR because its fork was deleted, not because the
+                    # proposal was rejected. Archiving here would undo the recovery the app
+                    # performs on the next sync, every night, silently.
+                    new_status = PullRequestStatus.UNKNOWN
+                    logger.info(f"PR #{pr_number} for workspace {workspace.id} is detached (its fork was deleted); leaving the workspace active")
                 elif pr_state == "open":
                     new_status = PullRequestStatus.OPEN
                 elif pr_state == "closed":
@@ -147,7 +152,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                             logger.info(f"[DRY RUN] Would archive workspace {workspace.id} (PR is {new_status.value})")
 
                     # Check if it would be reactivated (PR reopened)
-                    if new_status == PullRequestStatus.OPEN:
+                    if new_status == PullRequestStatus.OPEN and status_changed:
                         if workspace.status == WorkspaceStatus.ARCHIVED:
                             logger.info(f"[DRY RUN] Would reactivate workspace {workspace.id} (PR #{pr_number} reopened)")
                 else:
@@ -167,8 +172,10 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
                             logger.info(f"Archived workspace {workspace.id} (PR #{pr_number} is {new_status.value})")
                             changed = True
 
-                    # Reactivate if PR is reopened
-                    elif new_status == PullRequestStatus.OPEN:
+                    # Reactivate only on an actual closed -> open transition. Without the
+                    # status_changed guard this also un-archives workspaces the user archived
+                    # by hand while their PR was open, overriding a deliberate choice.
+                    elif new_status == PullRequestStatus.OPEN and status_changed:
                         if workspace.status == WorkspaceStatus.ARCHIVED:
                             workspace.status = WorkspaceStatus.ACTIVE
                             workspace.archived_at = None
@@ -193,6 +200,7 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
         raise
     finally:
         db.close()
+        await github_service.aclose()
 
 
 if __name__ == "__main__":
