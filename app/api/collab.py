@@ -6,11 +6,10 @@ import anyio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from app.db.database import SessionLocal
-from app.dependencies import get_event_broker
+from app.dependencies import get_event_broker, get_workspace_service
 from app.schemas.events import EventType
 from app.services.auth_service import get_current_user, require_github_user
 from app.services.events_service import FORCE_RESYNC, HEARTBEAT_SECONDS
-from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +19,6 @@ router = APIRouter(prefix="/workspaces", tags=["Realtime"])
 # This is also what makes mid-session revocation close the socket - `share.revoked` is targeted at the
 # revoked user (see share_service.revoke_share), so only their connection receives it and then closes.
 _CLOSING_EVENTS = {EventType.SHARE_REVOKED.value, EventType.WORKSPACE_DELETED.value}
-
-_workspace_service = WorkspaceService()
 
 
 async def _authorize(token: str | None, workspace_id: str) -> str:
@@ -40,7 +37,7 @@ async def _authorize(token: str | None, workspace_id: str) -> str:
         current_user = await require_github_user(current_user=current_user)
         user_id = current_user["user"].id
         # Any user with access may subscribe; raises 404 if they have none.
-        _workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        get_workspace_service().get_workspace_by_id(db, workspace_id, user_id)
         return user_id
     finally:
         db.close()

@@ -8,20 +8,29 @@ from sqlalchemy.orm import Session
 
 from app.services.build_service import BuildService
 from app.services.workspace_service import WorkspaceService
+from app.utils.locks import build_locks
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
 
+def _build_lock_key(workspace_id: str, pfs: list[str] | None) -> str:
+    """Two builds clobber each other exactly when they share the output prefix, which is the
+    workspace plus the PFS selection — so that is the lock key, not the whole workspace."""
+    return f"{workspace_id}:{'-'.join(pfs or [])}"
+
+
 class PreviewService:
-    def __init__(self):
-        self.build_service = BuildService()
-        self.workspace_service = WorkspaceService()
+    def __init__(self, build_service: BuildService | None = None, workspace_service: WorkspaceService | None = None):
+        self.build_service = build_service or BuildService()
+        self.workspace_service = workspace_service or WorkspaceService()
 
     async def generate_preview(self, db: Session, pfs: list[str] | None, workspace_id: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
-        build_info = await self.build_service.build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs)
+        pfs_selection = pfs or workspace.pfs
+        async with build_locks(_build_lock_key(workspace_id, pfs_selection)):
+            build_info = await self.build_service.build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs_selection)
 
         if build_info.get("status") == "success":
             return await self._get_preview_files(workspace.abs_path, file_prefix=build_info.get("output_file"))
@@ -78,9 +87,11 @@ class PreviewService:
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
 
-            build_info = await self.build_service.build(
-                workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs or workspace.pfs, include_format=format
-            )
+            pfs_selection = pfs or workspace.pfs
+            async with build_locks(_build_lock_key(workspace_id, pfs_selection)):
+                build_info = await self.build_service.build(
+                    workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs_selection, include_format=format
+                )
 
             if build_info.get("status") == "success":
                 document_file = Path(build_info.get("output_file") + f".{format}")
@@ -101,6 +112,3 @@ class PreviewService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An error occurred while downloading the preview document. Please try again later." + str(e),
             ) from e
-
-
-preview_service = PreviewService()

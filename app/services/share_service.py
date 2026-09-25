@@ -30,8 +30,8 @@ SHARE_LINK_TOKEN_TYPE = "share_link"
 
 
 class ShareService:
-    def __init__(self, broker: EventBroker | None = None):
-        self.github_service = GitHubService()
+    def __init__(self, github_service: GitHubService | None = None, broker: EventBroker | None = None):
+        self.github_service = github_service or GitHubService()
         self.broker = broker
 
     def resolve_role(self, db: Session, workspace: GitWorkspace, user_id: str) -> str | None:

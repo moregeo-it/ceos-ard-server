@@ -16,6 +16,9 @@ class EventType(str, Enum):
     FILE_RENAMED = "file.renamed"
     FILE_REVERTED = "file.reverted"
     FILE_COMMITTED = "file.committed"
+    # The owner synced the workspace with GitHub (POST .../sync, or the merge on commit) and files
+    # changed on disk at arbitrary depth: subscribers must reload the tree and their open files.
+    WORKSPACE_SYNCED = "workspace.synced"
     SHARE_REVOKED = "share.revoked"
     WORKSPACE_ARCHIVED = "workspace.archived"
     WORKSPACE_DELETED = "workspace.deleted"

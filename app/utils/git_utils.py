@@ -36,6 +36,10 @@ def get_file_info(repo: pygit2.Repository, path: Path) -> dict[str, str] | None:
         workspace_path = Path(repo.workdir)
         relative_path = str(path.relative_to(workspace_path)).replace("\\", "/")
 
+        # git never tracks directory paths directly, and status_file() raises for them
+        if path.is_dir():
+            return None
+
         # First, check for renames using diff with rename detection
         # This must be done before checking status flags, because a renamed file
         # shows as "added" in the status flags
@@ -47,13 +51,16 @@ def get_file_info(repo: pygit2.Repository, path: Path) -> dict[str, str] | None:
                     if delta.new_file.path == relative_path:
                         return {"path": relative_path, "status": "renamed", "source": delta.old_file.path}
 
-        # Check for the file in status
-        status_dict = repo.status()
-        if relative_path in status_dict:
-            flags = status_dict[relative_path]
-            file_status = get_file_status_from_flags(flags)
-            if file_status:
-                return {"path": relative_path, "status": file_status}
+        # status_file() checks just this path; repo.status() would scan the whole working
+        # tree — on the event loop, once per saved/deleted/renamed file.
+        try:
+            flags = repo.status_file(relative_path)
+        except (KeyError, ValueError):
+            # Not something git knows about (e.g. an ignored path)
+            return None
+        file_status = get_file_status_from_flags(flags)
+        if file_status:
+            return {"path": relative_path, "status": file_status}
 
         return None
     except (pygit2.GitError, ValueError):

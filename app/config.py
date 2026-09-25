@@ -56,6 +56,7 @@ class Settings:
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI", f"{SERVER_URL}/auth/callback")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    BUILD_CONCURRENCY: int = int(os.getenv("BUILD_CONCURRENCY", "2"))
 
     SHARING_MODES_ENABLED: list[str] = os.getenv("SHARING_MODES_ENABLED", "readonly").split(",")
 
