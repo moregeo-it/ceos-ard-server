@@ -7,17 +7,21 @@ from typing import Any
 import pygit2
 from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from strictyaml import YAMLValidationError, as_document
 from yaml import load as yaml_load
 
 from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, WorkspaceCreate, WorkspaceUpdate
+from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare
+from app.schemas.events import EventType, build_event
+from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
+from app.services.events_service import EventBroker
 from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
+from app.services.share_service import ROLE_RANK, ShareService
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
@@ -44,10 +48,14 @@ class WorkspaceService:
         git_service: GitService | None = None,
         build_service: BuildService | None = None,
         github_service: GitHubService | None = None,
+        share_service: ShareService | None = None,
+        broker: EventBroker | None = None,
     ):
         self.git_service = git_service or GitService()
         self.build_service = build_service or BuildService()
         self.github_service = github_service or GitHubService()
+        self.share_service = share_service or ShareService(github_service=self.github_service, broker=broker)
+        self.broker = broker
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user: User) -> GitWorkspace:
         if not workspace_data.title:
@@ -75,6 +83,9 @@ class WorkspaceService:
             db.add(workspace)
             db.commit()
             db.refresh(workspace)
+            workspace.viewer_role = "owner"
+            workspace.owner_username = user.username
+            workspace.owner_full_name = user.full_name
 
             # Under the workspace lock so nothing can operate on the half-cloned tree
             async def transaction():
@@ -91,6 +102,9 @@ class WorkspaceService:
                 if success:
                     db.commit()
                     db.refresh(workspace)
+                    workspace.viewer_role = "owner"
+                    workspace.owner_username = user.username
+                    workspace.owner_full_name = user.full_name
 
                     logger.info(f"Successfully setup workspace {workspace.id}")
                 else:
@@ -111,14 +125,41 @@ class WorkspaceService:
                 db.rollback()
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create workspace: {str(e)}") from e
 
-    def get_user_workspaces(self, db: Session, user_id: str, access_token: str) -> list[GitWorkspace]:
+    def get_user_workspaces(self, db: Session, user: User) -> list[GitWorkspace]:
         try:
-            if not user_id:
+            if not user.id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-            workspaces = db.query(GitWorkspace).filter(GitWorkspace.user_id == user_id).order_by(GitWorkspace.created_at.desc()).all()
+            owned = (
+                db.query(GitWorkspace)
+                .filter(GitWorkspace.user_id == user.id)
+                .order_by(GitWorkspace.created_at.desc())
+                .with_for_update(of=GitWorkspace)
+                .all()
+            )
+            for workspace in owned:
+                workspace.viewer_role = "owner"
+                workspace.owner_username = user.username
+                workspace.owner_full_name = user.full_name
 
-            return workspaces
+            shares_by_workspace_id = {
+                share.workspace_id: share
+                for share in db.query(WorkspaceShare)
+                .filter(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.status == ShareStatus.ACCEPTED)
+                .all()
+            }
+            shared = (
+                db.query(GitWorkspace).options(joinedload(GitWorkspace.user)).filter(GitWorkspace.id.in_(shares_by_workspace_id.keys())).all()
+                if shares_by_workspace_id
+                else []
+            )
+            for workspace in shared:
+                share = shares_by_workspace_id[workspace.id]
+                workspace.viewer_role = ShareMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else share.mode.value
+                workspace.owner_username = workspace.user.username if workspace.user else None
+                workspace.owner_full_name = workspace.user.full_name if workspace.user else None
+
+            return owned + shared
 
         except HTTPException:
             raise
@@ -126,23 +167,37 @@ class WorkspaceService:
             logger.error(f"Error getting user workspaces: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
-    def get_workspace_by_id(self, db: Session, workspace_id: str, user_id: str, exists=True) -> GitWorkspace:
+    def get_workspace_by_id(
+        self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = ShareMode.READONLY.value
+    ) -> GitWorkspace:
         try:
             if not workspace_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
             elif not user_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
 
-            query = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id, GitWorkspace.user_id == user_id)
-
-            workspace = query.first()
+            workspace = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).first()
             if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-            elif exists and not workspace.abs_path.exists():
+
+            role = self.share_service.resolve_role(db, workspace, user_id)
+            # Don't leak workspace existence to users who have no access to it at all.
+            if role is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+            if ROLE_RANK[role] < ROLE_RANK[min_role]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to perform this action on this workspace"
+                )
+
+            if exists and not workspace.abs_path.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found on filesystem")
             elif exists and not workspace.abs_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not a directory")
 
+            workspace.viewer_role = role
+            workspace.owner_username = workspace.user.username if workspace.user else None
+            workspace.owner_full_name = workspace.user.full_name if workspace.user else None
             return workspace
         except HTTPException:
             raise
@@ -251,7 +306,9 @@ class WorkspaceService:
             return await operation()
 
     async def sync_git(self, db: Session, workspace_id: str, user: User) -> SyncResult:
-        workspace = self.get_workspace_by_id(db, workspace_id, user.id)
+        # Owner only: the sync pushes and merges with the caller's GitHub credentials and
+        # rewrites the owner's working tree. Collaborators learn about it via workspace.synced.
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot sync an archived workspace")
@@ -283,7 +340,14 @@ class WorkspaceService:
                 result.repaired = True
                 return result
 
-        return await run_exclusive(workspace.id, transaction)
+        result = await run_exclusive(workspace.id, transaction)
+
+        # Files changed on disk beyond what the single-file events describe, so subscribers
+        # (read-only collaborators) must reload the tree. Published after the lock is released.
+        if self.broker and result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
+            self.broker.publish(workspace.id, build_event(EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value))
+
+        return result
 
     def _update_fork_reference(self, db: Session, user_id: str, owner: str, name: str, clone_url: str = None) -> None:
         """
@@ -360,8 +424,10 @@ class WorkspaceService:
                 workspace.archived_at = datetime.now(UTC)
                 workspace.status = WorkspaceStatus.ARCHIVED
 
-    async def sync_workspace(self, db: Session, user_id: str, workspace_id: str, access_token: str) -> GitWorkspace | None:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+    async def sync_workspace(
+        self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = ShareMode.READONLY.value
+    ) -> GitWorkspace | None:
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role=min_role)
 
         if not access_token:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token is required")
@@ -450,7 +516,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace status")
 
         try:
-            workspace = self.get_workspace_by_id(db, workspace_id, user.id)
+            workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
 
             if workspace.status == WorkspaceStatus.ARCHIVED and update_data.status == WorkspaceStatus.ACTIVE:
                 # Release the read transaction before the GitHub round trip below
@@ -487,6 +553,11 @@ class WorkspaceService:
             db.commit()
             db.refresh(workspace)
 
+            # Publish event when workspace is archived
+            if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ARCHIVED.value.upper():
+                if self.broker:
+                    self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id))
+
             return workspace
         except HTTPException:
             raise
@@ -498,10 +569,7 @@ class WorkspaceService:
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id, exists=False)
-
-        if workspace.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this workspace")
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, exists=False, min_role="owner")
 
         # Under the workspace lock so an in-flight commit/push/sync finishes before its tree
         # disappears; requests queued behind the delete then 404 at the workspace read.
@@ -525,12 +593,18 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
         result = await run_exclusive(workspace_id, transaction)
+
+        # Tell subscribers the workspace is gone (the realtime gateway closes their connections)
+        if self.broker:
+            self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_DELETED, actor_user_id=user_id))
+
         # Best-effort: the workspace is gone, so its cross-process lock file is dead weight
         workspace_lock_file(workspace_id).unlink(missing_ok=True)
         return result
 
     def get_workspace_commits(self, db: Session, workspace_id: str, user_id: str) -> list[pygit2.Commit]:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        # Commit history is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         return self.git_service.get_commits(workspace.abs_path)
 
     async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
@@ -587,7 +661,7 @@ class WorkspaceService:
         if not request_data.id or not request_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user.id)
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)
         pfs_path = pfs_container / pfs_id
@@ -669,10 +743,20 @@ class WorkspaceService:
                 logger.error(f"Error creating PFS {pfs_id} for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
-        return await run_exclusive(workspace_id, transaction)
+        folder_details = await run_exclusive(workspace_id, transaction)
+
+        # Publish event when PFS is created (after the lock is released)
+        if self.broker:
+            self.broker.publish(
+                workspace_id,
+                build_event(EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details),
+            )
+
+        return folder_details
 
     async def get_proposal(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> Proposal | None:
-        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        # The proposal (PR) is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if not workspace.pull_request_number:
             return None
 
@@ -722,7 +806,7 @@ class WorkspaceService:
         # create/update, DB write: two concurrent proposals would otherwise both see
         # "no pull request yet" and open two pull requests upstream.
         async def transaction():
-            workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token)
+            workspace = await self.sync_workspace(db, user.id, workspace_id, user.access_token, min_role="owner")
 
             if workspace.pull_request_status == PullRequestStatus.MERGED:
                 raise HTTPException(

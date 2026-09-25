@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import dependencies
-from app.api import auth, core, file, preview, workspace
+from app.api import auth, collab, core, file, preview, share, workspace
 from app.config import settings
 from app.db.database import Base, engine
 from app.utils.cli_utils import load_project_info, run_checks
@@ -43,6 +43,8 @@ app.add_middleware(
 app.include_router(auth.router)
 
 app.include_router(core.router)
+app.include_router(collab.router)
 app.include_router(file.router)
 app.include_router(preview.router)
+app.include_router(share.router)
 app.include_router(workspace.router)

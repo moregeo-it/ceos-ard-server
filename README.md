@@ -177,6 +177,11 @@ pixi run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+> **Run a single worker process.** The realtime event stream uses an in-memory broker that is not
+> shared across processes, so do **not** pass `--workers N` (or run gunicorn with multiple workers /
+> multiple replicas): extra workers silently drop cross-worker events and their viewers miss live
+> updates. To scale horizontally, put a shared pub/sub (e.g. Redis) behind the `EventBroker`.
+
 The API will be available at:
 
 - **API**: <http://localhost:8000>
@@ -417,6 +422,11 @@ RUN pixi install
 EXPOSE 8000
 CMD ["pixi", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
+
+> **Single worker only.** Keep the server to one worker process (no `--workers`, no multi-worker
+> gunicorn, a single replica). The realtime `EventBroker` is in-memory and per-process, so extra
+> workers or replicas silently drop cross-worker realtime events. Horizontal scaling requires a shared
+> pub/sub (e.g. Redis) behind the broker.
 
 ## 🤝 Contributing
 

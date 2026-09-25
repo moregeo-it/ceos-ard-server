@@ -128,6 +128,27 @@ async def get_current_user(
         ) from e
 
 
+async def get_optional_current_user(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any] | None:
+    """Same as get_current_user, but returns None instead of raising when no/invalid token is present.
+
+    Used by endpoints that behave differently for authenticated vs. anonymous callers
+    (e.g. redeeming a share link, which returns a preview to anonymous callers).
+    """
+    credentials = await bearer_scheme(request)
+    token = credentials.credentials if credentials and credentials.credentials else None
+
+    if not token:
+        return None
+
+    try:
+        return await get_current_user(token=token, db=db)
+    except HTTPException:
+        return None
+
+
 async def require_github_user(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
