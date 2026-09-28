@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.database import get_db
+from app.dependencies import get_event_broker
 from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
 from app.schemas.error import create_error_detail
@@ -84,7 +85,10 @@ async def logout(current_user=Depends(get_current_user), db: Session = Depends(g
         user.updated_at = datetime.now(UTC)
         db.commit()
 
-        logger.info(f"User {user.username} logged out successfully, provider tokens cleared")
+        # The JWT cannot be invalidated; its realtime sockets close with 4001 (re-login before reconnecting).
+        closed_sockets = get_event_broker().close_user_connections(user.id)
+
+        logger.info(f"User {user.username} logged out successfully, provider tokens cleared, {closed_sockets} realtime socket(s) closed")
 
         return {
             "status": "success",

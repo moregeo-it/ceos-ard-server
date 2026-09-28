@@ -546,6 +546,7 @@ class WorkspaceService:
                     update_dict["archived_at"] = None
                     logger.info(f"Reactivating archived workspace {workspace_id}, clearing archival timestamp")
 
+            previous = {key: getattr(workspace, key) for key in ("title", "description", "pfs", "status")}
             for key, value in update_dict.items():
                 if hasattr(workspace, key):
                     setattr(workspace, key, value)
@@ -553,10 +554,13 @@ class WorkspaceService:
             db.commit()
             db.refresh(workspace)
 
-            # Publish event when workspace is archived
-            if "status" in update_dict and update_dict["status"] == WorkspaceStatus.ARCHIVED.value.upper():
-                if self.broker:
-                    self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id))
+            changed = [key for key, value in previous.items() if getattr(workspace, key) != value]
+            archived_now = "status" in changed and workspace.status == WorkspaceStatus.ARCHIVED
+            if self.broker and archived_now:
+                self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id))
+            fields = [key for key in changed if key != "status" or not archived_now]
+            if self.broker and fields:
+                self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields))
 
             return workspace
         except HTTPException:

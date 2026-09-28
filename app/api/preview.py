@@ -21,7 +21,7 @@ router = APIRouter(prefix="/workspaces", tags=["Previews"])
 @router.get(
     "/{workspace_id}/previews",
     summary="Generate Previews",
-    description="Generate Previews for a workspace",
+    description="Generate the preview for a workspace (owner only); everyone else sees this build",
     status_code=status.HTTP_200_OK,
 )
 async def generate_preview(
@@ -48,6 +48,31 @@ async def generate_preview(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=create_error_detail("generate preview", e),
+        ) from e
+
+
+@router.get(
+    "/{workspace_id}/previews/current",
+    summary="Get the current preview",
+    description="The owner's last generated preview for the workspace's PFS list, without building",
+    status_code=status.HTTP_200_OK,
+)
+async def get_current_preview(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    preview_service: PreviewService = Depends(get_preview_service),
+):
+    try:
+        html = await preview_service.get_current_preview(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return Response(content=html, status_code=status.HTTP_200_OK, media_type="text/html", headers={"Cache-Control": "no-store"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting the current preview for workspace {workspace_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_detail("get current preview", e),
         ) from e
 
 

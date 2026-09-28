@@ -63,6 +63,14 @@ class ShareService:
 
         return share.mode.value
 
+    @staticmethod
+    def _ensure_mode_enabled(mode: ShareMode) -> None:
+        if mode not in settings.SHARING_MODES_ENABLED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Share mode '{mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
+            )
+
     def _get_workspace_owned_by(self, db: Session, workspace_id: str, user_id: str) -> GitWorkspace:
         workspace = db.query(GitWorkspace).filter(GitWorkspace.id == workspace_id).first()
         if not workspace:
@@ -82,18 +90,14 @@ class ShareService:
         if expires_at <= datetime.now(UTC):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expiresAt must be in the future")
 
-    # --- Direct shares (invite by GitHub username) ---
+    # --- Direct shares (invited by username, bound to the GitHub account id) ---
 
     async def list_shares(self, db: Session, workspace_id: str, user_id: str) -> list[WorkspaceShare]:
         self._get_workspace_owned_by(db, workspace_id, user_id)
         return db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace_id).order_by(WorkspaceShare.created_at.desc()).all()
 
     async def create_shares(self, db: Session, workspace_id: str, user: User, request: ShareCreateRequest) -> list[WorkspaceShare]:
-        if request.mode not in settings.SHARING_MODES_ENABLED:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
-            )
+        self._ensure_mode_enabled(request.mode)
         # Validate that the workspace exists and is owned by the current user before proceeding.
         workspace = self._get_workspace_owned_by(db, workspace_id, user.id)
         # Deduplicate and clean the GitHub usernames, ignoring empty strings and duplicates (case-insensitive).
@@ -123,15 +127,14 @@ class ShareService:
         now = datetime.now(UTC)
         shares = []
         for gh_user in github_users:
-            # Use GitHub's canonical login casing rather than trusting the client's input casing.
+            # Bound to the account id (survives renames); the login is display only, in GitHub's canonical casing.
+            github_id = str(gh_user["id"])
             canonical_username = gh_user["login"]
-            existing_ceos_user = (
-                db.query(User).filter(User.username.ilike(canonical_username), User.identity_provider == IdentityProvider.github).first()
-            )
+            if github_id == user.external_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot share a workspace with yourself")
+            existing_ceos_user = db.query(User).filter(User.external_id == github_id, User.identity_provider == IdentityProvider.github).first()
             share = (
-                db.query(WorkspaceShare)
-                .filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_github_username.ilike(canonical_username))
-                .first()
+                db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_github_id == github_id).first()
             )
 
             if share:
@@ -149,6 +152,7 @@ class ShareService:
             else:
                 share = WorkspaceShare(
                     workspace_id=workspace.id,
+                    invitee_github_id=github_id,
                     invitee_github_username=canonical_username,
                     invitee_user_id=existing_ceos_user.id if existing_ceos_user else None,
                     invited_by_user_id=user.id,
@@ -167,16 +171,11 @@ class ShareService:
         return shares
 
     async def update_share(self, db: Session, workspace_id: str, share_id: str, user_id: str, request: ShareUpdateRequest) -> WorkspaceShare:
+        self._ensure_mode_enabled(request.mode)
         self._get_workspace_owned_by(db, workspace_id, user_id)
         share = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id, WorkspaceShare.workspace_id == workspace_id).first()
         if not share:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
-
-        if request.mode not in settings.SHARING_MODES_ENABLED:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
-            )
 
         share.mode = request.mode
         db.commit()
@@ -215,11 +214,7 @@ class ShareService:
         return links
 
     async def create_share_link(self, db: Session, workspace_id: str, user: User, request: ShareLinkCreateRequest) -> WorkspaceShareLink:
-        if request.mode not in settings.SHARING_MODES_ENABLED:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Share mode '{request.mode}' is not enabled. Enabled modes: {', '.join(settings.SHARING_MODES_ENABLED)}",
-            )
+        self._ensure_mode_enabled(request.mode)
 
         self._get_workspace_owned_by(db, workspace_id, user.id)
 
@@ -247,6 +242,9 @@ class ShareService:
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == link_id, WorkspaceShareLink.workspace_id == workspace_id).first()
         if not link:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
+
+        if request.mode is not None:
+            self._ensure_mode_enabled(request.mode)
 
         if request.expires_at:
             self._validate_expires_at(request.expires_at)
@@ -332,11 +330,12 @@ class ShareService:
             workspace.owner_full_name = user.full_name
             return None, workspace
 
+        # Matched by account id, not the renameable username: a pending invite is activated, not duplicated.
         share = (
             db.query(WorkspaceShare)
             .filter(
                 WorkspaceShare.workspace_id == workspace.id,
-                or_(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.invitee_github_username.ilike(user.username)),
+                or_(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.invitee_github_id == user.external_id),
             )
             .first()
         )
@@ -348,6 +347,7 @@ class ShareService:
             now = datetime.now(UTC)
             if share:
                 share.invitee_user_id = user.id
+                share.invitee_github_username = user.username
                 share.status = ShareStatus.ACCEPTED
                 share.accepted_at = now
                 share.share_link_id = link.id
@@ -355,6 +355,7 @@ class ShareService:
                 share = WorkspaceShare(
                     workspace_id=workspace.id,
                     share_link_id=link.id,
+                    invitee_github_id=user.external_id,
                     invitee_github_username=user.username,
                     invitee_user_id=user.id,
                     invited_by_user_id=link.created_by_user_id,

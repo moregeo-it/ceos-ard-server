@@ -25,7 +25,7 @@ workspace_service = WorkspaceService(
     broker=event_broker,
 )
 file_service = FileService(git_service=git_service, workspace_service=workspace_service, broker=event_broker)
-preview_service = PreviewService(build_service=build_service, workspace_service=workspace_service)
+preview_service = PreviewService(build_service=build_service, workspace_service=workspace_service, broker=event_broker)
 token_refresh_service = TokenRefreshService()
 
 

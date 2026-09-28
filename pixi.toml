@@ -5,7 +5,7 @@ platforms = ["osx-arm64", "win-64", "linux-64", "osx-64"]
 version = "0.1.0"
 
 [tasks]
-dev = "uvicorn app.main:app --reload"
+dev = "uvicorn app.main:app --reload --ws-max-size 4096"
 
 [dependencies]
 fastapi = ">=0.138.2,<0.139"

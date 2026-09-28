@@ -95,6 +95,11 @@ class GitService:
                 await asyncio.to_thread(shutil.rmtree, workspace_path)
 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid git repository") from e
+        except HTTPException:
+            # The initial push failed (RemoteAccessError): keep its status and message
+            if workspace_path.exists():
+                await asyncio.to_thread(shutil.rmtree, workspace_path)
+            raise
         except Exception as e:
             # Sanitize: libgit2 embeds the authenticated remote URL in its messages, so the
             # raw text can carry the access token into the API response.

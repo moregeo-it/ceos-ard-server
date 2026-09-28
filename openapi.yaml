@@ -224,6 +224,8 @@ paths:
       operationId: createWorkspace
       tags:
         - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
       requestBody:
         required: true
         content:
@@ -297,6 +299,10 @@ paths:
       description: |
         Updates workspace information including title, description, PFS, and status.
 
+        The PFS list doubles as the owner's preview selection: the editor saves it here whenever
+        the owner changes the preview, and viewers follow it. Realtime subscribers get a
+        `workspace.updated` event naming the changed fields (`workspace.archived` on archiving).
+
         **Archiving behavior:**
         - Setting status to "archived" will set archived_at to current time and deletion_at to 1 month later
         - Workspace files remain on disk during the 1-month retention period
@@ -310,6 +316,7 @@ paths:
       tags:
         - Workspaces
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -389,6 +396,7 @@ paths:
       tags:
         - Workspaces
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       responses:
         '204':
@@ -419,9 +427,31 @@ paths:
         WebSocket stream of workspace changes for any user with access. (Documented under `get`
         because OpenAPI has no WebSocket type - the request is a protocol upgrade.)
 
-        The server pushes `WorkspaceEvent` messages plus a `{"type":"ping"}` heartbeat; a terminal
-        event (`share.revoked` for this user, or `workspace.deleted`) closes the connection. Clients
-        send nothing.
+        The server pushes `WorkspaceEvent` messages plus a `{"type":"ping"}` heartbeat. Clients send
+        nothing: any inbound data frame closes the connection with `1008`, and frames above the
+        server's `--ws-max-size` are rejected with `1009`.
+
+        Handshake, in order: the `Origin` header, when present, must be one of the configured CORS
+        origins (otherwise the upgrade is rejected); the JWT from the `authorization` query parameter
+        is validated (the `Authorization` header is not read here - browsers can't set it on a
+        handshake; a session cookie will replace the query parameter, see issue #98); the connection
+        is subscribed to the workspace's events; then workspace access is checked and the connection
+        accepted. Subscribing before the access check means a revocation that commits in between is
+        still delivered as a terminal event.
+
+        Failures are reported as close codes right after the upgrade, since a close before the
+        upgrade is not distinguishable in browsers:
+
+        | Code | Meaning | Editor reaction |
+        |---|---|---|
+        | `4001` | JWT missing, invalid or expired; also sent when it expires mid-connection or the user logs out | ask for a new login, then reconnect |
+        | `4003` | no access to the workspace, or access ended (`share.revoked` for this user, `workspace.deleted`) | stop |
+        | `4009` | the server's buffer for this connection overflowed and events were dropped | reconnect at once and resync |
+        | `1008` | rejected `Origin`, or the client sent data | stop |
+
+        Echo filtering: an event is withheld from the socket whose user *and* `client_id` match the
+        client that caused it (that client applied the change locally, see the `X-Client-Id`
+        parameter). Other tabs and devices of the same user receive it.
 
         Planned: the same connection will also carry CRDT document-sync and presence frames for live
         collaborative editing (not yet implemented).
@@ -429,31 +459,25 @@ paths:
       tags:
         - Realtime
       security:
-        - bearerAuth: []
         - bearerQueryAuth: []
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
         - name: authorization
           in: query
-          required: false
-          description: JWT, since a browser `WebSocket` handshake can't send an `Authorization` header. Ignored if that header is present.
+          required: true
+          description: The JWT. A query parameter because a browser `WebSocket` handshake can't carry an `Authorization` header.
           schema:
             type: string
+        - name: client_id
+          in: query
+          required: false
+          description: The id this page load also sends as `X-Client-Id` on requests that change data; used for echo filtering only.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{8,64}$'
       responses:
         '101':
-          description: Handshake succeeded; the server streams `WorkspaceEvent` messages until the client disconnects or a terminal event closes the connection.
-        '401':
-          description: Missing or invalid token; the handshake is rejected before the upgrade.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Workspace not found, or the caller has no access.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          description: Handshake succeeded; the server streams `WorkspaceEvent` messages until the client disconnects or the server closes with one of the codes above.
 
   /workspaces/{workspaceId}/files:
     get:
@@ -516,6 +540,7 @@ paths:
       tags:
         - Files
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -624,6 +649,7 @@ paths:
       tags:
         - Files
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/FilePath'
       requestBody:
@@ -677,6 +703,7 @@ paths:
       tags:
         - Files
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/FilePath'
       responses:
@@ -723,6 +750,7 @@ paths:
       tags:
         - Files
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/FilePath'
       requestBody:
@@ -934,6 +962,7 @@ paths:
         - Files
         - Workspaces
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -1103,7 +1132,12 @@ paths:
   /workspaces/{workspaceId}/previews:
     get:
       summary: Generate preview
-      description: Generates preview for the current workspace state
+      description: |
+        Generates the preview for the current workspace state and publishes a
+        `preview.generated` event.
+
+        Owner only: a build writes into the workspace, and this build is what everyone else sees.
+        Other users fetch it with `GET .../previews/current`.
       operationId: generatePreview
       tags:
         - Previews
@@ -1128,8 +1162,47 @@ paths:
                   message:
                     type: string
                     example: "Preview generation started"
+        '403':
+          description: Forbidden - only the workspace owner can generate the preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/previews/current:
+    get:
+      summary: Get the current preview
+      description: |
+        The owner's last generated preview for the workspace's PFS list, as `GET .../previews`
+        returned it, without building anything. For any user with access. Clients call it on
+        `preview.generated` and when `workspace.updated` changes `pfs`.
+      operationId: getCurrentPreview
+      tags:
+        - Previews
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: The current preview
+          content:
+            text/html:
+              schema:
+                type: string
+                description: HTML content of the preview
+        '404':
+          description: Workspace not found, or the owner has not generated a preview for the workspace's PFS list yet
           content:
             application/json:
               schema:
@@ -1191,7 +1264,12 @@ paths:
   /workspaces/{workspaceId}/download:
     get:
       summary: Download preview document
-      description: Downloads the preview document for the current workspace state
+      description: |
+        Downloads the preview document for the current workspace state.
+
+        The owner builds the document; other users get the document of the owner's last preview
+        build for the workspace's PFS list (404 if there is none) and a 403 for any other `pfs`
+        value.
       operationId: downloadPreviewDocument
       tags:
         - Previews
@@ -1211,6 +1289,12 @@ paths:
               schema:
                 type: string
                 format: binary
+        '403':
+          description: Forbidden - only the workspace owner can change the PFS selection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: Workspace not found
           content:
@@ -1287,6 +1371,7 @@ paths:
       tags:
         - Workspaces
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -1414,6 +1499,7 @@ paths:
       tags:
         - Workspaces
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       responses:
         '200':
@@ -1492,6 +1578,7 @@ paths:
       tags:
         - PFS
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -1580,12 +1667,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  shares:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/WorkspaceShare'
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceShare'
         '404':
           description: Workspace not found
           content:
@@ -1624,6 +1708,7 @@ paths:
       tags:
         - Sharing
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -1637,12 +1722,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  shares:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/WorkspaceShare'
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceShare'
         '400':
           description: |
             Invalid request data.
@@ -1686,6 +1768,7 @@ paths:
       tags:
         - Sharing
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/ShareId'
       requestBody:
@@ -1731,6 +1814,7 @@ paths:
       tags:
         - Sharing
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/ShareId'
       responses:
@@ -1770,12 +1854,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  shareLinks:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/WorkspaceShareLink'
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceShareLink'
         '404':
           description: Workspace not found
           content:
@@ -1813,6 +1894,7 @@ paths:
       tags:
         - Sharing
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
       requestBody:
         required: true
@@ -1865,6 +1947,7 @@ paths:
       tags:
         - Sharing
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/ShareLinkId'
       requestBody:
@@ -1909,6 +1992,7 @@ paths:
       tags:
         - Sharing
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/ShareLinkId'
       responses:
@@ -1946,6 +2030,7 @@ paths:
         - bearerAuth: []
         - {}
       parameters:
+        - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/ShareLinkToken'
       responses:
         '200':
@@ -2011,6 +2096,19 @@ components:
       schema:
         type: string
         format: uuid
+
+    ClientId:
+      name: X-Client-Id
+      in: header
+      required: false
+      description: |
+        Random id of the client (browser tab) making the request, generated per page load. The
+        realtime events this request causes are withheld from that client's own WebSocket (which
+        presents the same id as `client_id`), while other tabs and devices of the same user still
+        receive them. Never sent to other clients.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{8,64}$'
 
     FilePath:
       name: filePath
@@ -2435,6 +2533,8 @@ components:
         - file.reverted
         - file.committed
         - workspace.synced
+        - workspace.updated
+        - preview.generated
         - share.revoked
         - workspace.archived
         - workspace.deleted
@@ -2447,6 +2547,8 @@ components:
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
         - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic merge on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
+        - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
+        - `preview.generated`: the owner generated the preview via `GET .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
         - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
@@ -2482,6 +2584,8 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventFileReverted'
         - $ref: '#/components/schemas/WorkspaceEventFileCommitted'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceSynced'
+        - $ref: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
+        - $ref: '#/components/schemas/WorkspaceEventPreviewGenerated'
         - $ref: '#/components/schemas/WorkspaceEventShareRevoked'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
@@ -2495,6 +2599,8 @@ components:
           file.reverted: '#/components/schemas/WorkspaceEventFileReverted'
           file.committed: '#/components/schemas/WorkspaceEventFileCommitted'
           workspace.synced: '#/components/schemas/WorkspaceEventWorkspaceSynced'
+          workspace.updated: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
+          preview.generated: '#/components/schemas/WorkspaceEventPreviewGenerated'
           share.revoked: '#/components/schemas/WorkspaceEventShareRevoked'
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
           workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
@@ -2522,7 +2628,7 @@ components:
           type:
             - string
             - "null"
-          description: User who caused the event, or `null` if system-generated. Clients typically ignore events they caused themselves.
+          description: User who caused the event, or `null` if system-generated. The server already withholds an event from the client that caused it (same user and `client_id`); other clients of that user do receive it.
         path:
           type:
             - string
@@ -2689,6 +2795,50 @@ components:
           properties:
             type:
               const: workspace.archived
+
+    WorkspaceEventWorkspaceUpdated:
+      description: |
+        Workspace metadata changed via `PATCH .../{workspaceId}`: the title, description, PFS list
+        or status (a reactivation; archiving sends `workspace.archived`). Carries only the names of
+        the changed fields, for the same reason as `workspace.archived`: clients refetch the
+        workspace. A changed PFS list is the owner's preview selection, which every viewer follows.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - fields
+          properties:
+            type:
+              const: workspace.updated
+            fields:
+              type: array
+              minItems: 1
+              items:
+                type: string
+                enum:
+                  - title
+                  - description
+                  - pfs
+                  - status
+
+    WorkspaceEventPreviewGenerated:
+      description: |
+        The owner generated the preview via `GET .../previews` for the PFS list in `pfs` (the
+        workspace's `pfs`). Only the owner builds; viewers, commenters and the owner's other tabs
+        fetch the result with `GET .../previews/current` instead of building themselves.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - pfs
+          properties:
+            type:
+              const: preview.generated
+            pfs:
+              type: array
+              items:
+                type: string
+              description: The PFS list the preview was generated for.
 
     WorkspaceEventWorkspaceDeleted:
       description: |
@@ -2899,7 +3049,7 @@ components:
 
             Set immediately for shares granted to an existing CEOS-ARD user,
             or on redeeming a share link. Null while `status` is "pending"
-            (username not yet onboarded).
+            (the GitHub account has not logged in yet).
           default: null
         invitedBy:
           type: string
@@ -2928,7 +3078,9 @@ components:
       description: |
         Grant one or more GitHub users access to a workspace. Access takes
         effect immediately (or automatically upon the invitee's next login,
-        if they haven't onboarded yet).
+        if they haven't onboarded yet). Each username is resolved to its
+        GitHub account id at creation and the share is bound to that id, so
+        a later rename of the username neither breaks nor transfers it.
       required:
         - githubUsernames
         - mode

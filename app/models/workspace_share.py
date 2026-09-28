@@ -27,7 +27,8 @@ class WorkspaceShare(Base):
     workspace_id = Column(String, ForeignKey("git_workspaces.id"), nullable=False)
     share_link_id = Column(String, ForeignKey("workspace_share_links.id"), nullable=True, index=True)
 
-    invitee_github_username = Column(String, nullable=False, index=True)
+    invitee_github_id = Column(String, nullable=False, index=True)
+    invitee_github_username = Column(String, nullable=False)
     invitee_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     invited_by_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
 
@@ -43,7 +44,7 @@ class WorkspaceShare(Base):
     invitee_user = relationship("User", foreign_keys=[invitee_user_id])
     invited_by_user = relationship("User", foreign_keys=[invited_by_user_id])
 
-    __table_args__ = (UniqueConstraint("workspace_id", "invitee_github_username", name="uq_share_workspace_gh"),)
+    __table_args__ = (UniqueConstraint("workspace_id", "invitee_github_id", name="uq_share_workspace_github_id"),)
 
     def __repr__(self):
         return f"<WorkspaceShare id={self.id} workspace_id={self.workspace_id} invitee_user_id={self.invitee_user_id} invited_by_user_id={self.invited_by_user_id} mode={self.mode} status={self.status}>"  # noqa: E501

@@ -143,31 +143,31 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
 
 def _activate_pending_shares(db: Session, user: User) -> None:
-    """Activate any workspace shares that were granted by GitHub username before this user existed.
+    """Activate this GitHub account's pending shares and refresh the cached username.
 
-    Matches case-insensitively since GitHub usernames are case-insensitive.
+    Matched by account id, never by username: a renamed username can be claimed by someone else.
     """
     if user.identity_provider != IdentityProvider.github:
         return
 
     try:
-        pending_shares = (
-            db.query(WorkspaceShare)
-            .filter(WorkspaceShare.invitee_github_username.ilike(user.username), WorkspaceShare.status == ShareStatus.PENDING)
-            .all()
-        )
-
-        if not pending_shares:
+        shares = db.query(WorkspaceShare).filter(WorkspaceShare.invitee_github_id == user.external_id).all()
+        if not shares:
             return
 
         now = datetime.now(UTC)
-        for share in pending_shares:
-            share.invitee_user_id = user.id
-            share.status = ShareStatus.ACCEPTED
-            share.accepted_at = now
+        activated = 0
+        for share in shares:
+            share.invitee_github_username = user.username
+            if share.status == ShareStatus.PENDING:
+                share.invitee_user_id = user.id
+                share.status = ShareStatus.ACCEPTED
+                share.accepted_at = now
+                activated += 1
 
         db.commit()
-        logger.info(f"Activated {len(pending_shares)} pending workspace share(s) for user {user.username}")
+        if activated:
+            logger.info(f"Activated {activated} pending workspace share(s) for user {user.username}")
     except SQLAlchemyError as e:
         logger.error(f"Failed to activate pending workspace shares for user {user.username}: {e}")
         db.rollback()
