@@ -10,11 +10,11 @@ from app.db.database import get_db
 from app.dependencies import get_event_broker
 from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
-from app.schemas.error import create_error_detail
 from app.services.auth_service import get_current_user
 from app.services.jwt_service import JWTService
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
+from app.utils.http_utils import internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ oauth_clients = {
 
 @router.get("/login", summary="Initiate login for a specific identity provider", description="Initiate login for a specific identity provider")
 async def initiate_login(request: Request, identity_provider: IdentityProvider = Query(IdentityProvider.github)):
-    try:
+    with internal_errors(f"initiate {identity_provider.value} login", logger):
         if identity_provider in oauth_clients:
             redirect_uri = f"{settings.CALLBACK_BASE_URI}/{identity_provider.value}"
             return await oauth_clients[identity_provider].authorize_redirect(request, redirect_uri)
@@ -40,12 +40,6 @@ async def initiate_login(request: Request, identity_provider: IdentityProvider =
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid identity provider",
             )
-    except Exception as e:
-        logger.error(f"Failed to initiate {identity_provider.value} login: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail(f"initiate {identity_provider.value} login", e),
-        ) from e
 
 
 @router.get("/callback/github", summary="Handle GitHub OAuth callback", description="Handle GitHub OAuth callback")
@@ -60,7 +54,7 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/logout", summary="Logout user", description="Logout user and clear provider tokens")
 async def logout(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    try:
+    with internal_errors("logout user", logger):
         user = current_user["user"]
         provider = current_user["provider"]
 
@@ -94,18 +88,11 @@ async def logout(current_user=Depends(get_current_user), db: Session = Depends(g
             "status": "success",
             "message": f"User {user.username} logged out successfully",
         }
-    except Exception as e:
-        logger.error(f"Failed to logout user: {e}")
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("logout user", e),
-        ) from e
 
 
 @router.get("/user")
 async def current_user(current_user=Depends(get_current_user)):
-    try:
+    with internal_errors("get current user", logger):
         user = current_user["user"]
 
         return {
@@ -117,12 +104,6 @@ async def current_user(current_user=Depends(get_current_user)):
             "updated_at": user.updated_at,
             "identity_provider": user.identity_provider,
         }
-    except Exception as e:
-        logger.error(f"Failed to get current user: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("get current user", e),
-        ) from e
 
 
 @router.post(
@@ -147,7 +128,7 @@ async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user
         - 200: Valid, returns current or fresh JWT with user info
         - 401: JWT expired, provider token expired, or refresh failed
     """
-    try:
+    with internal_errors("validate user", logger):
         user = current_user["user"]
         provider = current_user["provider"]
 
@@ -201,12 +182,3 @@ async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user
             "access_token": access_token,
             "token_refreshed": token_refreshed,  # Indicates if new JWT was issued
         }
-    except HTTPException:
-        # Re-raise authentication errors (401) from get_current_user
-        raise
-    except Exception as e:
-        logger.error(f"Failed to validate user: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("validate user", e),
-        ) from e

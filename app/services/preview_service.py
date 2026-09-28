@@ -6,19 +6,15 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.schemas.events import EventType, build_event
+from app.models.workspace import GitWorkspace
+from app.schemas.events import EventType
 from app.services.build_service import BuildService
-from app.services.events_service import EventBroker
+from app.services.events_service import EventBroker, event_broker
 from app.services.workspace_service import WorkspaceService
 from app.utils.locks import build_locks
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
-
-
-def _output_prefix(workspace_path: Path, pfs: list[str] | None) -> str:
-    """Where BuildService writes a selection's outputs (`<prefix>.html`, `.pdf`, `.docx`)."""
-    return str(workspace_path / "build" / "-".join(pfs or []))
 
 
 class PreviewService:
@@ -27,13 +23,16 @@ class PreviewService:
     ):
         self.build_service = build_service or BuildService()
         self.workspace_service = workspace_service or WorkspaceService()
-        self.broker = broker
+        self.broker = broker or event_broker
 
-    @staticmethod
-    def _ensure_pfs_selection_allowed(workspace, pfs: list[str] | None) -> None:
-        """Only the owner chooses the preview's PFS; others get the workspace's own selection."""
-        if pfs and workspace.viewer_role != "owner" and set(pfs) != set(workspace.pfs or []):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can change the PFS selection of the preview")
+    async def _build(self, workspace: GitWorkspace, pfs: list[str] | None, include_format: str | None = None) -> str:
+        """Run the build (the caller holds `build_locks`) and return the output prefix."""
+        build_info = await self.build_service.build(
+            workspace_path=workspace.abs_path, workspace_id=workspace.id, pfs=pfs, include_format=include_format
+        )
+        if build_info.get("status") != "success":
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
+        return build_info["output_file"]
 
     async def generate_preview(self, db: Session, pfs: list[str] | None, workspace_id: str, user_id: str):
         # Owner only: a build writes into the workspace, and this build is what everyone else sees
@@ -42,19 +41,16 @@ class PreviewService:
 
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
-            build_info = await self.build_service.build(workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs_selection)
-            if build_info.get("status") != "success":
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
-            html = await self._get_preview_files(workspace.abs_path, file_prefix=build_info.get("output_file"))
+            prefix = await self._build(workspace, pfs_selection)
+            html = await self._get_preview_files(workspace.abs_path, file_prefix=prefix)
 
-        if self.broker:
-            self.broker.publish(workspace_id, build_event(EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(pfs_selection or [])))
+        self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(pfs_selection or []))
         return html
 
     async def get_current_preview(self, db: Session, workspace_id: str, user_id: str):
         """The owner's last build for the workspace's PFS list, without building."""
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        prefix = _output_prefix(workspace.abs_path, workspace.pfs)
+        prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
 
         async with build_locks(workspace_id):
             if not workspace.pfs or not Path(prefix + ".html").exists():
@@ -110,21 +106,19 @@ class PreviewService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            self._ensure_pfs_selection_allowed(workspace, pfs)
 
             if workspace.viewer_role == "owner":
-                pfs_selection = pfs or workspace.pfs
                 async with build_locks(workspace_id):
-                    build_info = await self.build_service.build(
-                        workspace_path=workspace.abs_path, workspace_id=workspace_id, pfs=pfs_selection, include_format=format
-                    )
-                if build_info.get("status") != "success":
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
-                document_file = Path(build_info.get("output_file") + f".{format}")
+                    prefix = await self._build(workspace, pfs or workspace.pfs, include_format=format)
             else:
-                # Everyone else gets the owner's last build, which produces both formats
-                document_file = Path(_output_prefix(workspace.abs_path, workspace.pfs) + f".{format}")
+                # Everyone else gets the owner's last build (both formats), for the owner's PFS selection only
+                if pfs and set(pfs) != set(workspace.pfs or []):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can change the PFS selection of the preview"
+                    )
+                prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
 
+            document_file = Path(f"{prefix}.{format}")
             if not document_file.exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested document file not found")
 

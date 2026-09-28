@@ -17,13 +17,7 @@ git_service = GitService()
 build_service = BuildService()
 github_service = GitHubService()
 share_service = ShareService(github_service=github_service, broker=event_broker)
-workspace_service = WorkspaceService(
-    git_service=git_service,
-    build_service=build_service,
-    github_service=github_service,
-    share_service=share_service,
-    broker=event_broker,
-)
+workspace_service = WorkspaceService(git_service=git_service, build_service=build_service, github_service=github_service, broker=event_broker)
 file_service = FileService(git_service=git_service, workspace_service=workspace_service, broker=event_broker)
 preview_service = PreviewService(build_service=build_service, workspace_service=workspace_service, broker=event_broker)
 token_refresh_service = TokenRefreshService()

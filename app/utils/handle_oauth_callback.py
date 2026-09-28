@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import IdentityProvider, User
-from app.models.workspace_share import ShareStatus, WorkspaceShare
 from app.services.jwt_service import JWTService
+from app.services.share_service import activate_pending_shares
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
-            _activate_pending_shares(db, existing_user)
+            activate_pending_shares(db, existing_user)
             return existing_user
         else:
             new_user = User(
@@ -130,7 +130,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             db.refresh(new_user)
 
             logger.info(f"Created new {provider} user: {new_user.username}")
-            _activate_pending_shares(db, new_user)
+            activate_pending_shares(db, new_user)
             return new_user
 
     except SQLAlchemyError as e:
@@ -140,34 +140,3 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create or update user for {provider}",
         ) from e
-
-
-def _activate_pending_shares(db: Session, user: User) -> None:
-    """Activate this GitHub account's pending shares and refresh the cached username.
-
-    Matched by account id, never by username: a renamed username can be claimed by someone else.
-    """
-    if user.identity_provider != IdentityProvider.github:
-        return
-
-    try:
-        shares = db.query(WorkspaceShare).filter(WorkspaceShare.invitee_github_id == user.external_id).all()
-        if not shares:
-            return
-
-        now = datetime.now(UTC)
-        activated = 0
-        for share in shares:
-            share.invitee_github_username = user.username
-            if share.status == ShareStatus.PENDING:
-                share.invitee_user_id = user.id
-                share.status = ShareStatus.ACCEPTED
-                share.accepted_at = now
-                activated += 1
-
-        db.commit()
-        if activated:
-            logger.info(f"Activated {activated} pending workspace share(s) for user {user.username}")
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to activate pending workspace shares for user {user.username}: {e}")
-        db.rollback()

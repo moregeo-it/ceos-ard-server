@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_share_service
-from app.schemas.error import create_error_detail
 from app.schemas.share import (
     ShareCreateRequest,
     ShareLinkCreateRequest,
@@ -19,6 +18,7 @@ from app.schemas.share import (
 from app.schemas.workspace import WorkspaceResponse
 from app.services.auth_service import get_optional_current_user, require_github_user
 from app.services.share_service import ShareService
+from app.utils.http_utils import internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +37,8 @@ async def list_workspace_shares(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("list workspace shares", logger):
         return await share_service.list_shares(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing workspace shares: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list workspace shares", e)) from e
 
 
 @router.post(
@@ -59,13 +54,8 @@ async def create_workspace_shares(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("create workspace shares", logger):
         return await share_service.create_shares(db=db, workspace_id=workspace_id, user=current_user["user"], request=share_data)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating workspace shares: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create workspace shares", e)) from e
 
 
 @router.patch(
@@ -82,15 +72,10 @@ async def update_workspace_share(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("update workspace share", logger):
         return await share_service.update_share(
             db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id, request=share_data
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating workspace share: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("update workspace share", e)) from e
 
 
 @router.delete(
@@ -105,14 +90,9 @@ async def revoke_workspace_share(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("revoke workspace share", logger):
         await share_service.revoke_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error revoking workspace share: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("revoke workspace share", e)) from e
 
 
 @router.get(
@@ -127,13 +107,8 @@ async def list_workspace_share_links(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("list workspace share links", logger):
         return await share_service.list_share_links(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing workspace share links: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list workspace share links", e)) from e
 
 
 @router.post(
@@ -149,13 +124,8 @@ async def create_workspace_share_link(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("create workspace share link", logger):
         return await share_service.create_share_link(db=db, workspace_id=workspace_id, user=current_user["user"], request=link_data)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating workspace share link: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create workspace share link", e)) from e
 
 
 @router.patch(
@@ -172,15 +142,10 @@ async def update_workspace_share_link(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("update workspace share link", logger):
         return await share_service.update_share_link(
             db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id, request=link_data
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating workspace share link: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("update workspace share link", e)) from e
 
 
 @router.delete(
@@ -195,14 +160,9 @@ async def delete_workspace_share_link(
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("delete workspace share link", logger):
         await share_service.delete_share_link(db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting workspace share link: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace share link", e)) from e
 
 
 @router.post(
@@ -216,7 +176,7 @@ async def redeem_share_link(
     current_user: dict[str, Any] | None = Depends(get_optional_current_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    try:
+    with internal_errors("redeem share link", logger):
         if not current_user:
             preview = await share_service.get_share_link_preview(db=db, token=token)
             return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=preview.model_dump(by_alias=True))
@@ -229,8 +189,3 @@ async def redeem_share_link(
             "share": WorkspaceShareResponse.model_validate(share).model_dump(by_alias=True) if share else None,
             "workspace": WorkspaceResponse.model_validate(workspace).model_dump(by_alias=True),
         }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error redeeming share link: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("redeem share link", e)) from e

@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
-from app.schemas.events import EventType, build_event
+from app.schemas.events import EventType
 from app.schemas.workspace import FilePatchRequest, SyncStatus
-from app.services.events_service import EventBroker
+from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 class FileService:
     def __init__(self, git_service: GitService | None = None, workspace_service: WorkspaceService | None = None, broker: EventBroker | None = None):
         self.git_service = git_service or GitService()
-        self.workspace_service = workspace_service or WorkspaceService(git_service=self.git_service, broker=broker)
-        self.broker = broker
+        self.broker = broker or event_broker
+        self.workspace_service = workspace_service or WorkspaceService(git_service=self.git_service, broker=self.broker)
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
@@ -208,12 +208,8 @@ class FileService:
 
         result = await run_exclusive(workspace_id, transaction)
 
-        # Publish event when file/folder is created (after the lock is released)
-        if self.broker:
-            self.broker.publish(
-                workspace_id,
-                build_event(EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result),
-            )
+        # Published after the lock is released
+        self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result)
         return result
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
@@ -254,11 +250,7 @@ class FileService:
 
         result = await run_exclusive(workspace_id, transaction)
 
-        if self.broker:
-            self.broker.publish(
-                workspace_id,
-                build_event(EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result),
-            )
+        self.broker.emit(workspace_id, EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result)
         return result
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
@@ -349,17 +341,14 @@ class FileService:
 
         result = await run_exclusive(workspace_id, transaction)
 
-        if self.broker:
-            self.broker.publish(
-                workspace_id,
-                build_event(
-                    EventType.FILE_DELETED,
-                    actor_user_id=user_id,
-                    path=result["file_details"]["path"],
-                    file=result["file_details"],
-                    tracked=result["tracked"],
-                ),
-            )
+        self.broker.emit(
+            workspace_id,
+            EventType.FILE_DELETED,
+            actor_user_id=user_id,
+            path=result["file_details"]["path"],
+            file=result["file_details"],
+            tracked=result["tracked"],
+        )
         return result
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
@@ -368,27 +357,20 @@ class FileService:
             result = await run_exclusive(
                 workspace_id, lambda: self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
             )
-            if self.broker:
-                self.broker.publish(
-                    workspace_id,
-                    build_event(EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path),
-                )
+            self.broker.emit(workspace_id, EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path)
             return result
         elif operation_request.operation == "revert":
             result = await run_exclusive(workspace_id, lambda: self._revert_file_changes(workspace.abs_path, file_path))
-            if self.broker:
-                # old_path is only meaningful when the revert undid a staged rename.
-                reverted_rename = result.get("path") != file_path if isinstance(result, dict) else False
-                self.broker.publish(
-                    workspace_id,
-                    build_event(
-                        EventType.FILE_REVERTED,
-                        actor_user_id=user_id,
-                        path=file_path,
-                        file=result,
-                        old_path=file_path if reverted_rename else None,
-                    ),
-                )
+            # old_path is only meaningful when the revert undid a staged rename.
+            reverted_rename = result.get("path") != file_path
+            self.broker.emit(
+                workspace_id,
+                EventType.FILE_REVERTED,
+                actor_user_id=user_id,
+                path=file_path,
+                file=result,
+                old_path=file_path if reverted_rename else None,
+            )
             return result
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
@@ -614,7 +596,8 @@ class FileService:
 
             # Commit and push changes to the repository
             commit = await self.git_service.commit_changes(repo, message, user=user)
-            merged_remote = False
+            # Set when the recovery sync below also brought remote changes into the working tree
+            remote_sync: SyncStatus | None = None
 
             try:
                 # Recreates the fork first if it has been deleted on GitHub, then retries. Anything
@@ -639,7 +622,7 @@ class FileService:
                     raise push_error from None
 
                 if sync_result.status == SyncStatus.MERGED:
-                    merged_remote = True
+                    remote_sync = SyncStatus.MERGED
                     try:
                         await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
                     except HTTPException:
@@ -663,36 +646,24 @@ class FileService:
                     # The commit is on GitHub after all: the failed push was applied there, or the
                     # sync pushed it. Reverting it now would commit the same changes twice.
                     # A fast-forward on top of it also brought remote changes into the workspace.
-                    merged_remote = sync_result.status == SyncStatus.UPDATED
+                    if sync_result.status == SyncStatus.UPDATED:
+                        remote_sync = SyncStatus.UPDATED
                 else:
                     # The commit did not reach GitHub: undo it, leaving the changes staged
                     self._revert_commit(repo, workspace_id, commit.id, reason="the push was rejected and the commit never reached GitHub")
                     raise push_error from None
 
-            return commit, merged_remote, changes
+            return commit, remote_sync, changes
 
-        commit, merged_remote, changes = await run_exclusive(workspace_id, transaction)
+        commit, remote_sync, changes = await run_exclusive(workspace_id, transaction)
 
         # Only after the transaction: a reverted commit (rejected push, conflict) never happened
         # from the subscribers' point of view. Published outside the lock.
-        if self.broker:
-            self.broker.publish(
-                workspace_id,
-                build_event(
-                    EventType.FILE_COMMITTED,
-                    actor_user_id=user.id,
-                    commit=format_commit(commit),
-                    changes=changes,
-                ),
-            )
-            if merged_remote:
-                # The recovery sync brought remote changes into the working tree as well
-                self.broker.publish(
-                    workspace_id,
-                    build_event(EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=SyncStatus.MERGED.value),
-                )
+        self.broker.emit(workspace_id, EventType.FILE_COMMITTED, actor_user_id=user.id, commit=format_commit(commit), changes=changes)
+        if remote_sync:
+            self.broker.emit(workspace_id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=remote_sync.value)
 
-        return commit, merged_remote
+        return commit, remote_sync is not None
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
         """

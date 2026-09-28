@@ -4,14 +4,14 @@ from datetime import UTC, datetime
 
 import jwt
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare, WorkspaceShareLink
-from app.schemas.events import EventType, build_event
+from app.schemas.events import EventType
 from app.schemas.share import (
     ShareCreateRequest,
     ShareLinkCreateRequest,
@@ -19,7 +19,7 @@ from app.schemas.share import (
     ShareLinkUpdateRequest,
     ShareUpdateRequest,
 )
-from app.services.events_service import EventBroker
+from app.services.events_service import EventBroker, event_broker
 from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
@@ -29,39 +29,68 @@ ROLE_RANK = {ShareMode.READONLY.value: 0, "owner": 1}
 SHARE_LINK_TOKEN_TYPE = "share_link"
 
 
+def resolve_role(db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
+    """The effective role of a user on a workspace: "owner", "readonly", or None without access.
+
+    The owner is the sole writer; collaborators are readonly, as is everyone on an archived workspace.
+    """
+    if not user_id:
+        return None
+
+    if workspace.user_id == user_id:
+        return "owner"
+
+    share = (
+        db.query(WorkspaceShare)
+        .filter(
+            WorkspaceShare.workspace_id == workspace.id,
+            WorkspaceShare.invitee_user_id == user_id,
+            WorkspaceShare.status == ShareStatus.ACCEPTED,
+        )
+        .first()
+    )
+    if not share:
+        return None
+
+    if workspace.status == WorkspaceStatus.ARCHIVED:
+        return ShareMode.READONLY.value
+
+    return share.mode.value
+
+
+def activate_pending_shares(db: Session, user: User) -> None:
+    """At login: accept this GitHub account's pending shares and refresh the cached username.
+
+    Matched by account id, never by username: a renamed username can be claimed by someone else.
+    """
+    if user.identity_provider != IdentityProvider.github:
+        return
+
+    try:
+        shares = db.query(WorkspaceShare).filter(WorkspaceShare.invitee_github_id == user.external_id).all()
+        if not shares:
+            return
+
+        now = datetime.now(UTC)
+        activated = 0
+        for share in shares:
+            share.invitee_github_username = user.username
+            if share.status == ShareStatus.PENDING:
+                share.accept(user.id, user.username, now)
+                activated += 1
+
+        db.commit()
+        if activated:
+            logger.info(f"Activated {activated} pending workspace share(s) for user {user.username}")
+    except SQLAlchemyError as e:
+        logger.error(f"Failed to activate pending workspace shares for user {user.username}: {e}")
+        db.rollback()
+
+
 class ShareService:
     def __init__(self, github_service: GitHubService | None = None, broker: EventBroker | None = None):
         self.github_service = github_service or GitHubService()
-        self.broker = broker
-
-    def resolve_role(self, db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
-        """Resolve the effective role a user has on a workspace.
-
-        Returns "owner", "readonly", or None if the user has no access at all.
-        The owner is the sole writer; collaborators are readonly.
-        """
-        if not user_id:
-            return None
-
-        if workspace.user_id == user_id:
-            return "owner"
-
-        share = (
-            db.query(WorkspaceShare)
-            .filter(
-                WorkspaceShare.workspace_id == workspace.id,
-                WorkspaceShare.invitee_user_id == user_id,
-                WorkspaceShare.status == ShareStatus.ACCEPTED,
-            )
-            .first()
-        )
-        if not share:
-            return None
-
-        if workspace.status == WorkspaceStatus.ARCHIVED:
-            return ShareMode.READONLY.value
-
-        return share.mode.value
+        self.broker = broker or event_broker
 
     @staticmethod
     def _ensure_mode_enabled(mode: ShareMode) -> None:
@@ -78,6 +107,14 @@ class ShareService:
         if workspace.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can manage sharing")
         return workspace
+
+    @staticmethod
+    def _get_child_or_404(db: Session, model, child_id: str, workspace_id: str, detail: str):
+        """A share or share link by id, scoped to its workspace."""
+        child = db.query(model).filter(model.id == child_id, model.workspace_id == workspace_id).first()
+        if not child:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+        return child
 
     def _validate_expires_at(self, expires_at: datetime | None) -> None:
         if expires_at is None:
@@ -142,9 +179,7 @@ class ShareService:
                 share.invitee_github_username = canonical_username
                 share.revoked_at = None
                 if existing_ceos_user:
-                    share.invitee_user_id = existing_ceos_user.id
-                    share.status = ShareStatus.ACCEPTED
-                    share.accepted_at = share.accepted_at or now
+                    share.accept(existing_ceos_user.id, canonical_username, now)
                 elif share.status == ShareStatus.REVOKED:
                     share.status = ShareStatus.PENDING
                     share.invitee_user_id = None
@@ -173,9 +208,7 @@ class ShareService:
     async def update_share(self, db: Session, workspace_id: str, share_id: str, user_id: str, request: ShareUpdateRequest) -> WorkspaceShare:
         self._ensure_mode_enabled(request.mode)
         self._get_workspace_owned_by(db, workspace_id, user_id)
-        share = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id, WorkspaceShare.workspace_id == workspace_id).first()
-        if not share:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+        share = self._get_child_or_404(db, WorkspaceShare, share_id, workspace_id, "Share not found")
 
         share.mode = request.mode
         db.commit()
@@ -184,21 +217,16 @@ class ShareService:
 
     async def revoke_share(self, db: Session, workspace_id: str, share_id: str, user_id: str) -> WorkspaceShare:
         self._get_workspace_owned_by(db, workspace_id, user_id)
-        share = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id, WorkspaceShare.workspace_id == workspace_id).first()
-        if not share:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+        share = self._get_child_or_404(db, WorkspaceShare, share_id, workspace_id, "Share not found")
 
         share.status = ShareStatus.REVOKED
         share.revoked_at = datetime.now(UTC)
         db.commit()
         db.refresh(share)
 
-        # Publish event when share is revoked (only to the affected user)
-        if share.invitee_user_id and self.broker:
-            self.broker.publish(
-                workspace_id,
-                build_event(EventType.SHARE_REVOKED, actor_user_id=user_id, target_user_id=share.invitee_user_id),
-            )
+        # Only the affected user is told; the gateway closes their connection after delivery
+        if share.invitee_user_id:
+            self.broker.emit(workspace_id, EventType.SHARE_REVOKED, actor_user_id=user_id, target_user_id=share.invitee_user_id)
 
         return share
 
@@ -215,11 +243,8 @@ class ShareService:
 
     async def create_share_link(self, db: Session, workspace_id: str, user: User, request: ShareLinkCreateRequest) -> WorkspaceShareLink:
         self._ensure_mode_enabled(request.mode)
-
         self._get_workspace_owned_by(db, workspace_id, user.id)
-
-        if request.expires_at:
-            self._validate_expires_at(request.expires_at)
+        self._validate_expires_at(request.expires_at)
 
         link = WorkspaceShareLink(
             workspace_id=workspace_id,
@@ -239,15 +264,11 @@ class ShareService:
         self, db: Session, workspace_id: str, link_id: str, user_id: str, request: ShareLinkUpdateRequest
     ) -> WorkspaceShareLink:
         self._get_workspace_owned_by(db, workspace_id, user_id)
-        link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == link_id, WorkspaceShareLink.workspace_id == workspace_id).first()
-        if not link:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
+        link = self._get_child_or_404(db, WorkspaceShareLink, link_id, workspace_id, "Share link not found")
 
         if request.mode is not None:
             self._ensure_mode_enabled(request.mode)
-
-        if request.expires_at:
-            self._validate_expires_at(request.expires_at)
+        self._validate_expires_at(request.expires_at)
 
         for key, value in request.model_dump(exclude_unset=True).items():
             if key in ("mode", "is_active") and value is None:
@@ -261,9 +282,7 @@ class ShareService:
 
     async def delete_share_link(self, db: Session, workspace_id: str, link_id: str, user_id: str) -> None:
         self._get_workspace_owned_by(db, workspace_id, user_id)
-        link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == link_id, WorkspaceShareLink.workspace_id == workspace_id).first()
-        if not link:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found")
+        link = self._get_child_or_404(db, WorkspaceShareLink, link_id, workspace_id, "Share link not found")
 
         db.query(WorkspaceShare).filter(WorkspaceShare.share_link_id == link.id).update(
             {WorkspaceShare.share_link_id: None}, synchronize_session=False
@@ -290,26 +309,22 @@ class ShareService:
 
         return share_link_id
 
-    def _get_active_link_or_404(self, db: Session, token: str) -> WorkspaceShareLink:
+    def _get_active_link_or_404(self, db: Session, token: str) -> tuple[WorkspaceShareLink, GitWorkspace]:
+        """The link behind a token and its workspace; 404 unless the link is active and unexpired."""
         share_link_id = self._decode_share_link_token(token)
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.id == share_link_id).first()
 
-        if not link or not link.is_active:
+        if not link or not link.is_active or not link.workspace:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid, inactive, or deleted share link")
 
         if link.expires_at and link.expires_at <= datetime.now(UTC):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This share link has expired")
 
-        return link
+        return link, link.workspace
 
     async def get_share_link_preview(self, db: Session, token: str) -> ShareLinkPreview:
-        link = self._get_active_link_or_404(db, token)
-        workspace = db.query(GitWorkspace).filter(GitWorkspace.id == link.workspace_id).first()
-
-        if not workspace:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid, inactive, or deleted share link")
-
-        owner = db.query(User).filter(User.id == workspace.user_id).first()
+        link, workspace = self._get_active_link_or_404(db, token)
+        owner = workspace.user
 
         return ShareLinkPreview(
             workspace_title=workspace.title,
@@ -319,55 +334,40 @@ class ShareService:
         )
 
     async def redeem_share_link(self, db: Session, token: str, user: User) -> tuple[WorkspaceShare | None, GitWorkspace]:
-        link = self._get_active_link_or_404(db, token)
-        workspace = db.query(GitWorkspace).filter(GitWorkspace.id == link.workspace_id).first()
-        if not workspace:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid, inactive, or deleted share link")
+        link, workspace = self._get_active_link_or_404(db, token)
+        share = None
 
-        if workspace.user_id == user.id:
-            workspace.viewer_role = "owner"
-            workspace.owner_username = user.username
-            workspace.owner_full_name = user.full_name
-            return None, workspace
-
-        # Matched by account id, not the renameable username: a pending invite is activated, not duplicated.
-        share = (
-            db.query(WorkspaceShare)
-            .filter(
-                WorkspaceShare.workspace_id == workspace.id,
-                or_(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.invitee_github_id == user.external_id),
+        if workspace.user_id != user.id:
+            # Matched by account id, not the renameable username: a pending invite is activated, not duplicated.
+            share = (
+                db.query(WorkspaceShare)
+                .filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_github_id == user.external_id)
+                .first()
             )
-            .first()
-        )
 
-        if share and share.status == ShareStatus.REVOKED:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
+            if share and share.status == ShareStatus.REVOKED:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
 
-        if not share or share.status != ShareStatus.ACCEPTED:
-            now = datetime.now(UTC)
-            if share:
-                share.invitee_user_id = user.id
-                share.invitee_github_username = user.username
-                share.status = ShareStatus.ACCEPTED
-                share.accepted_at = now
-                share.share_link_id = link.id
-            else:
-                share = WorkspaceShare(
-                    workspace_id=workspace.id,
-                    share_link_id=link.id,
-                    invitee_github_id=user.external_id,
-                    invitee_github_username=user.username,
-                    invitee_user_id=user.id,
-                    invited_by_user_id=link.created_by_user_id,
-                    mode=link.mode,
-                    status=ShareStatus.ACCEPTED,
-                    accepted_at=now,
-                )
-                db.add(share)
-            db.commit()
-            db.refresh(share)
+            if not share or share.status != ShareStatus.ACCEPTED:
+                now = datetime.now(UTC)
+                if share:
+                    share.accept(user.id, user.username, now)
+                    share.share_link_id = link.id
+                else:
+                    share = WorkspaceShare(
+                        workspace_id=workspace.id,
+                        share_link_id=link.id,
+                        invitee_github_id=user.external_id,
+                        invitee_github_username=user.username,
+                        invitee_user_id=user.id,
+                        invited_by_user_id=link.created_by_user_id,
+                        mode=link.mode,
+                        status=ShareStatus.ACCEPTED,
+                        accepted_at=now,
+                    )
+                    db.add(share)
+                db.commit()
+                db.refresh(share)
 
-        workspace.viewer_role = self.resolve_role(db, workspace, user.id)
-        workspace.owner_username = workspace.user.username if workspace.user else None
-        workspace.owner_full_name = workspace.user.full_name if workspace.user else None
+        workspace.annotate_viewer(resolve_role(db, workspace, user.id))
         return share, workspace

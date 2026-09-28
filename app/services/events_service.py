@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from app.schemas.events import EventType, build_event
+
 logger = logging.getLogger(__name__)
 
 # Keepalive ping interval (seconds) for idle realtime connections; defeats proxy idle timeouts.
@@ -53,17 +55,15 @@ class EventBroker:
         self._by_user: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._seq = 0
 
-    def subscribe(self, workspace_id: str, user_id: str | None = None) -> asyncio.Queue:
+    def subscribe(self, workspace_id: str, user_id: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
         self._subscribers[workspace_id].add(queue)
-        if user_id:
-            self._by_user[user_id].add(queue)
+        self._by_user[user_id].add(queue)
         return queue
 
-    def unsubscribe(self, workspace_id: str, queue: asyncio.Queue, user_id: str | None = None) -> None:
+    def unsubscribe(self, workspace_id: str, queue: asyncio.Queue, user_id: str) -> None:
         self._discard(self._subscribers, workspace_id, queue)
-        if user_id:
-            self._discard(self._by_user, user_id, queue)
+        self._discard(self._by_user, user_id, queue)
 
     @staticmethod
     def _discard(registry: dict[str, set[asyncio.Queue]], key: str, queue: asyncio.Queue) -> None:
@@ -73,6 +73,10 @@ class EventBroker:
         queues.discard(queue)
         if not queues:
             registry.pop(key, None)
+
+    def emit(self, workspace_id: str, event_type: EventType, **fields: Any) -> None:
+        """Build and publish an event; see `build_event` for the fields."""
+        self.publish(workspace_id, build_event(event_type, **fields))
 
     def publish(self, workspace_id: str, event: dict[str, Any]) -> None:
         """Fan an event out to every subscriber of a workspace. Non-blocking and never raises."""
@@ -89,25 +93,19 @@ class EventBroker:
                 )
                 self._signal(queue, FORCE_RESYNC)
 
-    def close_user_connections(self, user_id: str, signal: CloseSignal = LOGGED_OUT) -> int:
+    def close_user_connections(self, user_id: str) -> int:
         """Tell every socket of a user to close (logout). Returns how many were signalled."""
         queues = list(self._by_user.get(user_id, ()))
         for queue in queues:
-            self._signal(queue, signal)
+            self._signal(queue, LOGGED_OUT)
         return len(queues)
 
     @staticmethod
     def _signal(queue: asyncio.Queue, signal: CloseSignal) -> None:
-        """Drain the backlog so the signal fits, then enqueue it."""
+        """Drain the backlog so the signal fits, then enqueue it (nothing else runs in between)."""
         while not queue.empty():
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-        try:
-            queue.put_nowait(signal)
-        except asyncio.QueueFull:
-            logger.error("Failed to enqueue close signal %s (%s)", signal.code, signal.reason)
+            queue.get_nowait()
+        queue.put_nowait(signal)
 
 
 # Module-level singleton shared across all requests in the process.

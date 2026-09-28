@@ -15,13 +15,13 @@ from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare
-from app.schemas.events import EventType, build_event
+from app.schemas.events import EventType
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
-from app.services.events_service import EventBroker
+from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
-from app.services.share_service import ROLE_RANK, ShareService
+from app.services.share_service import ROLE_RANK, resolve_role
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
@@ -48,14 +48,12 @@ class WorkspaceService:
         git_service: GitService | None = None,
         build_service: BuildService | None = None,
         github_service: GitHubService | None = None,
-        share_service: ShareService | None = None,
         broker: EventBroker | None = None,
     ):
         self.git_service = git_service or GitService()
         self.build_service = build_service or BuildService()
         self.github_service = github_service or GitHubService()
-        self.share_service = share_service or ShareService(github_service=self.github_service, broker=broker)
-        self.broker = broker
+        self.broker = broker or event_broker
 
     async def create_workspace(self, db: Session, workspace_data: WorkspaceCreate, user: User) -> GitWorkspace:
         if not workspace_data.title:
@@ -83,9 +81,7 @@ class WorkspaceService:
             db.add(workspace)
             db.commit()
             db.refresh(workspace)
-            workspace.viewer_role = "owner"
-            workspace.owner_username = user.username
-            workspace.owner_full_name = user.full_name
+            workspace.annotate_viewer("owner", owner=user)
 
             # Under the workspace lock so nothing can operate on the half-cloned tree
             async def transaction():
@@ -102,10 +98,6 @@ class WorkspaceService:
                 if success:
                     db.commit()
                     db.refresh(workspace)
-                    workspace.viewer_role = "owner"
-                    workspace.owner_username = user.username
-                    workspace.owner_full_name = user.full_name
-
                     logger.info(f"Successfully setup workspace {workspace.id}")
                 else:
                     db.rollback()
@@ -127,20 +119,9 @@ class WorkspaceService:
 
     def get_user_workspaces(self, db: Session, user: User) -> list[GitWorkspace]:
         try:
-            if not user.id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
-
-            owned = (
-                db.query(GitWorkspace)
-                .filter(GitWorkspace.user_id == user.id)
-                .order_by(GitWorkspace.created_at.desc())
-                .with_for_update(of=GitWorkspace)
-                .all()
-            )
+            owned = db.query(GitWorkspace).filter(GitWorkspace.user_id == user.id).order_by(GitWorkspace.created_at.desc()).all()
             for workspace in owned:
-                workspace.viewer_role = "owner"
-                workspace.owner_username = user.username
-                workspace.owner_full_name = user.full_name
+                workspace.annotate_viewer("owner", owner=user)
 
             shares_by_workspace_id = {
                 share.workspace_id: share
@@ -155,9 +136,7 @@ class WorkspaceService:
             )
             for workspace in shared:
                 share = shares_by_workspace_id[workspace.id]
-                workspace.viewer_role = ShareMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else share.mode.value
-                workspace.owner_username = workspace.user.username if workspace.user else None
-                workspace.owner_full_name = workspace.user.full_name if workspace.user else None
+                workspace.annotate_viewer(ShareMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else share.mode.value)
 
             return owned + shared
 
@@ -180,7 +159,7 @@ class WorkspaceService:
             if not workspace:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-            role = self.share_service.resolve_role(db, workspace, user_id)
+            role = resolve_role(db, workspace, user_id)
             # Don't leak workspace existence to users who have no access to it at all.
             if role is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
@@ -195,10 +174,7 @@ class WorkspaceService:
             elif exists and not workspace.abs_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not a directory")
 
-            workspace.viewer_role = role
-            workspace.owner_username = workspace.user.username if workspace.user else None
-            workspace.owner_full_name = workspace.user.full_name if workspace.user else None
-            return workspace
+            return workspace.annotate_viewer(role)
         except HTTPException:
             raise
         except Exception as e:
@@ -319,33 +295,25 @@ class WorkspaceService:
         # Release the read transaction before the fetch/merge/push network work below
         db.commit()
 
+        attempts = 0
+
         async def sync():
+            nonlocal attempts
+            attempts += 1
             return await self.git_service.sync_with_origin(
                 repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, restore_branch=restore_branch
             )
 
-        # One transaction under the workspace lock, fork repair and retry included:
-        # releasing the lock between them would expose the half-repaired state.
-        async def transaction():
-            try:
-                return await sync()
-            except RemoteAccessError as e:
-                logger.info(f"Sync failed for workspace {workspace_id}; checking whether the fork still exists")
-                if not await self._repair_fork(db, workspace, user):
-                    raise
-                # Sync again rather than returning early: repair only restored the fork and branch,
-                # the ahead/behind/conflict answer still has to be computed.
-                logger.info(f"Recovered workspace {workspace_id} from a deleted fork after a failed {e.operation}")
-                result = await sync()
-                result.repaired = True
-                return result
-
-        result = await run_exclusive(workspace.id, transaction)
+        # One transaction under the workspace lock, fork repair and retry included: releasing the
+        # lock between them would expose the half-repaired state. The retry runs the whole sync
+        # again, because the repair only restores the fork and branch.
+        result = await run_exclusive(workspace.id, lambda: self.with_remote_recovery(db, workspace, user, sync))
+        result.repaired = attempts > 1
 
         # Files changed on disk beyond what the single-file events describe, so subscribers
         # (read-only collaborators) must reload the tree. Published after the lock is released.
-        if self.broker and result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
-            self.broker.publish(workspace.id, build_event(EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value))
+        if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
+            self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
 
         return result
 
@@ -556,11 +524,11 @@ class WorkspaceService:
 
             changed = [key for key, value in previous.items() if getattr(workspace, key) != value]
             archived_now = "status" in changed and workspace.status == WorkspaceStatus.ARCHIVED
-            if self.broker and archived_now:
-                self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id))
+            if archived_now:
+                self.broker.emit(workspace_id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id)
             fields = [key for key in changed if key != "status" or not archived_now]
-            if self.broker and fields:
-                self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields))
+            if fields:
+                self.broker.emit(workspace_id, EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields)
 
             return workspace
         except HTTPException:
@@ -599,8 +567,7 @@ class WorkspaceService:
         result = await run_exclusive(workspace_id, transaction)
 
         # Tell subscribers the workspace is gone (the realtime gateway closes their connections)
-        if self.broker:
-            self.broker.publish(workspace_id, build_event(EventType.WORKSPACE_DELETED, actor_user_id=user_id))
+        self.broker.emit(workspace_id, EventType.WORKSPACE_DELETED, actor_user_id=user_id)
 
         # Best-effort: the workspace is gone, so its cross-process lock file is dead weight
         workspace_lock_file(workspace_id).unlink(missing_ok=True)
@@ -749,12 +716,8 @@ class WorkspaceService:
 
         folder_details = await run_exclusive(workspace_id, transaction)
 
-        # Publish event when PFS is created (after the lock is released)
-        if self.broker:
-            self.broker.publish(
-                workspace_id,
-                build_event(EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details),
-            )
+        # Published after the lock is released
+        self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details)
 
         return folder_details
 
