@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime
 
 import jwt
 from fastapi import HTTPException, status
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -27,6 +28,9 @@ logger = logging.getLogger(__name__)
 # Effective-role ranking used to gate access. Owner is the sole writer.
 ROLE_RANK = {ShareMode.READONLY.value: 0, "owner": 1}
 SHARE_LINK_TOKEN_TYPE = "share_link"
+# GitHub login syntax: alphanumerics and single hyphens, up to 39 characters. Checked before the
+# name goes into the API URL path, where e.g. "octocat/repos" would hit another endpoint.
+GITHUB_USERNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 
 
 def resolve_role(db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
@@ -148,6 +152,10 @@ class ShareService:
         if not usernames:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one GitHub username is required")
 
+        malformed = [username for username in usernames if not GITHUB_USERNAME.match(username)]
+        if malformed:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid GitHub username(s): {', '.join(malformed)}")
+
         if any(username.lower() == user.username.lower() for username in usernames):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot share a workspace with yourself")
 
@@ -162,6 +170,17 @@ class ShareService:
             )
 
         now = datetime.now(UTC)
+        try:
+            return self._upsert_shares(db, workspace, user, request.mode, github_users, now)
+        except IntegrityError:
+            # Lost a race with a concurrent share of the same account: redo on top of its row
+            db.rollback()
+            return self._upsert_shares(db, workspace, user, request.mode, github_users, now)
+
+    @staticmethod
+    def _upsert_shares(
+        db: Session, workspace: GitWorkspace, user: User, mode: ShareMode, github_users: list[dict], now: datetime
+    ) -> list[WorkspaceShare]:
         shares = []
         for gh_user in github_users:
             # Bound to the account id (survives renames); the login is display only, in GitHub's canonical casing.
@@ -175,7 +194,7 @@ class ShareService:
             )
 
             if share:
-                share.mode = request.mode
+                share.mode = mode
                 share.invitee_github_username = canonical_username
                 share.revoked_at = None
                 if existing_ceos_user:
@@ -191,7 +210,7 @@ class ShareService:
                     invitee_github_username=canonical_username,
                     invitee_user_id=existing_ceos_user.id if existing_ceos_user else None,
                     invited_by_user_id=user.id,
-                    mode=request.mode,
+                    mode=mode,
                     status=ShareStatus.ACCEPTED if existing_ceos_user else ShareStatus.PENDING,
                     accepted_at=now if existing_ceos_user else None,
                 )
@@ -338,36 +357,45 @@ class ShareService:
         share = None
 
         if workspace.user_id != user.id:
-            # Matched by account id, not the renameable username: a pending invite is activated, not duplicated.
-            share = (
-                db.query(WorkspaceShare)
-                .filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_github_id == user.external_id)
-                .first()
-            )
-
-            if share and share.status == ShareStatus.REVOKED:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
-
-            if not share or share.status != ShareStatus.ACCEPTED:
-                now = datetime.now(UTC)
-                if share:
-                    share.accept(user.id, user.username, now)
-                    share.share_link_id = link.id
-                else:
-                    share = WorkspaceShare(
-                        workspace_id=workspace.id,
-                        share_link_id=link.id,
-                        invitee_github_id=user.external_id,
-                        invitee_github_username=user.username,
-                        invitee_user_id=user.id,
-                        invited_by_user_id=link.created_by_user_id,
-                        mode=link.mode,
-                        status=ShareStatus.ACCEPTED,
-                        accepted_at=now,
-                    )
-                    db.add(share)
-                db.commit()
-                db.refresh(share)
+            try:
+                share = self._accept_link_share(db, link, workspace, user)
+            except IntegrityError:
+                # Lost a race with a concurrent redemption by the same account: redo on top of its row
+                db.rollback()
+                share = self._accept_link_share(db, link, workspace, user)
 
         workspace.annotate_viewer(resolve_role(db, workspace, user.id))
         return share, workspace
+
+    @staticmethod
+    def _accept_link_share(db: Session, link: WorkspaceShareLink, workspace: GitWorkspace, user: User) -> WorkspaceShare:
+        # Matched by account id, not the renameable username: a pending invite is activated, not duplicated.
+        share = (
+            db.query(WorkspaceShare).filter(WorkspaceShare.workspace_id == workspace.id, WorkspaceShare.invitee_github_id == user.external_id).first()
+        )
+
+        if share and share.status == ShareStatus.REVOKED:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
+
+        if not share or share.status != ShareStatus.ACCEPTED:
+            now = datetime.now(UTC)
+            if share:
+                share.accept(user.id, user.username, now)
+                share.share_link_id = link.id
+            else:
+                share = WorkspaceShare(
+                    workspace_id=workspace.id,
+                    share_link_id=link.id,
+                    invitee_github_id=user.external_id,
+                    invitee_github_username=user.username,
+                    invitee_user_id=user.id,
+                    invited_by_user_id=link.created_by_user_id,
+                    mode=link.mode,
+                    status=ShareStatus.ACCEPTED,
+                    accepted_at=now,
+                )
+                db.add(share)
+            db.commit()
+            db.refresh(share)
+
+        return share

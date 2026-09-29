@@ -360,9 +360,9 @@ class WorkspaceService:
         logger.info(f"Fork for workspace {workspace.id} moved to {full_name}; realigning")
         self._update_fork_reference(db, workspace.user_id, owner, name, head_repo.get("clone_url"))
 
-    def _apply_pull_request_state(self, workspace: GitWorkspace, pull_request: dict[str, Any]) -> None:
+    def _apply_pull_request_state(self, workspace: GitWorkspace, pull_request: dict[str, Any]) -> bool:
         """
-        Copy live pull request state onto the workspace.
+        Copy live pull request state onto the workspace; True when this archived it.
 
         Archiving is the consequential part: it starts the one-month timer in
         scripts/cleanup_archived_workspaces.py, which deletes the local clone and the database
@@ -379,18 +379,25 @@ class WorkspaceService:
             # active and let the next push recreate the fork; propose() opens a fresh one.
             workspace.pull_request_status = PullRequestStatus.UNKNOWN
             logger.info(f"Pull request {workspace.pull_request_number} is detached: its fork was deleted on GitHub")
-            return
+            return False
         elif pull_request.get("state") == "open":
             workspace.pull_request_status = PullRequestStatus.OPEN
         else:
             workspace.pull_request_status = PullRequestStatus.CLOSED
 
-        if workspace.pull_request_status in (PullRequestStatus.MERGED, PullRequestStatus.CLOSED):
-            # Only on the transition, so reopening the workspace does not keep pushing the
-            # deletion date back.
-            if workspace.status != WorkspaceStatus.ARCHIVED:
-                workspace.archived_at = datetime.now(UTC)
-                workspace.status = WorkspaceStatus.ARCHIVED
+        # Only on the transition, so reopening the workspace does not keep pushing the deletion date back.
+        if workspace.pull_request_status in (PullRequestStatus.MERGED, PullRequestStatus.CLOSED) and workspace.status != WorkspaceStatus.ARCHIVED:
+            workspace.archived_at = datetime.now(UTC)
+            workspace.status = WorkspaceStatus.ARCHIVED
+            return True
+        return False
+
+    def _publish_status_change(self, workspace_id: str, user_id: str | None, *, reactivated: bool = False, archived: bool = False) -> None:
+        """The same events update_workspace sends when the status changes as a side effect of a PR refresh."""
+        if reactivated:
+            self.broker.emit(workspace_id, EventType.WORKSPACE_UPDATED, actor_user_id=user_id, fields=["status"])
+        if archived:
+            self.broker.emit(workspace_id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id)
 
     async def sync_workspace(
         self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = ShareMode.READONLY.value
@@ -425,12 +432,14 @@ class WorkspaceService:
             return workspace
 
         self._realign_renamed_fork(db, workspace, pull_request)
-        self._apply_pull_request_state(workspace, pull_request)
+        archived = self._apply_pull_request_state(workspace, pull_request)
 
         db.add(workspace)
         db.commit()
         db.refresh(workspace)
 
+        # A merged or closed proposal archives the workspace here; connected tabs must learn it too
+        self._publish_status_change(workspace.id, user_id, archived=archived)
         return workspace
 
     async def _reactivation_blocked_reason(self, workspace: GitWorkspace, access_token: str) -> str | None:
@@ -822,16 +831,18 @@ class WorkspaceService:
                     workspace=workspace,
                 )
 
+                reactivated = False
                 if data.state == "open":
+                    reactivated = workspace.status == WorkspaceStatus.ARCHIVED
                     workspace.archived_at = None
                     workspace.status = WorkspaceStatus.ACTIVE
 
                 # String column: bind a string so this keeps working on a stricter database
                 workspace.pull_request_number = str(pr_response["number"])
-                self._apply_pull_request_state(workspace, pr_response)
+                archived = self._apply_pull_request_state(workspace, pr_response)
                 db.commit()
 
-                return self._to_proposal(pr_response)
+                return self._to_proposal(pr_response), reactivated, archived
 
             except HTTPException:
                 raise
@@ -839,7 +850,10 @@ class WorkspaceService:
                 logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
 
-        return await run_exclusive(workspace_id, transaction)
+        proposal, reactivated, archived = await run_exclusive(workspace_id, transaction)
+        # After the lock, like every other event
+        self._publish_status_change(workspace_id, user.id, reactivated=reactivated, archived=archived)
+        return proposal
 
     @staticmethod
     def _is_unreopenable(error: GitHubAPIError) -> bool:

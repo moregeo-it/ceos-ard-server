@@ -432,7 +432,8 @@ paths:
         server's `--ws-max-size` are rejected with `1009`.
 
         Handshake, in order: the `Origin` header, when present, must be one of the configured CORS
-        origins (otherwise the upgrade is rejected); the JWT from the `authorization` query parameter
+        origins (otherwise the upgrade fails; a browser then sees close code `1006`, no server
+        code); the JWT from the `authorization` query parameter
         is validated (the `Authorization` header is not read here - browsers can't set it on a
         handshake; a session cookie will replace the query parameter, see issue #98); the connection
         is subscribed to the workspace's events; then workspace access is checked and the connection
@@ -447,7 +448,7 @@ paths:
         | `4001` | JWT missing, invalid or expired; also sent when it expires mid-connection or the user logs out | ask for a new login, then reconnect |
         | `4003` | no access to the workspace, or access ended (`share.revoked` for this user, `workspace.deleted`) | stop |
         | `4009` | the server's buffer for this connection overflowed and events were dropped | reconnect at once and resync |
-        | `1008` | rejected `Origin`, or the client sent data | stop |
+        | `1008` | the client sent data | stop |
 
         Echo filtering: an event is withheld from the socket whose user *and* `client_id` match the
         client that caused it (that client applied the change locally, see the `X-Client-Id`
