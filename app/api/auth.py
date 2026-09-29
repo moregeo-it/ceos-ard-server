@@ -7,10 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.database import get_db
+from app.dependencies import get_github_service
 from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_logout_user
+from app.services.github_service import GitHubService
 from app.services.jwt_service import JWTService
+from app.services.token_refresh_service import TokenRefreshService
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
 from app.utils.http_utils import internal_errors
@@ -51,24 +54,26 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "google", oauth.google, extract_google_user_info)
 
 
-@router.post("/logout", summary="Logout user", description="Logout user and clear provider tokens")
-async def logout(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+@router.post("/logout", summary="Logout user", description="Logout user, revoke and clear the provider tokens")
+async def logout(
+    current_user=Depends(get_logout_user),
+    db: Session = Depends(get_db),
+    github_service: GitHubService = Depends(get_github_service),
+):
     with internal_errors("logout user", logger):
         user = current_user["user"]
         provider = current_user["provider"]
 
-        # Revoke token with OAuth provider
+        # Best effort: clearing the tokens below is what ends the session, even when the provider is unreachable
         try:
-            if provider == IdentityProvider.google and user.refresh_token:
-                # Revoke Google refresh token
-                await oauth.google.revoke_token(user.refresh_token)
+            if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
+                # The refresh token takes its access tokens with it; without one, revoke the access token
+                await TokenRefreshService.revoke_google_token(user.refresh_token or user.access_token)
                 logger.info(f"Revoked Google token for user {user.username}")
             elif provider == IdentityProvider.github and user.access_token:
-                # Revoke GitHub token
-                await oauth.github.revoke_token(user.access_token)
+                await github_service.revoke_oauth_token(user.access_token)
                 logger.info(f"Revoked GitHub token for user {user.username}")
         except Exception as revoke_error:
-            # Log but don't fail - still clear from DB
             logger.warning(f"Failed to revoke {provider.value} token for {user.username}: {revoke_error}")
 
         # Clear provider tokens from database
