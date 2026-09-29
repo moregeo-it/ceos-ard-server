@@ -66,8 +66,9 @@ async def logout(
 
         # Best effort: clearing the tokens below is what ends the session, even when the provider is unreachable
         try:
-            if provider == IdentityProvider.google and user.refresh_token:
-                await TokenRefreshService.revoke_google_token(user.refresh_token)
+            if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
+                # The refresh token takes its access tokens with it; without one, revoke the access token
+                await TokenRefreshService.revoke_google_token(user.refresh_token or user.access_token)
                 logger.info(f"Revoked Google token for user {user.username}")
             elif provider == IdentityProvider.github and user.access_token:
                 await github_service.revoke_oauth_token(user.access_token)

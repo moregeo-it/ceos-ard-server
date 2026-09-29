@@ -81,10 +81,10 @@ class TokenRefreshService:
             ) from e
 
     @staticmethod
-    async def revoke_google_token(refresh_token: str) -> None:
-        """Revoke a Google refresh token, which also invalidates the access tokens issued from it."""
+    async def revoke_google_token(token: str) -> None:
+        """Revoke a Google access or refresh token; a refresh token also invalidates the access tokens issued from it."""
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(settings.GOOGLE_REVOKE_URL, data={"token": refresh_token})
+            response = await client.post(settings.GOOGLE_REVOKE_URL, data={"token": token})
         response.raise_for_status()
 
     @staticmethod
