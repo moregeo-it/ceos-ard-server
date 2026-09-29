@@ -511,7 +511,7 @@ class FileService:
         return get_repo_changes(repo)
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
         relative_path_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
