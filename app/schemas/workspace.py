@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
 
@@ -50,6 +50,8 @@ class WorkspaceUpdate(BaseModel):
 
 
 class WorkspaceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     title: str
     user_id: str
@@ -66,9 +68,6 @@ class WorkspaceResponse(BaseModel):
     updated_at: datetime
     archived_at: datetime | None
     deletion_at: datetime | None  # Computed from archived_at + 1 month
-
-    class ConfigDict:
-        from_attributes = True
 
 
 class ProposalRequest(BaseModel):

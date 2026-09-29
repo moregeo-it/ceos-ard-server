@@ -1,13 +1,12 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_workspace_service
-from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     Commit,
     CreatePFSRequest,
@@ -23,6 +22,7 @@ from app.schemas.workspace import (
 from app.services.auth_service import require_github_user
 from app.services.workspace_service import WorkspaceService
 from app.utils.git_utils import format_commit
+from app.utils.http_utils import internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +36,12 @@ async def create_workspace(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("create workspace", logger):
         return await workspace_service.create_workspace(
             db=db,
             user=current_user["user"],
             workspace_data=workspace_data,
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create workspace", e)) from e
 
 
 @router.get(
@@ -61,13 +56,8 @@ async def get_user_workspaces(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("get workspaces", logger):
         return workspace_service.get_user_workspaces(db=db, user_id=current_user["user"].id, access_token=current_user["user"].access_token)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting workspaces: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspaces", e)) from e
 
 
 @router.get(
@@ -82,15 +72,10 @@ async def get_user_workspace(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("get workspace", logger):
         return await workspace_service.sync_workspace(
             db=db, workspace_id=workspace_id, user_id=current_user["user"].id, access_token=current_user["user"].access_token
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace", e)) from e
 
 
 @router.patch("/{workspace_id}", summary="Update a workspace", response_model=WorkspaceResponse, description="Update a workspace information")
@@ -101,13 +86,8 @@ async def update_workspace(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("update workspace", logger):
         return await workspace_service.update_workspace(db=db, workspace_id=workspace_id, user=current_user["user"], update_data=update_data)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("update workspace", e)) from e
 
 
 @router.delete(
@@ -123,13 +103,9 @@ async def delete_workspace(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
-        return await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete workspace", e)) from e
+    with internal_errors("delete workspace", logger):
+        await workspace_service.delete_workspace(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
@@ -145,7 +121,7 @@ async def get_proposal(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("get proposal changes", logger):
         pull_request = await workspace_service.get_proposal(
             db=db,
             workspace_id=workspace_id,
@@ -157,12 +133,6 @@ async def get_proposal(
             return pull_request  # todo: format PR, see old commits
         else:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting proposal changes: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get proposal changes", e)) from e
 
 
 @router.put(
@@ -179,18 +149,13 @@ async def propose(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("propose changes", logger):
         return await workspace_service.propose(
             db=db,
             workspace_id=workspace_id,
             data=propose_data,
             user=current_user["user"],
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error proposing changes: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("propose changes", e)) from e
 
 
 @router.get(
@@ -206,18 +171,13 @@ async def get_workspace_commits(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("get workspace commits", logger):
         commits = workspace_service.get_workspace_commits(
             db=db,
             workspace_id=workspace_id,
             user_id=current_user["user"].id,
         )
         return [format_commit(commit) for commit in commits]
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting workspace commits: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get workspace commits", e)) from e
 
 
 @router.post(
@@ -234,13 +194,8 @@ async def sync_workspace_repository(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("sync workspace", logger):
         return await workspace_service.sync_git(db=db, workspace_id=workspace_id, user=current_user["user"])
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error syncing workspace: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("sync workspace", e)) from e
 
 
 @router.get(
@@ -252,14 +207,9 @@ async def list_workspace_pfs_types(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> PFSTypesResponse:
-    try:
+    with internal_errors("list PFS types", logger):
         pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
         return {"pfsTypes": pfs_types}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing Workspace PFS types: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list PFS types", e)) from e
 
 
 @router.post(
@@ -277,12 +227,7 @@ async def create_workspace_pfs(
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    try:
+    with internal_errors("create PFS", logger):
         return await workspace_service.create_workspace_pfs(
             db=db, workspace_id=workspace_id, user=current_user["user"], request_data=create_pfs_request
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating PFS: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create PFS", e)) from e

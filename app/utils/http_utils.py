@@ -1,5 +1,24 @@
 import hashlib
+import logging
 import os
+from collections.abc import Generator
+from contextlib import contextmanager
+
+from fastapi import HTTPException, status
+
+from app.schemas.error import create_error_detail
+
+
+@contextmanager
+def internal_errors(operation: str, logger: logging.Logger) -> Generator[None]:
+    """Turn an unexpected exception in a route into a logged 500; HTTPExceptions pass through."""
+    try:
+        yield
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to {operation}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail(operation, e)) from e
 
 
 def compute_file_etag(stat_result: os.stat_result) -> str:

@@ -262,28 +262,21 @@ class WorkspaceService:
         # Release the read transaction before the fetch/merge/push network work below
         db.commit()
 
+        attempts = 0
+
         async def sync():
+            nonlocal attempts
+            attempts += 1
             return await self.git_service.sync_with_origin(
                 repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, restore_branch=restore_branch
             )
 
-        # One transaction under the workspace lock, fork repair and retry included:
-        # releasing the lock between them would expose the half-repaired state.
-        async def transaction():
-            try:
-                return await sync()
-            except RemoteAccessError as e:
-                logger.info(f"Sync failed for workspace {workspace_id}; checking whether the fork still exists")
-                if not await self._repair_fork(db, workspace, user):
-                    raise
-                # Sync again rather than returning early: repair only restored the fork and branch,
-                # the ahead/behind/conflict answer still has to be computed.
-                logger.info(f"Recovered workspace {workspace_id} from a deleted fork after a failed {e.operation}")
-                result = await sync()
-                result.repaired = True
-                return result
-
-        return await run_exclusive(workspace.id, transaction)
+        # One transaction under the workspace lock, fork repair and retry included: releasing the
+        # lock between them would expose the half-repaired state. The retry runs the whole sync
+        # again, because the repair only restores the fork and branch.
+        result = await run_exclusive(workspace.id, lambda: self.with_remote_recovery(db, workspace, user, sync))
+        result.repaired = attempts > 1
+        return result
 
     def _update_fork_reference(self, db: Session, user_id: str, owner: str, name: str, clone_url: str = None) -> None:
         """
