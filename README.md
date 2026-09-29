@@ -7,7 +7,7 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 ### Authentication & Authorization
 
 - **OAuth Integration**: Support for GitHub and Google OAuth providers
-- **JWT Token Management**: Secure token-based authentication
+- **Session Cookie**: The JWT lives in an HttpOnly cookie, never in the browser's storage or in URLs
 - **User Management**: Automatic user creation and profile management
 - **GitHub-Only Workspaces**: All workspace features exclusively available to GitHub users
 
@@ -105,6 +105,15 @@ The following properties should be changed at least:
 - `GITHUB_SERVICE_TOKEN` (for automated maintenance tasks - see setup below)
 - `SECRET_KEY` (for JWT token signing)
 - `ENVIRONMENT` (development/production)
+
+The editor and the API must run on the **same site**, i.e. under the same registrable domain
+(`editor.ceos-ard.moregeo.it` and `api.ceos-ard.moregeo.it`; in development both on `localhost`).
+The session cookie is then first-party, so browsers don't block it as a third-party cookie.
+`CORS_ORIGINS` must list the exact editor origin (e.g. `http://localhost:5173`), no wildcards.
+
+For local development over plain HTTP in **Safari**, set `SESSION_COOKIE_SECURE=false`: Safari drops
+`Secure` cookies on `http://localhost`. Chrome and Firefox accept them there, so the default works.
+Never use this setting in production; the server refuses to start with it.
 
 ### 5. OAuth Setup
 
@@ -354,9 +363,12 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 ## 🔐 Security Features
 
 - **OAuth 2.0**: Secure authentication via GitHub/Google
-- **JWT Tokens**: Stateless authentication tokens
-- **Session Security**: Signed session cookies with `itsdangerous`
-- **CORS Protection**: Configurable cross-origin resource sharing
+- **Session Cookie**: The JWT in an `HttpOnly; Secure; SameSite=Strict` `__Host-session` cookie; scripts, tests
+  and Swagger can still send it as an `Authorization: Bearer` header
+- **Cross-Site Request Protection**: POST, PUT, PATCH and DELETE requests authenticated by the cookie must send
+  `X-Client-Id`, which a foreign page can't add without passing the CORS check; GET requests never change data
+- **OAuth State**: Signed session cookie with `itsdangerous` between login and callback
+- **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only
 - **Input Sanitization**: Protection against malicious input
 - **User Isolation**: Workspaces are isolated per user
 - **Provider-based Authorization**: Workspace access restricted to GitHub users only
@@ -409,6 +421,9 @@ ENVIRONMENT=production
 
 # Use a strong secret key
 SECRET_KEY=your-production-secret-key
+
+# The exact editor origin, on the same site as SERVER_URL (see Environment Configuration)
+CORS_ORIGINS=https://yourdomain.com
 
 # Use absolute path for database in production
 DATABASE_URL=sqlite:////app/data/ceos_ard_server.db

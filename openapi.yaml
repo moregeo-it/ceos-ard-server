@@ -19,6 +19,7 @@ servers:
     description: Production server
 
 security:
+  - cookieAuth: []
   - bearerAuth: []
 
 
@@ -84,80 +85,76 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /auth/callback:
+  /auth/callback/{provider}:
     get:
-      summary: GitHub OAuth callback
-      description: Handles GitHub OAuth callback and returns JWT token
+      summary: OAuth callback
+      description: |
+        Completes the login started at `/auth/login`: stores the provider tokens server-side, sets
+        the session cookie (the JWT, `HttpOnly; Secure; SameSite=Strict; Path=/`, for the JWT's
+        lifetime) and redirects to the editor's `/auth/callback` without any parameters. The editor
+        then reads the user and the session expiry from `GET /auth/user`.
+
+        The editor and the API must be on the same site (same registrable domain, e.g.
+        `editor.example.org` and `api.example.org`), otherwise the cookie is third-party and
+        browsers may block it.
       operationId: authCallback
       tags:
         - Authentication
       security: []
       parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - github
+              - google
         - name: code
           in: query
           required: true
-          description: Authorization code from GitHub
+          description: Authorization code from the provider
           schema:
             type: string
         - name: state
           in: query
           required: true
-          description: State parameter for CSRF protection
+          description: OAuth state, checked against the login request
           schema:
             type: string
       responses:
-        '200':
-          description: Successful authentication
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - accessToken
-                  - refreshToken
-                  - expiresIn
-                  - user
-                properties:
-                  accessToken:
-                    type: string
-                    description: JWT access token
-                  refreshToken:
-                    type: string
-                    description: Refresh token for token renewal
-                  expiresIn:
-                    type: integer
-                    description: Token expiration time in seconds
-                  user:
-                    $ref: '#/components/schemas/User'
-        '400':
-          description: Invalid request parameters
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Authentication failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /auth/logout:
-    get:
-      summary: Logout user
-      description: Invalidates current session and tokens
-      operationId: logout
-      tags:
-        - Authentication
-      responses:
         '302':
-          description: Successfully logged out
+          description: Logged in; redirects to the editor. On failure, redirects to the editor's `/auth/error` with `message` and `provider` parameters.
           headers:
             Location:
-              description: Redirect URL after logout
               schema:
                 type: string
                 format: uri
+            Set-Cookie:
+              description: The session cookie (`__Host-session`)
+              schema:
+                type: string
+
+  /auth/logout:
+    post:
+      summary: Logout user
+      description: |
+        Revokes the provider token, clears the session cookie and closes the user's realtime
+        sockets with `4001`. The JWT itself can't be invalidated, but it is refused afterwards
+        because the provider token is gone.
+      operationId: logout
+      tags:
+        - Authentication
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Logged out
+          headers:
+            Set-Cookie:
+              description: Expires the session cookie
+              schema:
+                type: string
         '401':
           description: Unauthorized
           content:
@@ -168,7 +165,7 @@ paths:
   /auth/user:
     get:
       summary: Get current user information
-      description: Returns current authenticated user's information
+      description: The authenticated user and when the session ends. Browsers can't read the HttpOnly cookie, so `expires_at` is how the editor knows when to ask for a new login.
       operationId: getCurrentUser
       tags:
         - Authentication
@@ -178,9 +175,82 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                required:
+                  - id
+                  - username
+                  - identity_provider
+                  - expires_at
+                properties:
+                  id:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+                  username:
+                    type: string
+                  full_name:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+                  identity_provider:
+                    type: string
+                    enum:
+                      - github
+                      - google
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: When the JWT, and with it the session cookie, expires
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/validate:
+    post:
+      summary: Validate the session and renew it if needed
+      description: |
+        Validates the JWT (refreshing a Google provider token transparently) and renews it within
+        15 minutes of expiry. A cookie session is renewed with a fresh cookie; the JWT is returned
+        in the body (`access_token`) only to callers that sent it as a bearer header.
+      operationId: validateSession
+      tags:
+        - Authentication
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: The session is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - valid
+                  - expires_at
+                  - token_refreshed
+                properties:
+                  valid:
+                    type: boolean
+                  expires_at:
+                    type: string
+                    format: date-time
+                  expires_in:
+                    type: integer
+                  token_refreshed:
+                    type: boolean
+                  access_token:
+                    type: string
+                    description: Bearer callers only
+        '401':
+          description: The JWT or the provider token expired
           content:
             application/json:
               schema:
@@ -433,10 +503,9 @@ paths:
 
         Handshake, in order: the `Origin` header, when present, must be one of the configured CORS
         origins (otherwise the upgrade fails; a browser then sees close code `1006`, no server
-        code); the JWT from the `authorization` query parameter
-        is validated (the `Authorization` header is not read here - browsers can't set it on a
-        handshake; a session cookie will replace the query parameter, see issue #98); the connection
-        is subscribed to the workspace's events; then workspace access is checked and the connection
+        code; this check is also what keeps other same-site hosts from using the session cookie); the
+        JWT from the session cookie, which browsers send on the handshake, or an `Authorization:
+        Bearer` header is validated; the connection is subscribed to the workspace's events; then workspace access is checked and the connection
         accepted. Subscribing before the access check means a revocation that commits in between is
         still delivered as a terminal event.
 
@@ -459,16 +528,8 @@ paths:
       operationId: subscribeWorkspaceEvents
       tags:
         - Realtime
-      security:
-        - bearerQueryAuth: []
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
-        - name: authorization
-          in: query
-          required: true
-          description: The JWT. A query parameter because a browser `WebSocket` handshake can't carry an `Authorization` header.
-          schema:
-            type: string
         - name: client_id
           in: query
           required: false
@@ -1131,7 +1192,7 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/previews:
-    get:
+    post:
       summary: Generate preview
       description: |
         Generates the preview for the current workspace state and publishes a
@@ -2077,16 +2138,21 @@ paths:
 
 components:
   securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-session
+      description: |
+        The browser session: the JWT in an HttpOnly cookie set by the OAuth callback. Requests
+        that change data (POST, PUT, PATCH, DELETE) authenticated this way must send
+        `X-Client-Id`, otherwise they are rejected with `403`. GET requests never change data.
+        With `SESSION_COOKIE_SECURE=false` (local HTTP development only) the cookie is called
+        `ceos_ard_session` and is not `Secure`.
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: JWT token obtained from authentication endpoint
-    bearerQueryAuth:
-      type: apiKey
-      in: query
-      name: authorization
-      description: Same JWT as `bearerAuth`, as a query param. Used by the realtime WebSocket endpoint (`/workspaces/{workspaceId}/ws`), whose browser clients can't set headers on the handshake.
+      description: The same JWT as a header, for scripts, tests and Swagger. Takes precedence over the cookie; no `X-Client-Id` needed.
 
   parameters:
     WorkspaceId:
@@ -2107,6 +2173,9 @@ components:
         realtime events this request causes are withheld from that client's own WebSocket (which
         presents the same id as `client_id`), while other tabs and devices of the same user still
         receive them. Never sent to other clients.
+
+        Required on POST, PUT, PATCH and DELETE requests without an `Authorization` header
+        (cross-site request protection for the session cookie); those are rejected with `403`.
       schema:
         type: string
         pattern: '^[A-Za-z0-9_-]{8,64}$'
@@ -2215,33 +2284,6 @@ components:
       required:
         - error
         - code
-
-    User:
-      type: object
-      required:
-        - id
-        - username
-        - displayName
-        - email
-        - avatar
-      properties:
-        id:
-          type: string
-          description: User ID
-        username:
-          type: string
-          description: GitHub username
-        displayName:
-          type: string
-          description: User's display name
-        email:
-          type: string
-          format: email
-          description: User's email address
-        avatar:
-          type: string
-          format: uri
-          description: URL to user's avatar image
 
     ProposalTitle:
       type: string

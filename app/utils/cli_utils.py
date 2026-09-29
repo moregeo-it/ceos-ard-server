@@ -51,6 +51,7 @@ async def run_checks():
     checks = {
         "CEOS-ARD CLI": check_ceos_ard_cli,
         "Playwright": check_playwright,
+        "Session cookie": check_session_cookie,
     }
     failures = []
     for check_name, check_func in checks.items():
@@ -65,6 +66,14 @@ async def run_checks():
             sys.exit(1)
     else:
         logger.info("All prerequisite checks passed.")
+
+
+async def check_session_cookie():
+    """Every request carries the session cookie, so only exact origins may read responses."""
+    if any("*" in origin for origin in settings.CORS_ORIGINS):
+        raise Exception("CORS_ORIGINS must list exact origins, no wildcards")
+    if settings.ENVIRONMENT == "production" and not settings.SESSION_COOKIE_SECURE:
+        raise Exception("SESSION_COOKIE_SECURE=false is for local development over HTTP only")
 
 
 async def check_playwright():

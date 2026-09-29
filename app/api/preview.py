@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workspaces", tags=["Previews"])
 
 
-@router.get(
+@router.post(
     "/{workspace_id}/previews",
     summary="Generate Previews",
     description="Generate the preview for a workspace (owner only); everyone else sees this build",
