@@ -10,7 +10,7 @@ from app.db.database import get_db
 from app.dependencies import get_github_service
 from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, get_logout_user
 from app.services.github_service import GitHubService
 from app.services.jwt_service import JWTService
 from app.services.token_refresh_service import TokenRefreshService
@@ -56,7 +56,7 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/logout", summary="Logout user", description="Logout user, revoke and clear the provider tokens")
 async def logout(
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_logout_user),
     db: Session = Depends(get_db),
     github_service: GitHubService = Depends(get_github_service),
 ):
