@@ -2,16 +2,15 @@ import logging
 from email.utils import formatdate
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_preview_service
-from app.schemas.error import create_error_detail
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
-from app.utils.http_utils import compute_file_etag, if_none_match_matches
+from app.utils.http_utils import compute_file_etag, if_none_match_matches, internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ async def generate_preview(
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
 ):
-    try:
+    with internal_errors("generate preview", logger):
         generated_previews = await preview_service.generate_preview(db=db, pfs=pfs, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         # Preview HTML is regenerated on every request; never let the browser cache it.
@@ -41,14 +40,6 @@ async def generate_preview(
             media_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting preview for workspace {workspace_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("generate preview", e),
-        ) from e
 
 
 @router.get(
@@ -65,7 +56,7 @@ async def get_preview_static_file(
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
 ):
-    try:
+    with internal_errors("get preview static file", logger):
         # Raises 404 if the asset no longer exists (e.g. it was deleted).
         file = await preview_service.get_preview_static_file(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
@@ -85,14 +76,6 @@ async def get_preview_static_file(
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=cache_headers)
 
         return FileResponse(str(file), headers=cache_headers)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting preview static file {file_path} for workspace {workspace_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("get preview static file", e),
-        ) from e
 
 
 @router.get(
@@ -114,7 +97,7 @@ async def download_preview_document(
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
     media_type = media_types.get(format, "application/octet-stream")
-    try:
+    with internal_errors("download preview document", logger):
         document_file = await preview_service.download_preview_document(
             db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
         )
@@ -125,11 +108,3 @@ async def download_preview_document(
             media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={document_file['name']}"},
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error downloading preview document for workspace {workspace_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("download preview document", e),
-        ) from e

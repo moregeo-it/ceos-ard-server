@@ -1755,7 +1755,7 @@ components:
         - pfs
         - created
         - pr
-        - owner
+        - user_id
       properties:
         id:
           type: string
@@ -1833,7 +1833,7 @@ components:
             - null
           description: Status of the PR
           default: null
-        owner:
+        user_id:
           type: string
           description: The user ID of the workspace owner
 

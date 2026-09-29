@@ -421,6 +421,8 @@ class FileService:
             # In a thread: reads every searchable file. Deliberately lock-free — a racing save
             # yields at worst a stale hit, and the per-file error handling covers deletions.
             return await asyncio.to_thread(self._search_file_contents, files, workspace.abs_path, search_query.lower())
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from e
 

@@ -1,14 +1,14 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.dependencies import get_github_service
-from app.schemas.error import create_error_detail
 from app.schemas.workspace import PFSTypesResponse
 from app.services.auth_service import get_current_user
 from app.services.github_service import GitHubService
+from app.utils.http_utils import internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ async def list_pfs_folders(
     current_user=Depends(get_current_user),
     github_service: GitHubService = Depends(get_github_service),
 ) -> PFSTypesResponse:
-    try:
+    with internal_errors("list PFS folders", logger):
         access_token = current_user["user"].access_token
 
         final_owner = settings.CEOS_ARD_ORG
@@ -75,12 +75,3 @@ async def list_pfs_folders(
         pfs_types = await github_service.get_pfs_types(owner=final_owner, repo=final_repo, token=access_token, branch=final_branch)
         response_pfs_types = [{"id": pfs} for pfs in pfs_types]
         return {"pfsTypes": response_pfs_types}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error listing PFS folders: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_error_detail("list PFS folders", e),
-        ) from e

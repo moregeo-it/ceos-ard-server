@@ -1,13 +1,12 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_file_service
-from app.schemas.error import create_error_detail
 from app.schemas.workspace import (
     CommitRequest,
     CommitResult,
@@ -21,6 +20,7 @@ from app.schemas.workspace import (
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
 from app.utils.git_utils import format_commit
+from app.utils.http_utils import internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +42,8 @@ async def list_workspace_files(
     path: str | None = Query(default="/", description="Path to list files from"),
     recurse: bool = Query(default=False, description="Whether to list files recursively"),
 ):
-    try:
+    with internal_errors("list workspace files", logger):
         return await file_service.get_workspace_files(db=db, path=path, workspace_id=workspace_id, user_id=current_user["user"].id, recurse=recurse)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing workspace files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("list workspace files", e)) from e
 
 
 @router.post(
@@ -65,13 +60,8 @@ async def create(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("create file or folder", logger):
         return await file_service.create(db=db, workspace_id=workspace_id, request_data=create_file_request, user_id=current_user["user"].id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating file or folder: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("create file or folder", e)) from e
 
 
 @router.get(
@@ -86,14 +76,10 @@ async def read_file_content(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("read file", logger):
         file_info = await file_service.read_file_content(db=db, workspace_id=workspace_id, file_path=file_path, user_id=current_user["user"].id)
 
         return Response(content=file_info["content"], media_type=file_info["media_type"], status_code=status.HTTP_200_OK)
-
-    except Exception as e:
-        logger.error(f"Error reading file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("read file", e)) from e
 
 
 @router.put(
@@ -111,7 +97,7 @@ async def store_file_content(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("store file", logger):
         return await file_service.store_file_content(
             db=db,
             workspace_id=workspace_id,
@@ -119,11 +105,6 @@ async def store_file_content(
             content=await request.body(),
             user_id=current_user["user"].id,
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error storing file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("store file", e)) from e
 
 
 @router.delete(
@@ -138,18 +119,13 @@ async def delete(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("delete file", logger):
         deleted_file = await file_service.delete(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         if deleted_file["tracked"]:
             return JSONResponse(content=deleted_file["file_details"], status_code=status.HTTP_200_OK)
         else:
             return Response(content=None, status_code=status.HTTP_204_NO_CONTENT)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("delete file", e)) from e
 
 
 @router.patch(
@@ -167,7 +143,7 @@ async def patch_file(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("update file", logger):
         return await file_service.update_file(
             db=db,
             file_path=file_path,
@@ -175,11 +151,6 @@ async def patch_file(
             operation_request=operation_request,
             user_id=current_user["user"].id,
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating file: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("update file", e)) from e
 
 
 @router.get(
@@ -196,13 +167,8 @@ async def search_files(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("search files", logger):
         return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=query, user_id=current_user["user"].id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error searching files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("search files", e)) from e
 
 
 @router.get(
@@ -218,13 +184,8 @@ async def get_changed_files(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("get changed files", logger):
         return {"files": await file_service.get_changed_files(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting changed files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get changed files", e)) from e
 
 
 @router.put(
@@ -243,7 +204,7 @@ async def commit_changes(
     current_user: dict[str, Any] = Depends(require_github_user),
     file_service: FileService = Depends(get_file_service),
 ):
-    try:
+    with internal_errors("commit changes", logger):
         commit, merged_remote = await file_service.persist_changes(
             db=db,
             workspace_id=workspace_id,
@@ -251,11 +212,6 @@ async def commit_changes(
             user=current_user["user"],
         )
         return {**format_commit(commit), "merged_remote": merged_remote}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error committing changes: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("commit changes", e)) from e
 
 
 @router.get(
@@ -291,8 +247,5 @@ async def get_file_context(
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
-    try:
+    with internal_errors("get file context", logger):
         return await file_service.get_file_context(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
-    except Exception as e:
-        logger.error(f"Error getting file context: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail("get file context", e)) from e
