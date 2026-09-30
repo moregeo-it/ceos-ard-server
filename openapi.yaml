@@ -1248,7 +1248,7 @@ paths:
     get:
       summary: Get the current preview
       description: |
-        The owner's last generated preview for the workspace's PFS list, as `GET .../previews`
+        The owner's last generated preview for the workspace's PFS list, as `POST .../previews`
         returned it, without building anything. For any user with access. Clients call it on
         `preview.generated` and when `workspace.updated` changes `pfs`.
       operationId: getCurrentPreview
@@ -2593,7 +2593,7 @@ components:
         - `file.committed`: changes committed via `PUT .../diffs`.
         - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic merge on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
         - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
-        - `preview.generated`: the owner generated the preview via `GET .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
+        - `preview.generated`: the owner generated the preview via `POST .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
         - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
@@ -2868,7 +2868,7 @@ components:
 
     WorkspaceEventPreviewGenerated:
       description: |
-        The owner generated the preview via `GET .../previews` for the PFS list in `pfs` (the
+        The owner generated the preview via `POST .../previews` for the PFS list in `pfs` (the
         workspace's `pfs`). Only the owner builds; viewers, commenters and the owner's other tabs
         fetch the result with `GET .../previews/current` instead of building themselves.
       allOf:
