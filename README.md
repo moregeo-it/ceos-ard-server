@@ -201,8 +201,9 @@ pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 4096
 The API will be available at:
 
 - **API**: <http://localhost:8000>
-- **Interactive Docs**: <http://localhost:8000/docs>
-- **ReDoc**: <http://localhost:8000/redoc>
+
+The API contract is [`openapi.yaml`](openapi.yaml); open it in any OpenAPI viewer. The server serves no
+docs pages of its own.
 
 ## 🧪 Development
 
@@ -363,8 +364,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 ## 🔐 Security Features
 
 - **OAuth 2.0**: Secure authentication via GitHub/Google
-- **Session Cookie**: The JWT in an `HttpOnly; Secure; SameSite=Strict` `__Host-session` cookie; scripts, tests
-  and Swagger can still send it as an `Authorization: Bearer` header
+- **Session Cookie**: The JWT in an `HttpOnly; Secure; SameSite=Strict` `__Host-session` cookie; scripts and
+  tests can still send it as an `Authorization: Bearer` header
 - **Cross-Site Request Protection**: POST, PUT, PATCH and DELETE requests authenticated by the cookie must send
   `X-Client-Id`, which a foreign page can't add without passing the CORS check. So must the three GET requests that
   change data (workspace and proposal refresh the pull request state, download builds the document)

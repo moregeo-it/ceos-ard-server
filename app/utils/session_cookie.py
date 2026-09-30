@@ -33,7 +33,7 @@ def bearer_token(connection: HTTPConnection) -> str | None:
 
 
 def request_token(connection: HTTPConnection) -> str | None:
-    """The caller's JWT: a bearer header (scripts, tests, Swagger) wins over the session cookie."""
+    """The caller's JWT: a bearer header (scripts, tests) wins over the session cookie."""
     return bearer_token(connection) or connection.cookies.get(settings.SESSION_COOKIE_NAME) or None
 
 

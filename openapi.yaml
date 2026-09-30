@@ -2163,7 +2163,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: The same JWT as a header, for scripts, tests and Swagger. Takes precedence over the cookie; no `X-Client-Id` needed.
+      description: The same JWT as a header, for scripts and tests. Takes precedence over the cookie; no `X-Client-Id` needed.
 
   parameters:
     WorkspaceId:

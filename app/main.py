@@ -30,7 +30,9 @@ async def lifespan(app: FastAPI):
     await dependencies.github_service.aclose()
 
 
-app = FastAPI(title=title, version=version, lifespan=lifespan)
+# No generated docs: /docs and /redoc would load CDN scripts onto the origin that holds the session cookie.
+# The API contract is openapi.yaml.
+app = FastAPI(title=title, version=version, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 Base.metadata.create_all(bind=engine)
 
