@@ -75,6 +75,19 @@ class GitHubService:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
 
+    async def revoke_oauth_token(self, token: str) -> None:
+        """Revoke one OAuth token of this app. The user's authorization of the app stays, so the
+        next login skips the consent screen. Authenticated as the app (client id and secret)."""
+        response = await self.client.request(
+            "DELETE",
+            f"{self.base_url}/applications/{settings.GITHUB_CLIENT_ID}/token",
+            auth=(settings.GITHUB_CLIENT_ID, settings.GITHUB_CLIENT_SECRET),
+            headers=self.default_headers,
+            json={"access_token": token},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+
     def _get_auth_headers(self, token: str, auth_type: str = "Bearer") -> dict[str, str]:
         """Create headers with authorization token.
 

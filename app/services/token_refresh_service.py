@@ -2,9 +2,11 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.oauth.handler import oauth
 
@@ -77,6 +79,13 @@ class TokenRefreshService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Failed to refresh Google token. Please re-authenticate.",
             ) from e
+
+    @staticmethod
+    async def revoke_google_token(token: str) -> None:
+        """Revoke a Google access or refresh token; a refresh token also invalidates the access tokens issued from it."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(settings.GOOGLE_REVOKE_URL, data={"token": token})
+        response.raise_for_status()
 
     @staticmethod
     async def refresh_token_for_user(user: User, db: Session) -> dict[str, Any]:

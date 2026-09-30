@@ -10,9 +10,9 @@ from app import dependencies
 from app.api import auth, collab, core, file, preview, share, workspace
 from app.config import settings
 from app.db.database import Base, engine
-from app.utils.session_cookie import bearer_token
 from app.utils.cli_utils import load_project_info, run_checks
 from app.utils.request_context import CLIENT_ID_HEADER, reset_client_id, set_client_id, validate_client_id
+from app.utils.session_cookie import bearer_token
 
 logging.basicConfig(level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG)
 logger = logging.getLogger(__name__)
