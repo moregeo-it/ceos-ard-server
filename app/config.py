@@ -46,6 +46,7 @@ class Settings:
     GOOGLE_CLIENT_SCOPE: str = "openid email profile"
     GOOGLE_API_BASE_URL: str = "https://www.googleapis.com"
     GOOGLE_DISCOVERY_URL: str = "https://accounts.google.com/.well-known/openid-configuration"
+    GOOGLE_REVOKE_URL: str = "https://oauth2.googleapis.com/revoke"
 
     CEOS_ARD_ORG: str = os.getenv("CEOS_ARD_ORG", "ceos-org")
     CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
