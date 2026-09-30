@@ -113,7 +113,7 @@ The session cookie is then first-party, so browsers don't block it as a third-pa
 
 For local development over plain HTTP in **Safari**, set `SESSION_COOKIE_SECURE=false`: Safari drops
 `Secure` cookies on `http://localhost`. Chrome and Firefox accept them there, so the default works.
-Never use this setting in production; the server refuses to start with it.
+Only for `ENVIRONMENT=development`; the server refuses to start with it otherwise.
 
 ### 5. OAuth Setup
 
@@ -366,7 +366,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 - **Session Cookie**: The JWT in an `HttpOnly; Secure; SameSite=Strict` `__Host-session` cookie; scripts, tests
   and Swagger can still send it as an `Authorization: Bearer` header
 - **Cross-Site Request Protection**: POST, PUT, PATCH and DELETE requests authenticated by the cookie must send
-  `X-Client-Id`, which a foreign page can't add without passing the CORS check; GET requests never change data
+  `X-Client-Id`, which a foreign page can't add without passing the CORS check; GET requests only refresh from GitHub or rebuild the preview
 - **OAuth State**: Signed session cookie with `itsdangerous` between login and callback
 - **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only
 - **Input Sanitization**: Protection against malicious input

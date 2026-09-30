@@ -1206,6 +1206,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/PfsType'
+        - $ref: '#/components/parameters/ClientId'
       responses:
         '200':
           description: Preview generated successfully

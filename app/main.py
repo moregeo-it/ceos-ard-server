@@ -10,6 +10,7 @@ from app import dependencies
 from app.api import auth, collab, core, file, preview, share, workspace
 from app.config import settings
 from app.db.database import Base, engine
+from app.utils.session_cookie import bearer_token
 from app.utils.cli_utils import load_project_info, run_checks
 from app.utils.request_context import CLIENT_ID_HEADER, reset_client_id, set_client_id, validate_client_id
 
@@ -44,7 +45,7 @@ async def client_id_context(request: Request, call_next):
     # Cross-site request protection for the session cookie: another page can make the browser send the
     # cookie, but can't add a custom header without a CORS preflight, which only CORS_ORIGINS pass.
     # A bearer header is not sent automatically, so those requests need no client id.
-    if request.method in _STATE_CHANGING_METHODS and not request.headers.get(CLIENT_ID_HEADER) and "authorization" not in request.headers:
+    if request.method in _STATE_CHANGING_METHODS and not request.headers.get(CLIENT_ID_HEADER) and not bearer_token(request):
         return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": f"The {CLIENT_ID_HEADER} header is required"})
 
     # Realtime echo filter: remember which client sent the request (app/utils/request_context.py).

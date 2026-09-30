@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -12,8 +13,11 @@ from app.utils.session_cookie import request_token
 
 logger = logging.getLogger(__name__)
 
+# Only declares the bearer scheme for /docs; request_token reads the header itself
+bearer_scheme = HTTPBearer(auto_error=False)
 
-async def get_jwt_token(request: Request) -> str:
+
+async def get_jwt_token(request: Request, _: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
     """The caller's JWT from the `Authorization: Bearer` header or the session cookie."""
     token = request_token(request)
     if not token:
@@ -112,6 +116,7 @@ async def get_current_user(
 async def get_optional_current_user(
     request: Request,
     db: Session = Depends(get_db),
+    _: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict[str, Any] | None:
     """Same as get_current_user, but returns None instead of raising when no/invalid token is present.
 

@@ -23,9 +23,14 @@ def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/", secure=settings.SESSION_COOKIE_SECURE, httponly=True, samesite="strict")
 
 
-def request_token(connection: HTTPConnection) -> str | None:
-    """The caller's JWT: an `Authorization: Bearer` header (scripts, tests, Swagger) wins over the session cookie."""
+def bearer_token(connection: HTTPConnection) -> str | None:
+    """The JWT from an `Authorization: Bearer` header; None for no header, another scheme or an empty credential."""
     scheme, _, credentials = connection.headers.get("authorization", "").partition(" ")
-    if scheme.lower() == "bearer" and credentials.strip():
-        return credentials.strip()
-    return connection.cookies.get(settings.SESSION_COOKIE_NAME) or None
+    if scheme.lower() != "bearer":
+        return None
+    return credentials.strip() or None
+
+
+def request_token(connection: HTTPConnection) -> str | None:
+    """The caller's JWT: a bearer header (scripts, tests, Swagger) wins over the session cookie."""
+    return bearer_token(connection) or connection.cookies.get(settings.SESSION_COOKIE_NAME) or None

@@ -14,7 +14,7 @@ from app.services.jwt_service import JWTService
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
 from app.utils.http_utils import internal_errors
-from app.utils.session_cookie import clear_session_cookie, set_session_cookie
+from app.utils.session_cookie import bearer_token, clear_session_cookie, set_session_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ async def validate_auth(request: Request, response: Response, token: str = Depen
             f"JWT valid for {int(time_until_expiry.total_seconds() / 60)} minutes{', issued fresh JWT' if token_refreshed else ''}"
         )
 
-        from_header = request.headers.get("authorization", "").lower().startswith("bearer ")
+        from_header = bearer_token(request) is not None
         if token_refreshed and not from_header:
             set_session_cookie(response, token, jwt_exp)
 
