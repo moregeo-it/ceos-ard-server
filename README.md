@@ -366,10 +366,12 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 - **Session Cookie**: The JWT in an `HttpOnly; Secure; SameSite=Strict` `__Host-session` cookie; scripts, tests
   and Swagger can still send it as an `Authorization: Bearer` header
 - **Cross-Site Request Protection**: POST, PUT, PATCH and DELETE requests authenticated by the cookie must send
-  `X-Client-Id`, which a foreign page can't add without passing the CORS check; GET requests only refresh from GitHub or rebuild the preview
+  `X-Client-Id`, which a foreign page can't add without passing the CORS check. So must the three GET requests that
+  change data (workspace and proposal refresh the pull request state, download builds the document)
 - **User Content Sandbox**: Workspace files and previews are served with `Content-Security-Policy: sandbox`, so a
   script in them can't run on the API origin with the session cookie
-- **OAuth State**: Signed session cookie with `itsdangerous` between login and callback
+- **OAuth State**: Signed `__Host-oauth_state` cookie with `itsdangerous` between login and callback; the prefix keeps
+  sibling hosts of the same site from planting their own state
 - **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only
 - **Input Sanitization**: Protection against malicious input
 - **User Isolation**: Workspaces are isolated per user

@@ -344,6 +344,7 @@ paths:
         - Workspaces
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ClientId'
       responses:
         '200':
           description: Workspace details
@@ -351,6 +352,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '403':
+          description: Forbidden - missing `X-Client-Id` (this request refreshes the pull request state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: Workspace not found
           content:
@@ -1340,6 +1347,7 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/PfsType'
         - $ref: '#/components/parameters/DocumentFormat'
+        - $ref: '#/components/parameters/ClientId'
       responses:
         '200':
           description: Preview document content downloaded successfully
@@ -1353,7 +1361,7 @@ paths:
                 type: string
                 format: binary
         '403':
-          description: Forbidden - only the workspace owner can change the PFS selection
+          description: Forbidden - missing `X-Client-Id`, or only the workspace owner can change the PFS selection
           content:
             application/json:
               schema:
@@ -1387,6 +1395,7 @@ paths:
         - Workspaces
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ClientId'
       responses:
         '200':
           description: Proposal information retrieved successfully
@@ -1409,7 +1418,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - only the workspace owner can view the proposal
+          description: Forbidden - missing `X-Client-Id`, or only the workspace owner can view the proposal
           content:
             application/json:
               schema:
@@ -2177,7 +2186,9 @@ components:
         receive them. Never sent to other clients.
 
         Required on POST, PUT, PATCH and DELETE requests without an `Authorization` header
-        (cross-site request protection for the session cookie); those are rejected with `403`.
+        (cross-site request protection for the session cookie), and on the GET requests that
+        change data (`GET /workspaces/{workspaceId}`, `.../proposal`, `.../download`); those are
+        rejected with `403`.
       schema:
         type: string
         pattern: '^[A-Za-z0-9_-]{8,64}$'

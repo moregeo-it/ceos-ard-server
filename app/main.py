@@ -12,7 +12,7 @@ from app.config import settings
 from app.db.database import Base, engine
 from app.utils.cli_utils import load_project_info, run_checks
 from app.utils.request_context import CLIENT_ID_HEADER, reset_client_id, set_client_id, validate_client_id
-from app.utils.session_cookie import bearer_token
+from app.utils.session_cookie import lacks_client_id
 
 logging.basicConfig(level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -35,17 +35,17 @@ app = FastAPI(title=title, version=version, lifespan=lifespan)
 Base.metadata.create_all(bind=engine)
 
 # Holds the OAuth state between /auth/login and the callback; Lax, because GitHub redirects back cross-site
-app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY, https_only=settings.SESSION_COOKIE_SECURE)
+app.add_middleware(
+    SessionMiddleware, secret_key=settings.SECRET_KEY, session_cookie=settings.OAUTH_STATE_COOKIE_NAME, https_only=settings.SESSION_COOKIE_SECURE
+)
 
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 @app.middleware("http")
 async def client_id_context(request: Request, call_next):
-    # Cross-site request protection for the session cookie: another page can make the browser send the
-    # cookie, but can't add a custom header without a CORS preflight, which only CORS_ORIGINS pass.
-    # A bearer header is not sent automatically, so those requests need no client id.
-    if request.method in _STATE_CHANGING_METHODS and not request.headers.get(CLIENT_ID_HEADER) and not bearer_token(request):
+    # Cross-site request protection for the session cookie (see lacks_client_id)
+    if request.method in _STATE_CHANGING_METHODS and lacks_client_id(request):
         return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": f"The {CLIENT_ID_HEADER} header is required"})
 
     # Realtime echo filter: remember which client sent the request (app/utils/request_context.py).

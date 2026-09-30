@@ -11,6 +11,7 @@ from app.dependencies import get_preview_service
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
 from app.utils.http_utils import USER_CONTENT_HEADERS, compute_file_etag, if_none_match_matches, internal_errors
+from app.utils.session_cookie import require_client_id
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,8 @@ async def get_preview_static_file(
 @router.get(
     "/{workspace_id}/download",
     summary="Download Previews PDF Document or DOCX",
+    # Builds the document for the owner
+    dependencies=[Depends(require_client_id)],
     description="Download Previews PDF Document or DOCX for a workspace",
     status_code=status.HTTP_200_OK,
 )
