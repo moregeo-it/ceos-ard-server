@@ -20,7 +20,7 @@ from app.schemas.workspace import (
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
 from app.utils.git_utils import format_commit
-from app.utils.http_utils import internal_errors
+from app.utils.http_utils import USER_CONTENT_HEADERS, internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,9 @@ async def read_file_content(
     with internal_errors("read file", logger):
         file_info = await file_service.read_file_content(db=db, workspace_id=workspace_id, file_path=file_path, user_id=current_user["user"].id)
 
-        return Response(content=file_info["content"], media_type=file_info["media_type"], status_code=status.HTTP_200_OK)
+        return Response(
+            content=file_info["content"], media_type=file_info["media_type"], status_code=status.HTTP_200_OK, headers=USER_CONTENT_HEADERS
+        )
 
 
 @router.put(

@@ -367,6 +367,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
   and Swagger can still send it as an `Authorization: Bearer` header
 - **Cross-Site Request Protection**: POST, PUT, PATCH and DELETE requests authenticated by the cookie must send
   `X-Client-Id`, which a foreign page can't add without passing the CORS check; GET requests only refresh from GitHub or rebuild the preview
+- **User Content Sandbox**: Workspace files and previews are served with `Content-Security-Policy: sandbox`, so a
+  script in them can't run on the API origin with the session cookie
 - **OAuth State**: Signed session cookie with `itsdangerous` between login and callback
 - **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only
 - **Input Sanitization**: Protection against malicious input

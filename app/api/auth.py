@@ -145,7 +145,11 @@ async def validate_auth(request: Request, response: Response, token: str = Depen
 
         if token_refreshed:
             jwt_data = JWTService.create_access_token(user)
-            token, jwt_exp = jwt_data["access_token"], datetime.fromisoformat(jwt_data["expires_at"])
+            fresh_exp = datetime.fromisoformat(jwt_data["expires_at"])
+            # A GitHub session can't be extended past its provider token (see create_access_token)
+            token_refreshed = int(fresh_exp.timestamp()) > payload["exp"]
+            if token_refreshed:
+                token, jwt_exp = jwt_data["access_token"], fresh_exp
         logger.info(
             f"Token validation for {user.username} ({provider.value}): "
             f"JWT valid for {int(time_until_expiry.total_seconds() / 60)} minutes{', issued fresh JWT' if token_refreshed else ''}"

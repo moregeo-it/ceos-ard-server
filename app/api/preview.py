@@ -10,7 +10,7 @@ from app.db.database import get_db
 from app.dependencies import get_preview_service
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
-from app.utils.http_utils import compute_file_etag, if_none_match_matches, internal_errors
+from app.utils.http_utils import USER_CONTENT_HEADERS, compute_file_etag, if_none_match_matches, internal_errors
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def generate_preview(
             content=generated_previews,
             status_code=status.HTTP_200_OK,
             media_type="text/html",
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "no-store", **USER_CONTENT_HEADERS},
         )
 
 
@@ -56,7 +56,9 @@ async def get_current_preview(
 ):
     with internal_errors("get current preview", logger):
         html = await preview_service.get_current_preview(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return Response(content=html, status_code=status.HTTP_200_OK, media_type="text/html", headers={"Cache-Control": "no-store"})
+        return Response(
+            content=html, status_code=status.HTTP_200_OK, media_type="text/html", headers={"Cache-Control": "no-store", **USER_CONTENT_HEADERS}
+        )
 
 
 @router.get(
@@ -92,7 +94,7 @@ async def get_preview_static_file(
         if if_none_match and if_none_match_matches(if_none_match, etag):
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=cache_headers)
 
-        return FileResponse(str(file), headers=cache_headers)
+        return FileResponse(str(file), headers={**cache_headers, **USER_CONTENT_HEADERS})
 
 
 @router.get(
