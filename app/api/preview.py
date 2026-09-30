@@ -91,10 +91,12 @@ async def get_preview_static_file(
         }
 
         if_none_match = request.headers.get("if-none-match")
+        # Also on the 304: browsers update a cached response's headers from it
+        headers = {**cache_headers, **USER_CONTENT_HEADERS}
         if if_none_match and if_none_match_matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=cache_headers)
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
 
-        return FileResponse(str(file), headers={**cache_headers, **USER_CONTENT_HEADERS})
+        return FileResponse(str(file), headers=headers)
 
 
 @router.get(
