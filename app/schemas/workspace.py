@@ -16,6 +16,11 @@ class WorkspaceStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class ViewerRole(str, Enum):
+    OWNER = "owner"
+    READONLY = "readonly"
+
+
 class SyncStatus(str, Enum):
     UP_TO_DATE = "up_to_date"
     UPDATED = "updated"  # fast-forwarded to remote
@@ -68,6 +73,9 @@ class WorkspaceResponse(BaseModel):
     updated_at: datetime
     archived_at: datetime | None
     deletion_at: datetime | None  # Computed from archived_at + 1 month
+    viewer_role: ViewerRole = Field(description="The current authenticated user's effective role on this workspace")
+    owner_username: str | None = Field(None, description="GitHub username of the workspace owner")
+    owner_full_name: str | None = Field(None, description="Full name of the workspace owner")
 
 
 class ProposalRequest(BaseModel):

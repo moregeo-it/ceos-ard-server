@@ -23,3 +23,12 @@ repos:
     hooks:
       - id: editorconfig-checker
         alias: ec
+
+  - repo: local
+    hooks:
+      - id: check-event-contract
+        name: Check realtime event contract (events.py vs openapi.yaml)
+        entry: python scripts/check_event_contract.py
+        language: system
+        pass_filenames: false
+        files: ^(openapi\.yaml|app/schemas/events\.py|scripts/check_event_contract\.py)$

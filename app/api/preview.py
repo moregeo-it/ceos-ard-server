@@ -20,7 +20,7 @@ router = APIRouter(prefix="/workspaces", tags=["Previews"])
 @router.get(
     "/{workspace_id}/previews",
     summary="Generate Previews",
-    description="Generate Previews for a workspace",
+    description="Generate the preview for a workspace (owner only); everyone else sees this build",
     status_code=status.HTTP_200_OK,
 )
 async def generate_preview(
@@ -40,6 +40,23 @@ async def generate_preview(
             media_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
+
+
+@router.get(
+    "/{workspace_id}/previews/current",
+    summary="Get the current preview",
+    description="The owner's last generated preview for the workspace's PFS list, without building",
+    status_code=status.HTTP_200_OK,
+)
+async def get_current_preview(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    preview_service: PreviewService = Depends(get_preview_service),
+):
+    with internal_errors("get current preview", logger):
+        html = await preview_service.get_current_preview(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return Response(content=html, status_code=status.HTTP_200_OK, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 @router.get(
