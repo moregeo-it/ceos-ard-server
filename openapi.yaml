@@ -2293,16 +2293,18 @@ components:
   schemas:
     Error:
       type: object
-      properties:
-        error:
-          type: string
-          description: Error message
-        code:
-          type: string
-          description: Error code
+      description: |
+        The error body of every non-2xx response: a message in `detail`, or for a `422` the list
+        of field errors.
       required:
-        - error
-        - code
+        - detail
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
 
     ProposalTitle:
       type: string
