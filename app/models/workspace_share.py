@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, Column, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, String, UniqueConstraint
 from sqlalchemy import Enum as SqlAlchemyEnum
 from sqlalchemy.orm import relationship
 
@@ -69,7 +69,6 @@ class WorkspaceShareLink(Base):
     token = Column(String, nullable=False, unique=True, index=True, default=lambda: secrets.token_urlsafe(32))
 
     mode = Column(SqlAlchemyEnum(ShareMode), nullable=False)
-    is_active = Column(Boolean, nullable=False, default=True)
     expires_at = Column(UTCDateTime, nullable=True)
 
     created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
@@ -83,4 +82,4 @@ class WorkspaceShareLink(Base):
         return f"{settings.CLIENT_URL}/share/{self.token}"
 
     def __repr__(self):
-        return f"<WorkspaceShareLink id={self.id} workspace_id={self.workspace_id} mode={self.mode} is_active={self.is_active}>"
+        return f"<WorkspaceShareLink id={self.id} workspace_id={self.workspace_id} mode={self.mode}>"

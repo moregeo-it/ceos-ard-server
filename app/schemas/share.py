@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.workspace_share import ShareMode, ShareStatus
+from app.schemas.workspace import WorkspaceResponse
 
 
 class ShareCreateRequest(BaseModel):
@@ -43,7 +44,6 @@ class ShareLinkUpdateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     mode: ShareMode | None = None
-    is_active: bool | None = Field(None, alias="isActive")
     expires_at: datetime | None = Field(None, alias="expiresAt")
 
 
@@ -53,7 +53,6 @@ class WorkspaceShareLinkResponse(BaseModel):
     id: str
     workspace_id: str = Field(alias="workspaceId")
     mode: ShareMode
-    is_active: bool = Field(alias="isActive")
     url: str = Field(description="The full shareable URL ({clientUrl}/share/{token})")
     created_by_user_id: str = Field(alias="createdBy")
     created_at: datetime = Field(alias="createdAt")
@@ -66,4 +65,10 @@ class ShareLinkPreview(BaseModel):
     workspace_title: str = Field(alias="workspaceTitle")
     owner_display_name: str = Field(alias="ownerDisplayName")
     mode: ShareMode
-    is_active: bool = Field(alias="isActive")
+
+
+class RedeemResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    share: WorkspaceShareResponse | None = Field(description="None for the workspace owner, who needs no share")
+    workspace: WorkspaceResponse
