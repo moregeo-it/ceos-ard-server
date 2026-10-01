@@ -61,14 +61,14 @@ async def _reject(websocket: WebSocket, code: int, reason: str) -> None:
     await websocket.close(code=code, reason=reason)
 
 
-def _deliverable(event: dict[str, Any], user_id: str, client_id: str | None) -> bool:
+def _targeted(event: dict[str, Any], user_id: str) -> bool:
     target_user_id = event.get("target_user_id")
-    if target_user_id is not None and target_user_id != user_id:
-        return False
-    # Echo filter: only the tab that made the change is skipped, so user and client id must both match.
-    if client_id is not None and event.get("actor_user_id") == user_id and event.get("actor_client_id") == client_id:
-        return False
-    return True
+    return target_user_id is None or target_user_id == user_id
+
+
+def _own_change(event: dict[str, Any], user_id: str, client_id: str | None) -> bool:
+    """Echo filter: the tab that made the change already applied it, so user and client id must both match."""
+    return client_id is not None and event.get("actor_user_id") == user_id and event.get("actor_client_id") == client_id
 
 
 @router.websocket("/{workspace_id}/ws")
@@ -111,9 +111,9 @@ async def workspace_ws(websocket: WebSocket, workspace_id: str):
     finally:
         db.close()
 
-    await websocket.accept()
-
     try:
+        # Inside the try: a client that is gone by now must not leave its queue subscribed
+        await websocket.accept()
         # A task group runs the outbound writer and the inbound reader concurrently; whichever ends
         # first cancels the other. Using anyio (not raw asyncio tasks) keeps cancellation aligned
         # with Starlette's own WebSocket cancel scope so the handler unwinds cleanly on disconnect.
@@ -145,13 +145,13 @@ async def workspace_ws(websocket: WebSocket, workspace_id: str):
                         await close_and_stop(item.code, item.reason)
                         return
 
-                    if not _deliverable(item, user_id, client_id):
+                    if not _targeted(item, user_id):
                         continue
-
-                    await websocket.send_text(json.dumps({k: v for k, v in item.items() if k not in _INTERNAL_FIELDS}, default=str))
+                    if not _own_change(item, user_id, client_id):
+                        await websocket.send_text(json.dumps({k: v for k, v in item.items() if k not in _INTERNAL_FIELDS}, default=str))
 
                     if item["type"] in _CLOSING_EVENTS:
-                        # Terminal event delivered; end the connection.
+                        # Terminal event: end the connection, also for the tab that caused it
                         await close_and_stop(WS_CLOSE_ACCESS_REVOKED, "access revoked")
                         return
 
