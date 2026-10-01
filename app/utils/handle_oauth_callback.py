@@ -48,10 +48,9 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
         logger.info(f"User {user_to_use.username} logged in successfully via {provider}")
         return response
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error in {provider} callback: {e}")
+        # A browser navigation: every failure, expected or not, lands on the editor's error page
+        logger.error(f"{provider} callback failed: {getattr(e, 'detail', e)}")
         return RedirectResponse(
             status_code=status.HTTP_302_FOUND,
             url=f"{settings.CLIENT_URL}/auth/error?message=authentication_failed&provider={provider}",

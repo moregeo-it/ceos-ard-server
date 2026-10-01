@@ -750,8 +750,10 @@ class WorkspaceService:
             if not pull_request:
                 return None
 
-            self._apply_pull_request_state(workspace, pull_request)
+            archived = self._apply_pull_request_state(workspace, pull_request)
             db.commit()
+            # A merged or closed proposal archives the workspace here too; connected tabs must learn it
+            self._publish_status_change(workspace.id, user_id, archived=archived)
 
             return self._to_proposal(pull_request)
         except HTTPException:
