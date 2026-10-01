@@ -1,23 +1,23 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_share_service
-from app.models.user import IdentityProvider
 from app.schemas.share import (
+    RedeemResponse,
     ShareCreateRequest,
     ShareLinkCreateRequest,
+    ShareLinkPreview,
     ShareLinkUpdateRequest,
     ShareUpdateRequest,
     WorkspaceShareLinkResponse,
     WorkspaceShareResponse,
 )
 from app.schemas.workspace import WorkspaceResponse
-from app.services.auth_service import get_optional_current_user, require_github_user
+from app.services.auth_service import require_github_user
 from app.services.share_service import ShareService
 from app.utils.http_utils import internal_errors
 
@@ -166,27 +166,32 @@ async def delete_workspace_share_link(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get(
+    "/share-links/{token}",
+    summary="Preview a share link",
+    description="What a link leads to, for the share page before login. Public: no sensitive data.",
+    response_model=ShareLinkPreview,
+)
+async def get_share_link_preview(token: str, db: Session = Depends(get_db), share_service: ShareService = Depends(get_share_service)):
+    with internal_errors("preview share link", logger):
+        return await share_service.get_share_link_preview(db=db, token=token)
+
+
 @router.post(
     "/share-links/{token}/redeem",
     summary="Redeem a share link",
-    status_code=status.HTTP_200_OK,
+    description="Grant the logged-in GitHub user the link's access to the workspace",
+    response_model=RedeemResponse,
 )
 async def redeem_share_link(
     token: str,
     db: Session = Depends(get_db),
-    current_user: dict[str, Any] | None = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
     with internal_errors("redeem share link", logger):
-        if not current_user:
-            preview = await share_service.get_share_link_preview(db=db, token=token)
-            return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=preview.model_dump(by_alias=True))
-
-        if current_user["provider"] != IdentityProvider.github:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace share links require GitHub authentication")
         share, workspace = await share_service.redeem_share_link(db=db, token=token, user=current_user["user"])
-
-        return {
-            "share": WorkspaceShareResponse.model_validate(share).model_dump(by_alias=True) if share else None,
-            "workspace": WorkspaceResponse.model_validate(workspace).model_dump(by_alias=True),
-        }
+        return RedeemResponse(
+            share=WorkspaceShareResponse.model_validate(share) if share else None,
+            workspace=WorkspaceResponse.model_validate(workspace),
+        )

@@ -269,7 +269,6 @@ class ShareService:
         link = WorkspaceShareLink(
             workspace_id=workspace_id,
             mode=request.mode,
-            is_active=True,
             expires_at=request.expires_at,
             created_by_user_id=user.id,
         )
@@ -290,7 +289,7 @@ class ShareService:
         self._validate_expires_at(request.expires_at)
 
         for key, value in request.model_dump(exclude_unset=True).items():
-            if key in ("mode", "is_active") and value is None:
+            if key == "mode" and value is None:
                 continue
             setattr(link, key, value)
 
@@ -309,12 +308,12 @@ class ShareService:
         db.delete(link)
         db.commit()
 
-    def _get_active_link_or_404(self, db: Session, token: str) -> tuple[WorkspaceShareLink, GitWorkspace]:
-        """The link behind a token and its workspace; 404 unless the link is active and unexpired."""
+    def _get_live_link_or_404(self, db: Session, token: str) -> tuple[WorkspaceShareLink, GitWorkspace]:
+        """The link behind a token and its workspace; 404 unless the link exists and is unexpired."""
         link = db.query(WorkspaceShareLink).filter(WorkspaceShareLink.token == token).first()
 
-        if not link or not link.is_active or not link.workspace:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid, inactive, or deleted share link")
+        if not link or not link.workspace:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or deleted share link")
 
         if link.expires_at and link.expires_at <= datetime.now(UTC):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This share link has expired")
@@ -322,18 +321,17 @@ class ShareService:
         return link, link.workspace
 
     async def get_share_link_preview(self, db: Session, token: str) -> ShareLinkPreview:
-        link, workspace = self._get_active_link_or_404(db, token)
+        link, workspace = self._get_live_link_or_404(db, token)
         owner = workspace.user
 
         return ShareLinkPreview(
             workspace_title=workspace.title,
             owner_display_name=(owner.full_name or owner.username) if owner else "Unknown",
             mode=link.mode,
-            is_active=link.is_active,
         )
 
     async def redeem_share_link(self, db: Session, token: str, user: User) -> tuple[WorkspaceShare | None, GitWorkspace]:
-        link, workspace = self._get_active_link_or_404(db, token)
+        link, workspace = self._get_live_link_or_404(db, token)
         share = None
 
         if workspace.user_id != user.id:
