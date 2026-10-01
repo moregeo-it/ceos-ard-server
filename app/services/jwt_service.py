@@ -12,7 +12,8 @@ import jwt
 from fastapi import HTTPException, status
 
 from app.config import settings
-from app.models.user import User
+from app.models.user import IdentityProvider, User
+from app.services.token_refresh_service import PROVIDER_EXPIRY_BUFFER
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class JWTService:
         logged out after 8 hours.
 
         The backend handles provider token differences transparently:
-        - GitHub: 8-hour provider token, no refresh (JWT matches provider lifetime)
+        - GitHub: 8-hour provider token, no refresh (the JWT ends when it stops being usable)
         - Google: 1-hour provider token, auto-refreshed (JWT independent of provider)
 
         Args:
@@ -46,6 +47,10 @@ class JWTService:
         # Use 8-hour expiry for both providers (sliding window session)
         expires_delta = timedelta(hours=JWTService.JWT_EXPIRY_HOURS)
         expiry_time = datetime.now(UTC) + expires_delta
+        if user.identity_provider == IdentityProvider.github and user.token_expiry:
+            # A GitHub token can't be refreshed, so the session ends when it stops being usable
+            expiry_time = min(expiry_time, user.token_expiry - PROVIDER_EXPIRY_BUFFER)
+            expires_delta = expiry_time - datetime.now(UTC)
 
         # Create JWT payload
         payload = {

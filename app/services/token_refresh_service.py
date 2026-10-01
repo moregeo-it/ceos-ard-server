@@ -12,6 +12,9 @@ from app.oauth.handler import oauth
 
 logger = logging.getLogger(__name__)
 
+# A provider token counts as expired this long before its actual expiry
+PROVIDER_EXPIRY_BUFFER = timedelta(minutes=5)
+
 
 class TokenRefreshService:
     """Service for refreshing OAuth access tokens.
@@ -127,5 +130,4 @@ class TokenRefreshService:
         if not user.token_expiry:
             # If no expiry is set, assume it might be expired
             return True
-        # Add 5 minute buffer to refresh before actual expiry
-        return datetime.now(UTC) >= (user.token_expiry - timedelta(minutes=5))
+        return datetime.now(UTC) >= user.token_expiry - PROVIDER_EXPIRY_BUFFER

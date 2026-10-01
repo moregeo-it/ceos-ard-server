@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.services.jwt_service import JWTService
 from app.services.share_service import activate_pending_shares
+from app.utils.session_cookie import set_session_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +40,10 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
         # Note: Github does not provider refresh tokens and expires_in, so we only store access_token.
         user_to_use = await create_or_update_user(db, user_info, provider, token)
 
-        # Generate JWT token for client (never expose provider token)
-        # JWT expiry is derived from provider token expiry stored in user.token_expiry
+        # The JWT goes into the HttpOnly session cookie only, never into the redirect URL
         jwt_data = JWTService.create_access_token(user_to_use)
-
-        # Build redirect URL with JWT token (not provider token)
-        redirect_url = (
-            f"{settings.AUTH_SUCCESS_CLIENT_REDIRECT}"
-            f"?access_token={jwt_data['access_token']}"
-            f"&token_type={jwt_data['token_type']}"
-            f"&expires_in={jwt_data['expires_in']}"
-            f"&user_id={user_to_use.id}"
-            f"&username={user_to_use.username}"
-            f"&provider={provider}"
-        )
-
-        response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
+        response = RedirectResponse(url=settings.AUTH_SUCCESS_CLIENT_REDIRECT, status_code=status.HTTP_302_FOUND)
+        set_session_cookie(response, jwt_data["access_token"], datetime.fromisoformat(jwt_data["expires_at"]))
 
         logger.info(f"User {user_to_use.username} logged in successfully via {provider}")
         return response

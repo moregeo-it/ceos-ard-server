@@ -1,8 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.security import HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -10,13 +9,14 @@ from app.db.database import get_db
 from app.dependencies import get_event_broker, get_github_service
 from app.models.user import IdentityProvider
 from app.oauth.handler import oauth
-from app.services.auth_service import get_current_user, get_logout_user
+from app.services.auth_service import get_current_user, get_jwt_token, get_logout_user
 from app.services.github_service import GitHubService
 from app.services.jwt_service import JWTService
 from app.services.token_refresh_service import TokenRefreshService
 from app.utils.handle_oauth_callback import handle_oauth_callback
 from app.utils.handle_user_info_extractor import extract_github_user_info, extract_google_user_info
 from app.utils.http_utils import internal_errors
+from app.utils.session_cookie import bearer_token, clear_session_cookie, set_session_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,9 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     return await handle_oauth_callback(request, db, "google", oauth.google, extract_google_user_info)
 
 
-@router.post("/logout", summary="Logout user", description="Logout user, revoke and clear the provider tokens")
+@router.post("/logout", summary="Logout user", description="Logout user, revoke and clear the provider tokens and the session cookie")
 async def logout(
+    response: Response,
     current_user=Depends(get_logout_user),
     db: Session = Depends(get_db),
     github_service: GitHubService = Depends(get_github_service),
@@ -86,6 +87,8 @@ async def logout(
         # The JWT cannot be invalidated; its realtime sockets close with 4001 (re-login before reconnecting).
         closed_sockets = get_event_broker().close_user_connections(user.id)
 
+        clear_session_cookie(response)
+
         logger.info(f"User {user.username} logged out successfully, provider tokens cleared, {closed_sockets} realtime socket(s) closed")
 
         return {
@@ -95,9 +98,11 @@ async def logout(
 
 
 @router.get("/user")
-async def current_user(current_user=Depends(get_current_user)):
+async def current_user(current_user=Depends(get_current_user), token: str = Depends(get_jwt_token)):
     with internal_errors("get current user", logger):
         user = current_user["user"]
+        # The editor can't read the HttpOnly cookie, so this is how it learns when the session ends
+        expires_at = datetime.fromtimestamp(JWTService.decode_access_token(token)["exp"], tz=UTC)
 
         return {
             "id": user.id,
@@ -107,82 +112,64 @@ async def current_user(current_user=Depends(get_current_user)):
             "created_at": user.created_at,
             "updated_at": user.updated_at,
             "identity_provider": user.identity_provider,
+            "expires_at": expires_at.isoformat(),
         }
 
 
 @router.post(
     "/validate",
-    summary="Validate JWT and refresh if needed",
-    description="Validate JWT token, auto-refresh provider tokens, and return fresh JWT if nearing expiry",
+    summary="Validate the session and refresh it if needed",
+    description="Validate the JWT, auto-refresh provider tokens, and renew the session if it is nearing expiry",
 )
-async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user=Depends(get_current_user)):
-    """Validate JWT and provider tokens, return fresh JWT only if nearing expiry.
+async def validate_auth(request: Request, response: Response, token: str = Depends(get_jwt_token), current_user=Depends(get_current_user)):
+    """Validate the session and renew it within 15 minutes of expiry.
 
-    This endpoint is designed for periodic client polling (e.g., every 5 minutes) to:
-    - Validate the JWT is still valid
-    - Check provider token status
-    - For Google: Auto-refresh provider token if expired (transparent)
-    - For GitHub: Return 401 if provider token expired (requires re-login)
-    - Return a fresh JWT ONLY if current JWT expires within 3 × ping_interval (15 minutes)
+    - Google: the provider token is refreshed transparently (in get_current_user)
+    - GitHub: 401 when the provider token expired (requires re-login)
 
-    This optimization reduces unnecessary JWT generation while ensuring tokens are
-    refreshed before they expire.
-
-    Returns:
-        - 200: Valid, returns current or fresh JWT with user info
-        - 401: JWT expired, provider token expired, or refresh failed
+    A cookie session is renewed by setting a fresh cookie; the JWT is returned in the body only to
+    callers that sent it as a bearer header, so page scripts never get to read it.
     """
     with internal_errors("validate user", logger):
         user = current_user["user"]
         provider = current_user["provider"]
 
-        # Decode current JWT to check expiry
-        jwt_token = authorization.credentials
-        payload = JWTService.decode_access_token(jwt_token)
+        payload = JWTService.decode_access_token(token)
 
-        # Configuration: ping interval in minutes
-        PING_INTERVAL_MINUTES = 5
-        REFRESH_THRESHOLD_MINUTES = 3 * PING_INTERVAL_MINUTES  # 15 minutes
+        # Clients are expected to ping every 5 minutes; refresh within three pings of expiry
+        REFRESH_THRESHOLD_MINUTES = 15
 
-        # Check if JWT is nearing expiry
         jwt_exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
         time_until_expiry = jwt_exp - datetime.now(UTC)
-        should_refresh = time_until_expiry.total_seconds() < (REFRESH_THRESHOLD_MINUTES * 60)
+        token_refreshed = time_until_expiry.total_seconds() < REFRESH_THRESHOLD_MINUTES * 60
 
-        if should_refresh:
-            # Generate fresh JWT (extends session)
+        if token_refreshed:
             jwt_data = JWTService.create_access_token(user)
-            logger.info(
-                f"Token validation for {user.username} ({provider.value}): "
-                f"JWT expiring in {int(time_until_expiry.total_seconds() / 60)} minutes, issued fresh JWT"
-            )
-            access_token = jwt_data["access_token"]
-            token_refreshed = True
-        else:
-            # Return current JWT (still valid for more than 15 minutes)
-            logger.info(
-                f"Token validation for {user.username} ({provider.value}): "
-                f"JWT valid for {int(time_until_expiry.total_seconds() / 60)} minutes, no refresh needed"
-            )
-            jwt_data = {
-                "access_token": jwt_token,
-                "token_type": "Bearer",
-                "expires_in": int(time_until_expiry.total_seconds()),
-                "expires_at": jwt_exp.isoformat(),
-            }
-            access_token = jwt_token
-            token_refreshed = False
+            fresh_exp = datetime.fromisoformat(jwt_data["expires_at"])
+            # A GitHub session can't be extended past its provider token (see create_access_token)
+            token_refreshed = int(fresh_exp.timestamp()) > payload["exp"]
+            if token_refreshed:
+                token, jwt_exp = jwt_data["access_token"], fresh_exp
+        logger.info(
+            f"Token validation for {user.username} ({provider.value}): "
+            f"JWT valid for {int(time_until_expiry.total_seconds() / 60)} minutes{', issued fresh JWT' if token_refreshed else ''}"
+        )
 
-        return {
+        from_header = bearer_token(request) is not None
+        if token_refreshed and not from_header:
+            set_session_cookie(response, token, jwt_exp)
+
+        body = {
             "valid": True,
             "user_id": user.id,
             "email": user.email,
             "username": user.username,
             "provider": provider.value,
             "updated_at": user.updated_at,
-            "token_type": jwt_data["token_type"],
-            "expires_in": jwt_data["expires_in"],
-            "expires_at": jwt_data["expires_at"],
-            "access_token": access_token,
-            "token_refreshed": token_refreshed,  # Indicates if new JWT was issued
+            "expires_in": int((jwt_exp - datetime.now(UTC)).total_seconds()),
+            "expires_at": jwt_exp.isoformat(),
+            "token_refreshed": token_refreshed,
         }
+        if from_header:
+            body |= {"token_type": "Bearer", "access_token": token}
+        return body

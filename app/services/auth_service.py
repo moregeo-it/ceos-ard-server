@@ -1,46 +1,27 @@
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException, Query, Request, status
-from fastapi.security import HTTPBearer
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.user import IdentityProvider, User
 from app.services.jwt_service import JWTService
 from app.services.token_refresh_service import TokenRefreshService
+from app.utils.session_cookie import request_token
 
 logger = logging.getLogger(__name__)
 
 
-bearer_scheme = HTTPBearer(auto_error=False)
-
-
-async def get_jwt_token(
-    request: Request,
-    authorization: str | None = Query(default=None),
-) -> str:
-    """Extract JWT access token.
-
-    Priority:
-    1) Authorization header via HTTP Bearer scheme (expects: "Bearer <token>")
-    2) Query parameter "authorization" (expects: "<token>")
-    """
-    credentials = await bearer_scheme(request)
-    if credentials and credentials.credentials:
-        return credentials.credentials
-
-    if authorization:
-        token = authorization.strip()
-        if token.startswith("Bearer "):
-            token = token[7:].strip()
-        if token:
-            return token
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated - missing token",
-    )
+async def get_jwt_token(request: Request) -> str:
+    """The caller's JWT from the `Authorization: Bearer` header or the session cookie."""
+    token = request_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated - missing token",
+        )
+    return token
 
 
 async def _load_jwt_user(token: str, db: Session) -> User:
@@ -141,9 +122,7 @@ async def get_optional_current_user(
     Used by endpoints that behave differently for authenticated vs. anonymous callers
     (e.g. redeeming a share link, which returns a preview to anonymous callers).
     """
-    credentials = await bearer_scheme(request)
-    token = credentials.credentials if credentials and credentials.credentials else None
-
+    token = request_token(request)
     if not token:
         return None
 

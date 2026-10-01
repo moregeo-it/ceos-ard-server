@@ -75,8 +75,16 @@ class Settings:
     # PFS default type for new PFS documents
     PFS_DEFAULT_TYPE: str = os.getenv("PFS_DEFAULT_TYPE", PFS_DEFAULT_TYPE)
 
-    # One or more CORS origins separated by commas
+    # One or more CORS origins separated by commas. Exact origins only: requests carry the session cookie.
     CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", CLIENT_URL).split(",")
+
+    # The browser session is an HttpOnly cookie on the API host holding the JWT. Set to "false" only for
+    # local development over plain HTTP (Safari drops Secure cookies on http://localhost); this also drops
+    # the __Host- prefix, which requires Secure.
+    SESSION_COOKIE_SECURE: bool = os.getenv("SESSION_COOKIE_SECURE", "true").lower() != "false"
+    SESSION_COOKIE_NAME: str = "__Host-session" if SESSION_COOKIE_SECURE else "ceos_ard_session"
+    # __Host-: a sibling host of the same site can't plant its own OAuth state (login CSRF)
+    OAUTH_STATE_COOKIE_NAME: str = "__Host-oauth_state" if SESSION_COOKIE_SECURE else "ceos_ard_oauth_state"
 
 
 settings = Settings()
