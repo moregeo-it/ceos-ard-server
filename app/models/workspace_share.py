@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
@@ -6,6 +7,7 @@ from sqlalchemy import Boolean, Column, ForeignKey, String, UniqueConstraint
 from sqlalchemy import Enum as SqlAlchemyEnum
 from sqlalchemy.orm import relationship
 
+from app.config import settings
 from app.db.database import Base
 from app.db.types import UTCDateTime
 
@@ -63,6 +65,8 @@ class WorkspaceShareLink(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id = Column(String, ForeignKey("git_workspaces.id"), nullable=False)
     created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # Random rather than signed, so rotating SECRET_KEY doesn't break every link ever sent
+    token = Column(String, nullable=False, unique=True, index=True, default=lambda: secrets.token_urlsafe(32))
 
     mode = Column(SqlAlchemyEnum(ShareMode), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
@@ -73,6 +77,10 @@ class WorkspaceShareLink(Base):
 
     workspace = relationship("GitWorkspace", back_populates="share_links")
     created_by_user = relationship("User", foreign_keys=[created_by_user_id])
+
+    @property
+    def url(self) -> str:
+        return f"{settings.CLIENT_URL}/share/{self.token}"
 
     def __repr__(self):
         return f"<WorkspaceShareLink id={self.id} workspace_id={self.workspace_id} mode={self.mode} is_active={self.is_active}>"

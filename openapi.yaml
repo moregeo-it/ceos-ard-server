@@ -1764,7 +1764,7 @@ paths:
   /workspaces/{workspaceId}/shares/{shareId}:
     patch:
       summary: Change a collaborator's access mode
-      description: Updates the mode (readonly) of an existing share. Owner only.
+      description: Updates the mode (readonly) of an existing share. Owner only. The affected user receives `share.updated`.
       operationId: updateWorkspaceShare
       tags:
         - Sharing
@@ -1880,7 +1880,8 @@ paths:
     post:
       summary: Create a share link
       description: |
-        Generates a signed, mode-bound share link for the workspace. Anyone
+        Generates a mode-bound share link for the workspace. Its token is random and
+        stored with the link, so rotating `SECRET_KEY` does not break links. Anyone
         who opens the link is granted access with this mode once they're
         authenticated.
 
@@ -2167,7 +2168,7 @@ components:
       in: path
       required: true
       description: |
-        Signed, mode-bound share link token from `{clientUrl}/share/{token}`.
+        Random, mode-bound share link token from `{clientUrl}/share/{token}`.
         Invitee-agnostic - not tied to any specific identity, and not a
         session/JWT access token. Grants no access by itself; only
         `POST /share-links/{token}/redeem` (as an authenticated user) does.
@@ -2537,6 +2538,7 @@ components:
         - workspace.updated
         - preview.generated
         - share.revoked
+        - share.updated
         - workspace.archived
         - workspace.deleted
       description: |
@@ -2551,6 +2553,7 @@ components:
         - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
         - `preview.generated`: the owner generated the preview via `GET .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
         - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their connection.
+        - `share.updated`: the owner changed the target's mode via `PATCH .../shares/{shareId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
 
@@ -2588,6 +2591,7 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
         - $ref: '#/components/schemas/WorkspaceEventPreviewGenerated'
         - $ref: '#/components/schemas/WorkspaceEventShareRevoked'
+        - $ref: '#/components/schemas/WorkspaceEventShareUpdated'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
       discriminator:
@@ -2603,6 +2607,7 @@ components:
           workspace.updated: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
           preview.generated: '#/components/schemas/WorkspaceEventPreviewGenerated'
           share.revoked: '#/components/schemas/WorkspaceEventShareRevoked'
+          share.updated: '#/components/schemas/WorkspaceEventShareUpdated'
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
           workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
 
@@ -2783,6 +2788,26 @@ components:
             target_user_id:
               type: string
               description: The user id this event is delivered to (never broadcast to other subscribers).
+
+    WorkspaceEventShareUpdated:
+      description: |
+        The owner changed this user's share mode via `PATCH .../shares/{shareId}`. Delivered only
+        to the affected user (see `target_user_id`), who refetches the workspace for its new
+        `viewer_role`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - target_user_id
+            - mode
+          properties:
+            type:
+              const: share.updated
+            target_user_id:
+              type: string
+              description: The user id this event is delivered to (never broadcast to other subscribers).
+            mode:
+              $ref: '#/components/schemas/ShareMode'
 
     WorkspaceEventWorkspaceArchived:
       description: |

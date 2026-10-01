@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_share_service
+from app.models.user import IdentityProvider
 from app.schemas.share import (
     ShareCreateRequest,
     ShareLinkCreateRequest,
@@ -181,7 +182,7 @@ async def redeem_share_link(
             preview = await share_service.get_share_link_preview(db=db, token=token)
             return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=preview.model_dump(by_alias=True))
 
-        if current_user["provider"] != "github":
+        if current_user["provider"] != IdentityProvider.github:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace share links require GitHub authentication")
         share, workspace = await share_service.redeem_share_link(db=db, token=token, user=current_user["user"])
 
