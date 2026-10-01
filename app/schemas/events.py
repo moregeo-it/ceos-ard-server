@@ -26,6 +26,8 @@ class EventType(str, Enum):
     # The owner generated the preview; every other client fetches GET .../previews/current.
     PREVIEW_GENERATED = "preview.generated"
     SHARE_REVOKED = "share.revoked"
+    # The owner changed this user's mode; sent only to that user, who refetches the workspace
+    SHARE_UPDATED = "share.updated"
     WORKSPACE_ARCHIVED = "workspace.archived"
     WORKSPACE_DELETED = "workspace.deleted"
 
