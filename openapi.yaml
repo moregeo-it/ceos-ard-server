@@ -1914,7 +1914,7 @@ paths:
   /workspaces/{workspaceId}/share-links:
     get:
       summary: List share links for a workspace
-      description: Retrieves all share links (active and inactive) for a workspace. Owner only.
+      description: Retrieves all share links of a workspace. Owner only.
       operationId: listWorkspaceShareLinks
       tags:
         - Sharing
@@ -1956,13 +1956,12 @@ paths:
         who opens the link is granted access with this mode once they're
         authenticated.
 
-        The link's mode and active state are looked up on every use, so the
-        owner can change the mode without needing to reissue a new
-        URL. Deactivating a link is reversible - the same URL works again
-        once `isActive` is set back to `true`. Deleting a link is permanent,
-        so restoring access means creating a brand-new link.
-        Changing an active link's mode does not retroactively change the mode
-        already granted to people who joined earlier through it.
+        A link is an invitation: whoever opens it logs in with GitHub and is
+        then granted access with the link's mode. The mode is looked up on
+        every use, so the owner can change it without reissuing the URL;
+        it does not change the mode already granted to people who joined
+        earlier. Deleting a link is permanent and stops new people from
+        joining; those who joined keep their share.
       operationId: createWorkspaceShareLink
       tags:
         - Sharing
@@ -2011,11 +2010,8 @@ paths:
     patch:
       summary: Update a share link
       description: |
-        Changes a share link's mode, active state, and/or expiry. Owner only.
-        Setting `isActive: false` immediately stops the link from granting
-        new access (existing collaborators who already joined through it are
-        unaffected - revoke them individually via
-        `DELETE /workspaces/{workspaceId}/shares/{shareId}` if needed).
+        Changes a share link's mode and/or expiry. Owner only. To stop a link,
+        delete it.
       operationId: updateWorkspaceShareLink
       tags:
         - Sharing
@@ -2090,19 +2086,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /share-links/{token}:
+    get:
+      summary: Preview a share link
+      description: |
+        What a link leads to, for the share page before login. Public and free of
+        sensitive data: the workspace title, the owner's name and the mode.
+      operationId: getShareLinkPreview
+      tags:
+        - Sharing
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ShareLinkToken'
+      responses:
+        '200':
+          description: Share link preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLinkPreview'
+        '404':
+          description: Invalid, expired, or deleted share link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /share-links/{token}/redeem:
     post:
       summary: Redeem a share link
       description: |
-        Grants the currently authenticated user access to the shared
-        workspace with the appropriate mode.
+        Grants the logged-in GitHub user access to the shared workspace with
+        the link's mode. Visitors who aren't logged in get a plain `401`; the
+        share page shows them `GET /share-links/{token}` instead and redeems
+        after the login.
       operationId: redeemShareLink
       tags:
         - Sharing
-      security:
-        - cookieAuth: []
-        - bearerAuth: []
-        - {}
       parameters:
         - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/ShareLinkToken'
@@ -2112,37 +2132,21 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - share
-                  - workspace
-                properties:
-                  share:
-                    oneOf:
-                      - $ref: '#/components/schemas/WorkspaceShare'
-                      - type: "null"
-                    description: |
-                      Null when the requester is the workspace owner (they
-                      already have full access; no share row is created).
-                  workspace:
-                    $ref: '#/components/schemas/Workspace'
+                $ref: '#/components/schemas/RedeemResponse'
         '401':
-          description: |
-            Not authenticated yet. Body is a share link preview, not a
-            generic error - use it to render context before redirecting to
-            login/onboarding, then call this same endpoint again afterward.
+          description: Not logged in
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ShareLinkPreview'
+                $ref: '#/components/schemas/Error'
         '403':
-          description: This user's access to the workspace was previously revoked by the owner
+          description: Logged in with another provider than GitHub, or this user's access was previously revoked by the owner
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Invalid, inactive, expired, or deleted share link
+          description: Invalid, expired, or deleted share link
           content:
             application/json:
               schema:
@@ -2253,7 +2257,8 @@ components:
         Random, mode-bound share link token from `{clientUrl}/share/{token}`.
         Invitee-agnostic - not tied to any specific identity, and not a
         session/JWT access token. Grants no access by itself; only
-        `POST /share-links/{token}/redeem` (as an authenticated user) does.
+        `POST /share-links/{token}/redeem` (as a logged-in user) does, while
+        `GET /share-links/{token}` shows a public preview.
       schema:
         type: string
 
@@ -2288,16 +2293,18 @@ components:
   schemas:
     Error:
       type: object
-      properties:
-        error:
-          type: string
-          description: Error message
-        code:
-          type: string
-          description: Error code
+      description: |
+        The error body of every non-2xx response: a message in `detail`, or for a `422` the list
+        of field errors.
       required:
-        - error
-        - code
+        - detail
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
 
     ProposalTitle:
       type: string
@@ -3187,14 +3194,12 @@ components:
       type: object
       description: |
         A shareable, mode-bound, invitee-agnostic link for a workspace.
-        Mode and active state are resolved live from this record on every
-        use, not baked into the token, so they can be changed without
-        reissuing the link.
+        The mode is resolved live from this record on every use, not baked
+        into the token, so it can be changed without reissuing the link.
       required:
         - id
         - workspaceId
         - mode
-        - isActive
         - createdBy
         - createdAt
         - url
@@ -3209,9 +3214,6 @@ components:
           description: ID of the workspace this link grants access to
         mode:
           $ref: '#/components/schemas/ShareMode'
-        isActive:
-          type: boolean
-          description: Whether this link currently grants access. Owner-toggleable.
         url:
           type: string
           format: uri
@@ -3228,12 +3230,6 @@ components:
             - "null"
           format: date-time
           description: Optional expiry. Null means the link does not expire.
-          default: null
-        revokedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
           default: null
 
     ShareLinkCreateRequest:
@@ -3256,8 +3252,6 @@ components:
       properties:
         mode:
           $ref: '#/components/schemas/ShareMode'
-        isActive:
-          type: boolean
         expiresAt:
           type:
             - string
@@ -3275,7 +3269,6 @@ components:
         - workspaceTitle
         - ownerDisplayName
         - mode
-        - isActive
       properties:
         workspaceTitle:
           type: string
@@ -3285,6 +3278,17 @@ components:
           description: Display name of the workspace owner
         mode:
           $ref: '#/components/schemas/ShareMode'
-        isActive:
-          type: boolean
-          description: Whether this link currently grants access
+
+    RedeemResponse:
+      type: object
+      required:
+        - share
+        - workspace
+      properties:
+        share:
+          oneOf:
+            - $ref: '#/components/schemas/WorkspaceShare'
+            - type: "null"
+          description: Null when the requester is the workspace owner, who needs no share.
+        workspace:
+          $ref: '#/components/schemas/Workspace'
