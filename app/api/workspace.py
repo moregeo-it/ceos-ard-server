@@ -23,6 +23,7 @@ from app.services.auth_service import require_github_user
 from app.services.workspace_service import WorkspaceService
 from app.utils.git_utils import format_commit
 from app.utils.http_utils import internal_errors
+from app.utils.session_cookie import require_client_id
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,8 @@ async def get_user_workspaces(
     "/{workspace_id}",
     summary="Get a workspace",
     response_model=WorkspaceResponse,
+    # Refreshes the pull request state, which can archive the workspace
+    dependencies=[Depends(require_client_id)],
     description="Retrieve detailed information about a specific workspace",
 )
 async def get_user_workspace(
@@ -111,6 +114,8 @@ async def delete_workspace(
 @router.get(
     "/{workspace_id}/proposal",
     summary="Get existing pull request proposal",
+    # Refreshes the pull request state, which can archive the workspace
+    dependencies=[Depends(require_client_id)],
     response_model=Proposal,
     status_code=status.HTTP_200_OK,
     description="Retrieve the existing pull request in the original repository that proposes changes made in the workspace",

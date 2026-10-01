@@ -51,20 +51,33 @@ async def run_checks():
     checks = {
         "CEOS-ARD CLI": check_ceos_ard_cli,
         "Playwright": check_playwright,
+        "Session cookie": check_session_cookie,
     }
+    # Missing tools only break builds, but a session misconfiguration exposes sessions in every environment
+    fatal_checks = {check_session_cookie}
     failures = []
+    fatal = False
     for check_name, check_func in checks.items():
         try:
             await check_func()
         except Exception as e:
             failures.append(f"{check_name}: {e}")
+            fatal = fatal or check_func in fatal_checks
 
     if len(failures) > 0:
         logger.error("\n!!!! CHECKS FAILED !!!!\n - " + "\n - ".join(failures) + "\n")
-        if settings.ENVIRONMENT == "production":
+        if fatal or settings.ENVIRONMENT == "production":
             sys.exit(1)
     else:
         logger.info("All prerequisite checks passed.")
+
+
+async def check_session_cookie():
+    """Every request carries the session cookie, so only exact origins may read responses."""
+    if any("*" in origin for origin in settings.CORS_ORIGINS):
+        raise Exception("CORS_ORIGINS must list exact origins, no wildcards")
+    if settings.ENVIRONMENT != "development" and not settings.SESSION_COOKIE_SECURE:
+        raise Exception("SESSION_COOKIE_SECURE=false is for local development over HTTP only")
 
 
 async def check_playwright():

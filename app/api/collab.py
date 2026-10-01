@@ -15,6 +15,7 @@ from app.services.auth_service import get_current_user, require_github_user
 from app.services.events_service import HEARTBEAT_SECONDS, WS_CLOSE_ACCESS_REVOKED, WS_CLOSE_SESSION_EXPIRED, CloseSignal
 from app.services.jwt_service import JWTService
 from app.utils.request_context import CLIENT_ID_QUERY_PARAM, validate_client_id
+from app.utils.session_cookie import request_token
 
 logger = logging.getLogger(__name__)
 
@@ -74,19 +75,20 @@ def _deliverable(event: dict[str, Any], user_id: str, client_id: str | None) -> 
 async def workspace_ws(websocket: WebSocket, workspace_id: str):
     """Real-time workspace event stream over WebSocket.
 
-    Handshake: Origin check → JWT from the `authorization` query param (browsers can't set a header
-    on a handshake; a session cookie will replace it, see #98) → subscribe → access check → accept.
+    Handshake: Origin check → JWT from the session cookie (browsers send it on the handshake) or an
+    `Authorization: Bearer` header → subscribe → access check → accept.
     Subscribing before the access check keeps a revocation committing in between from being missed.
     Failures after the origin check are reported as close codes 4001/4003.
     """
     origin = websocket.headers.get("origin")
     if origin is not None and origin not in settings.CORS_ORIGINS:
-        # Browsers always send Origin; a foreign page just gets a failed upgrade.
+        # Browsers always send Origin; a foreign page just gets a failed upgrade. This is also what keeps
+        # other same-site hosts from using the session cookie: SameSite=Strict does not stop them.
         logger.warning("Rejected realtime connection from origin %s for workspace %s", origin, workspace_id)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    token = websocket.query_params.get("authorization")
+    token = request_token(websocket)
     client_id = validate_client_id(websocket.query_params.get(CLIENT_ID_QUERY_PARAM))
     broker = get_event_broker()
 
