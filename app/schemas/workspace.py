@@ -159,7 +159,7 @@ class PfsType(BaseModel):
 
 
 class PFSTypesResponse(BaseModel):
-    pfsTypes: list[PfsType]
+    pfs_types: list[PfsType]
 
 
 class FileResponse(BaseModel):

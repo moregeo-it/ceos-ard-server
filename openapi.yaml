@@ -1802,10 +1802,10 @@ paths:
             Invalid request data.
 
             Possible errors:
-            - `githubUsernames` empty or missing
+            - `github_usernames` empty or missing
             - Invalid mode
-            - Owner's own username included in `githubUsernames`
-            - One or more `githubUsernames` do not correspond to a real GitHub user (validated
+            - Owner's own username included in `github_usernames`
+            - One or more `github_usernames` do not correspond to a real GitHub user (validated
               against the GitHub API; the response names exactly which ones failed). This check
               runs before any shares are created - the whole request is rejected atomically if
               any username is invalid.
@@ -1982,7 +1982,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkspaceShareLink'
         '400':
-          description: Invalid mode or expiresAt
+          description: Invalid mode or expires_at
           content:
             application/json:
               schema:
@@ -3035,9 +3035,9 @@ components:
     pfsTypes:
       type: object
       required:
-        - pfsTypes
+        - pfs_types
       properties:
-        pfsTypes:
+        pfs_types:
           type: array
           items:
             type: object
@@ -3092,26 +3092,26 @@ components:
       description: |
         A single collaborator's access grant on a workspace, however it was
         created - a direct share by username, or a redeemed share link (see
-        `shareLinkId`). There is no separate "invitation" object: this row
+        `share_link_id`). There is no separate "invitation" object: this row
         *is* the grant, from the moment it's created.
       required:
         - id
-        - workspaceId
+        - workspace_id
         - mode
         - status
-        - invitedGithubUsername
-        - invitedBy
-        - createdAt
+        - invitee_github_username
+        - invited_by_user_id
+        - created_at
       properties:
         id:
           type: string
           format: uuid
           description: Unique identifier of the share
-        workspaceId:
+        workspace_id:
           type: string
           format: uuid
           description: ID of the workspace this share belongs to
-        shareLinkId:
+        share_link_id:
           type:
             - string
             - "null"
@@ -3125,10 +3125,10 @@ components:
           $ref: '#/components/schemas/ShareMode'
         status:
           $ref: '#/components/schemas/ShareStatus'
-        invitedGithubUsername:
+        invitee_github_username:
           type: string
           description: GitHub username this share was granted to
-        invitedUserId:
+        invitee_user_id:
           type:
             - string
             - "null"
@@ -3139,21 +3139,21 @@ components:
             or on redeeming a share link. Null while `status` is "pending"
             (the GitHub account has not logged in yet).
           default: null
-        invitedBy:
+        invited_by_user_id:
           type: string
           description: User ID of the workspace owner who granted this share
-        createdAt:
+        created_at:
           type: string
           format: date-time
           description: When the share was created
-        acceptedAt:
+        accepted_at:
           type:
             - string
             - "null"
           format: date-time
           description: When the share became active (immediately, or upon the invitee's first login if it started "pending")
           default: null
-        revokedAt:
+        revoked_at:
           type:
             - string
             - "null"
@@ -3170,10 +3170,10 @@ components:
         GitHub account id at creation and the share is bound to that id, so
         a later rename of the username neither breaks nor transfers it.
       required:
-        - githubUsernames
+        - github_usernames
         - mode
       properties:
-        githubUsernames:
+        github_usernames:
           type: array
           minItems: 1
           items:
@@ -3198,17 +3198,17 @@ components:
         into the token, so it can be changed without reissuing the link.
       required:
         - id
-        - workspaceId
+        - workspace_id
         - mode
-        - createdBy
-        - createdAt
+        - created_by_user_id
+        - created_at
         - url
       properties:
         id:
           type: string
           format: uuid
           description: Unique identifier of the share link
-        workspaceId:
+        workspace_id:
           type: string
           format: uuid
           description: ID of the workspace this link grants access to
@@ -3218,13 +3218,13 @@ components:
           type: string
           format: uri
           description: The full shareable URL (`{clientUrl}/share/{token}`)
-        createdBy:
+        created_by_user_id:
           type: string
           description: User ID of the workspace owner who created the link
-        createdAt:
+        created_at:
           type: string
           format: date-time
-        expiresAt:
+        expires_at:
           type:
             - string
             - "null"
@@ -3239,7 +3239,7 @@ components:
       properties:
         mode:
           $ref: '#/components/schemas/ShareMode'
-        expiresAt:
+        expires_at:
           type:
             - string
             - "null"
@@ -3252,7 +3252,7 @@ components:
       properties:
         mode:
           $ref: '#/components/schemas/ShareMode'
-        expiresAt:
+        expires_at:
           type:
             - string
             - "null"
@@ -3266,14 +3266,14 @@ components:
         landing page and decide whether to prompt login or onboarding
         before the link can be redeemed.
       required:
-        - workspaceTitle
-        - ownerDisplayName
+        - workspace_title
+        - owner_display_name
         - mode
       properties:
-        workspaceTitle:
+        workspace_title:
           type: string
           description: Title of the shared workspace
-        ownerDisplayName:
+        owner_display_name:
           type: string
           description: Display name of the workspace owner
         mode:
