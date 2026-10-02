@@ -1,46 +1,27 @@
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException, Query, Request, status
-from fastapi.security import HTTPBearer
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.user import IdentityProvider, User
 from app.services.jwt_service import JWTService
 from app.services.token_refresh_service import TokenRefreshService
+from app.utils.session_cookie import request_token
 
 logger = logging.getLogger(__name__)
 
 
-bearer_scheme = HTTPBearer(auto_error=False)
-
-
-async def get_jwt_token(
-    request: Request,
-    authorization: str | None = Query(default=None),
-) -> str:
-    """Extract JWT access token.
-
-    Priority:
-    1) Authorization header via HTTP Bearer scheme (expects: "Bearer <token>")
-    2) Query parameter "authorization" (expects: "<token>")
-    """
-    credentials = await bearer_scheme(request)
-    if credentials and credentials.credentials:
-        return credentials.credentials
-
-    if authorization:
-        token = authorization.strip()
-        if token.startswith("Bearer "):
-            token = token[7:].strip()
-        if token:
-            return token
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated - missing token",
-    )
+async def get_jwt_token(request: Request) -> str:
+    """The caller's JWT from the `Authorization: Bearer` header or the session cookie."""
+    token = request_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated - missing token",
+        )
+    return token
 
 
 async def _load_jwt_user(token: str, db: Session) -> User:
@@ -130,6 +111,25 @@ async def get_logout_user(
     the provider tokens when that token expired or can't be refreshed."""
     user = await _load_jwt_user(token, db)
     return {"user": user, "provider": user.identity_provider}
+
+
+async def get_optional_current_user(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any] | None:
+    """Same as get_current_user, but returns None instead of raising when no/invalid token is present.
+
+    Used by endpoints that behave differently for authenticated vs. anonymous callers
+    (e.g. redeeming a share link, which returns a preview to anonymous callers).
+    """
+    token = request_token(request)
+    if not token:
+        return None
+
+    try:
+        return await get_current_user(token=token, db=db)
+    except HTTPException:
+        return None
 
 
 async def require_github_user(

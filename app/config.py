@@ -59,6 +59,8 @@ class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     BUILD_CONCURRENCY: int = int(os.getenv("BUILD_CONCURRENCY", "2"))
 
+    SHARING_MODES_ENABLED: list[str] = os.getenv("SHARING_MODES_ENABLED", "readonly").split(",")
+
     CLIENT_URL: str = CLIENT_URL
     AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT", f"{CLIENT_URL}/auth/callback")
 
@@ -73,8 +75,16 @@ class Settings:
     # PFS default type for new PFS documents
     PFS_DEFAULT_TYPE: str = os.getenv("PFS_DEFAULT_TYPE", PFS_DEFAULT_TYPE)
 
-    # One or more CORS origins separated by commas
+    # One or more CORS origins separated by commas. Exact origins only: requests carry the session cookie.
     CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", CLIENT_URL).split(",")
+
+    # The browser session is an HttpOnly cookie on the API host holding the JWT. Set to "false" only for
+    # local development over plain HTTP (Safari drops Secure cookies on http://localhost); this also drops
+    # the __Host- prefix, which requires Secure.
+    SESSION_COOKIE_SECURE: bool = os.getenv("SESSION_COOKIE_SECURE", "true").lower() != "false"
+    SESSION_COOKIE_NAME: str = "__Host-session" if SESSION_COOKIE_SECURE else "ceos_ard_session"
+    # __Host-: a sibling host of the same site can't plant its own OAuth state (login CSRF)
+    OAUTH_STATE_COOKIE_NAME: str = "__Host-oauth_state" if SESSION_COOKIE_SECURE else "ceos_ard_oauth_state"
 
 
 settings = Settings()
