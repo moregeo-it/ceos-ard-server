@@ -38,7 +38,8 @@ class Settings:
 
     GITHUB_CLIENT_RESPONSE_TYPE: str = "code"
     GITHUB_API_BASE_URL: str = "https://api.github.com"
-    GITHUB_CLIENT_SCOPE: str = "user:email read:org public_repo repo:status workflow"
+    # offline_access: an expiring GitHub token with a refresh token, no extra consent prompt
+    GITHUB_CLIENT_SCOPE: str = "user:email read:org public_repo repo:status workflow offline_access"
     GITHUB_TOKEN_URL: str = "https://github.com/login/oauth/access_token"
     GITHUB_AUTHORIZE_URL: str = "https://github.com/login/oauth/authorize"
 

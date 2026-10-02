@@ -118,8 +118,8 @@ async def validate_auth(authorization: str = Depends(HTTPBearer()), current_user
     This endpoint is designed for periodic client polling (e.g., every 5 minutes) to:
     - Validate the JWT is still valid
     - Check provider token status
-    - For Google: Auto-refresh provider token if expired (transparent)
-    - For GitHub: Return 401 if provider token expired (requires re-login)
+    - Auto-refresh the provider token if expired (transparent)
+    - A GitHub token without a refresh token cannot be renewed: 401 (requires re-login)
     - Return a fresh JWT ONLY if current JWT expires within 3 × ping_interval (15 minutes)
 
     This optimization reduces unnecessary JWT generation while ensuring tokens are
