@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.oauth.handler import oauth
+from app.utils.locks import refresh_locks
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,6 @@ class TokenRefreshService:
     # A GitHub token without an expiry gets the lifetime of GitHub's expiring tokens, so every session ends the same way
     GITHUB_TOKEN_LIFETIME = timedelta(hours=8)
 
-    # One lock per user: concurrent requests must not each spend the single-use refresh token
-    _refresh_locks: dict[str, asyncio.Lock] = {}
-
     @staticmethod
     async def ensure_fresh_token(user: User, db: Session) -> None:
         """Renew the provider token when it is expired or about to expire.
@@ -36,8 +33,7 @@ class TokenRefreshService:
         """
         if not TokenRefreshService.is_token_expired(user):
             return
-        lock = TokenRefreshService._refresh_locks.setdefault(user.id, asyncio.Lock())
-        async with lock:
+        async with refresh_locks(user.id):
             db.refresh(user)
             if TokenRefreshService.is_token_expired(user):
                 await TokenRefreshService.refresh_token_for_user(user, db)
@@ -123,6 +119,11 @@ class TokenRefreshService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Failed to refresh GitHub token. Please log in again.",
             ) from e
+
+        # Logged out while GitHub was answering: don't store a token pair for a session the user just ended
+        db.refresh(user)
+        if user.access_token is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Logged out. Please log in again.")
 
         expires_in = new_token.get("expires_in")
         user.access_token = access_token

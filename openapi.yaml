@@ -83,12 +83,8 @@ paths:
               schema:
                 type: string
                 format: uri
-        '400':
-          description: Invalid identity provider
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+        '422':
+          description: Unknown identity provider
         '500':
           description: Internal server error
           content:
