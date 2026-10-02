@@ -58,21 +58,37 @@ paths:
 
   /auth/login:
     get:
-      summary: Initiate GitHub login
-      description: Redirects to GitHub for authentication
+      summary: Initiate login
+      description: Redirects to the identity provider for authentication
       operationId: initiateLogin
       tags:
         - Authentication
       security: []
+      parameters:
+        - name: identity_provider
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - github
+              - google
+            default: github
       responses:
         '302':
-          description: Redirect to GitHub authentication
+          description: Redirect to the provider's authorization page
           headers:
             Location:
-              description: GitHub authentication URL
+              description: Provider authorization URL
               schema:
                 type: string
                 format: uri
+        '400':
+          description: Invalid identity provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           description: Internal server error
           content:
@@ -80,80 +96,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /auth/callback:
+  /auth/callback/{provider}:
     get:
-      summary: GitHub OAuth callback
-      description: Handles GitHub OAuth callback and returns JWT token
+      summary: OAuth callback
+      description: |
+        Completes the login started at `/auth/login`: stores the provider tokens server-side and
+        redirects to the editor's `/auth/callback` with the JWT as `access_token`, plus
+        `token_type`, `expires_in`, `user_id`, `username` and `provider`. Provider tokens never
+        reach the client.
+
+        GitHub is asked for an expiring token (`offline_access` scope): an 8-hour access token with
+        a refresh token, which the server uses to renew the session. A GitHub token issued without
+        an expiry cannot be renewed; that session ends after 8 hours.
       operationId: authCallback
       tags:
         - Authentication
       security: []
       parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - github
+              - google
         - name: code
           in: query
           required: true
-          description: Authorization code from GitHub
+          description: Authorization code from the provider
           schema:
             type: string
         - name: state
           in: query
           required: true
-          description: State parameter for CSRF protection
+          description: OAuth state, checked against the login request
           schema:
             type: string
       responses:
+        '302':
+          description: Logged in; redirects to the editor. On failure, redirects to the editor's `/auth/error` with `message` and `provider` parameters.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+
+  /auth/logout:
+    post:
+      summary: Logout user
+      description: |
+        Revokes the provider token (best effort) and clears the stored provider tokens. The JWT
+        itself can't be invalidated, but it is refused afterwards because the provider token is gone.
+      operationId: logout
+      tags:
+        - Authentication
+      responses:
         '200':
-          description: Successful authentication
+          description: Logged out
           content:
             application/json:
               schema:
                 type: object
                 required:
-                  - accessToken
-                  - refreshToken
-                  - expiresIn
-                  - user
+                  - status
+                  - message
                 properties:
-                  accessToken:
+                  status:
                     type: string
-                    description: JWT access token
-                  refreshToken:
+                    enum:
+                      - success
+                  message:
                     type: string
-                    description: Refresh token for token renewal
-                  expiresIn:
-                    type: integer
-                    description: Token expiration time in seconds
-                  user:
-                    $ref: '#/components/schemas/User'
-        '400':
-          description: Invalid request parameters
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Authentication failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /auth/logout:
-    get:
-      summary: Logout user
-      description: Invalidates current session and tokens
-      operationId: logout
-      tags:
-        - Authentication
-      responses:
-        '302':
-          description: Successfully logged out
-          headers:
-            Location:
-              description: Redirect URL after logout
-              schema:
-                type: string
-                format: uri
         '401':
           description: Unauthorized
           content:
@@ -164,7 +178,7 @@ paths:
   /auth/user:
     get:
       summary: Get current user information
-      description: Returns current authenticated user's information
+      description: The authenticated user. Renews an expired provider token first, like every authenticated request.
       operationId: getCurrentUser
       tags:
         - Authentication
@@ -174,9 +188,94 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                required:
+                  - id
+                  - username
+                  - identity_provider
+                properties:
+                  id:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+                  username:
+                    type: string
+                  full_name:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+                  identity_provider:
+                    type: string
+                    enum:
+                      - github
+                      - google
         '401':
-          description: Unauthorized
+          description: The JWT is invalid, or the provider token expired and could not be renewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/validate:
+    post:
+      summary: Validate the session and renew it if needed
+      description: |
+        Validates the JWT, renewing an expired provider token transparently (Google, and GitHub
+        with expiring tokens), and returns a fresh JWT within 15 minutes of expiry.
+      operationId: validateSession
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: The session is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - valid
+                  - access_token
+                  - expires_at
+                  - token_refreshed
+                properties:
+                  valid:
+                    type: boolean
+                  user_id:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+                  username:
+                    type: string
+                  provider:
+                    type: string
+                    enum:
+                      - github
+                      - google
+                  updated_at:
+                    type: string
+                    format: date-time
+                  token_type:
+                    type: string
+                    enum:
+                      - Bearer
+                  access_token:
+                    type: string
+                    description: The current JWT, or a fresh one when `token_refreshed` is true
+                  expires_in:
+                    type: integer
+                  expires_at:
+                    type: string
+                    format: date-time
+                  token_refreshed:
+                    type: boolean
+        '401':
+          description: The JWT expired, or the provider token expired and could not be renewed
           content:
             application/json:
               schema:

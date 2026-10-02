@@ -117,6 +117,8 @@ The following properties should be changed at least:
   - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
 3. Copy the Client ID and Client Secret to your `.env` file
 
+The server requests the `offline_access` scope, so GitHub issues an 8-hour access token with a refresh token and the server renews the session without a new login; no app setting is needed. A token from a login before this scope cannot be renewed, so that session ends after 8 hours; the next login fixes it.
+
 **Note**: GitHub authentication is mandatory for workspace features. All workspace operations require GitHub OAuth.
 
 #### Google OAuth App (Optional - Future Use)
@@ -348,7 +350,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 - **Input Sanitization**: Protection against malicious input
 - **User Isolation**: Workspaces are isolated per user
 - **Provider-based Authorization**: Workspace access restricted to GitHub users only
-- **Token Refresh**: Automatic token refresh for Google; re-authentication required for expired GitHub tokens
+- **Token Refresh**: Provider tokens are renewed with their refresh token (Google, and GitHub with expiring tokens); a GitHub token without one requires a new login after 8 hours
 
 ## 🔑 Authorization Model
 

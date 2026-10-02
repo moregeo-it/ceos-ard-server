@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -14,11 +15,32 @@ logger = logging.getLogger(__name__)
 
 
 class TokenRefreshService:
-    """Service for refreshing OAuth access tokens.
+    """Refreshes the provider access tokens stored per user.
 
-    Note: GitHub standard OAuth does not support refresh tokens.
-    Only Google OAuth refresh is supported.
+    Google refresh tokens can be reused. GitHub's are single-use and come only with expiring
+    tokens (offline_access scope); a GitHub token without one cannot be renewed.
     """
+
+    # A GitHub token without an expiry gets the lifetime of GitHub's expiring tokens, so every session ends the same way
+    GITHUB_TOKEN_LIFETIME = timedelta(hours=8)
+
+    # One lock per user: concurrent requests must not each spend the single-use refresh token
+    _refresh_locks: dict[str, asyncio.Lock] = {}
+
+    @staticmethod
+    async def ensure_fresh_token(user: User, db: Session) -> None:
+        """Renew the provider token when it is expired or about to expire.
+
+        Same-user requests wait for the first renewal and re-read the user afterwards.
+        Raises HTTPException when the token cannot be renewed.
+        """
+        if not TokenRefreshService.is_token_expired(user):
+            return
+        lock = TokenRefreshService._refresh_locks.setdefault(user.id, asyncio.Lock())
+        async with lock:
+            db.refresh(user)
+            if TokenRefreshService.is_token_expired(user):
+                await TokenRefreshService.refresh_token_for_user(user, db)
 
     @staticmethod
     async def refresh_google_token(user: User, db: Session) -> dict[str, Any]:
@@ -81,6 +103,44 @@ class TokenRefreshService:
             ) from e
 
     @staticmethod
+    async def refresh_github_token(user: User, db: Session) -> dict[str, Any]:
+        """Exchange the refresh token for a new GitHub token pair; the old pair stops working."""
+        if not user.refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="GitHub access token expired and cannot be renewed. Please log in again.",
+            )
+
+        try:
+            new_token = await oauth.github.fetch_access_token(grant_type="refresh_token", refresh_token=user.refresh_token)
+            access_token = new_token.get("access_token")
+            if not access_token:
+                raise ValueError("no access token in the refresh response")
+        except Exception as e:
+            # Includes bad_refresh_token: unused for six months, or already spent
+            logger.error(f"Error refreshing GitHub token for {user.username}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to refresh GitHub token. Please log in again.",
+            ) from e
+
+        expires_in = new_token.get("expires_in")
+        user.access_token = access_token
+        # GitHub returns a new refresh token with every refresh
+        user.refresh_token = new_token.get("refresh_token", user.refresh_token)
+        user.token_expiry = datetime.now(UTC) + (timedelta(seconds=int(expires_in)) if expires_in else TokenRefreshService.GITHUB_TOKEN_LIFETIME)
+        user.updated_at = datetime.now(UTC)
+        db.commit()
+
+        logger.info(f"Refreshed GitHub token for user {user.username}")
+
+        return {
+            "access_token": access_token,
+            "expires_in": expires_in,
+            "refresh_token": user.refresh_token,
+        }
+
+    @staticmethod
     async def revoke_google_token(token: str) -> None:
         """Revoke a Google access or refresh token; a refresh token also invalidates the access tokens issued from it."""
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -102,10 +162,7 @@ class TokenRefreshService:
             HTTPException: If provider doesn't support refresh or refresh fails
         """
         if user.identity_provider == IdentityProvider.github:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="GitHub does not support token refresh. Please log in again.",
-            )
+            return await TokenRefreshService.refresh_github_token(user, db)
         elif user.identity_provider == IdentityProvider.google:
             return await TokenRefreshService.refresh_google_token(user, db)
         else:

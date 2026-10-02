@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.services.jwt_service import JWTService
+from app.services.token_refresh_service import TokenRefreshService
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
             )
 
         # Create or update user in database (stores provider tokens)
-        # Note: Github does not provider refresh tokens and expires_in, so we only store access_token.
+        # GitHub includes expires_in and a refresh token only with expiring tokens (offline_access scope)
         user_to_use = await create_or_update_user(db, user_info, provider, token)
 
         # Generate JWT token for client (never expose provider token)
@@ -77,17 +78,17 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
         # Extract token information
         access_token = token.get("access_token")  # Provider's access token
-        refresh_token = token.get("refresh_token")  # Provider's refresh token (None for GitHub)
-        expires_in = token.get("expires_in")  # Provider's token expiry in seconds (None for GitHub)
+        refresh_token = token.get("refresh_token")  # None for a GitHub token without expiry
+        expires_in = token.get("expires_in")  # Seconds until the provider token expires; None for a GitHub token without expiry
 
         # Calculate access token expiry time (use UTC for consistency with JWT)
         if expires_in:
-            # Google provides expires_in (typically 3600 seconds = 1 hour)
+            # Google: typically 3600 s. GitHub expiring tokens: 28800 s
             token_expiry = datetime.now(UTC) + timedelta(seconds=int(expires_in))
         elif provider == IdentityProvider.github.value:
-            # GitHub doesn't provide expires_in, but tokens typically last 8 hours
-            token_expiry = datetime.now(UTC) + timedelta(hours=8)
-            logger.info("GitHub token created with default 8-hour expiry")
+            # A GitHub token without expiry cannot be renewed; its session still ends after the same lifetime
+            token_expiry = datetime.now(UTC) + TokenRefreshService.GITHUB_TOKEN_LIFETIME
+            logger.info("GitHub token without expiry, using the default lifetime")
         else:
             # Default fallback
             token_expiry = datetime.now(UTC) + timedelta(hours=1)
