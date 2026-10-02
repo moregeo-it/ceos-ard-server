@@ -214,7 +214,7 @@ async def list_workspace_pfs_types(
 ) -> PFSTypesResponse:
     with internal_errors("list PFS types", logger):
         pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return {"pfsTypes": pfs_types}
+        return {"pfs_types": pfs_types}
 
 
 @router.post(

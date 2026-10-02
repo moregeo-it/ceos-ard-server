@@ -123,10 +123,10 @@ class ShareService:
         if expires_at.tzinfo is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="expiresAt must include a timezone offset (e.g. suffix with 'Z' for UTC)",
+                detail="expires_at must include a timezone offset (e.g. suffix with 'Z' for UTC)",
             )
         if expires_at <= datetime.now(UTC):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expiresAt must be in the future")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expires_at must be in the future")
 
     # --- Direct shares (invited by username, bound to the GitHub account id) ---
 

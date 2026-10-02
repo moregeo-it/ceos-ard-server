@@ -7,9 +7,7 @@ from app.schemas.workspace import WorkspaceResponse
 
 
 class ShareCreateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    github_usernames: list[str] = Field(..., alias="githubUsernames", min_length=1, max_length=50, description="GitHub usernames to grant access to")
+    github_usernames: list[str] = Field(..., min_length=1, max_length=50, description="GitHub usernames to grant access to")
     mode: ShareMode
 
 
@@ -18,57 +16,49 @@ class ShareUpdateRequest(BaseModel):
 
 
 class WorkspaceShareResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: str
-    workspace_id: str = Field(alias="workspaceId")
-    share_link_id: str | None = Field(None, alias="shareLinkId")
+    workspace_id: str
+    share_link_id: str | None = None
     mode: ShareMode
     status: ShareStatus
-    invitee_github_username: str = Field(alias="invitedGithubUsername")
-    invitee_user_id: str | None = Field(None, alias="invitedUserId")
-    invited_by_user_id: str = Field(alias="invitedBy")
-    created_at: datetime = Field(alias="createdAt")
-    accepted_at: datetime | None = Field(None, alias="acceptedAt")
-    revoked_at: datetime | None = Field(None, alias="revokedAt")
+    invitee_github_username: str
+    invitee_user_id: str | None = None
+    invited_by_user_id: str
+    created_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
 
 
 class ShareLinkCreateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     mode: ShareMode
-    expires_at: datetime | None = Field(None, alias="expiresAt", description="Optional expiry. Omit or set null for a link that does not expire.")
+    expires_at: datetime | None = Field(None, description="Optional expiry. Omit or set null for a link that does not expire.")
 
 
 class ShareLinkUpdateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     mode: ShareMode | None = None
-    expires_at: datetime | None = Field(None, alias="expiresAt")
+    expires_at: datetime | None = None
 
 
 class WorkspaceShareLinkResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: str
-    workspace_id: str = Field(alias="workspaceId")
+    workspace_id: str
     mode: ShareMode
     url: str = Field(description="The full shareable URL ({clientUrl}/share/{token})")
-    created_by_user_id: str = Field(alias="createdBy")
-    created_at: datetime = Field(alias="createdAt")
-    expires_at: datetime | None = Field(None, alias="expiresAt")
+    created_by_user_id: str
+    created_at: datetime
+    expires_at: datetime | None = None
 
 
 class ShareLinkPreview(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    workspace_title: str = Field(alias="workspaceTitle")
-    owner_display_name: str = Field(alias="ownerDisplayName")
+    workspace_title: str
+    owner_display_name: str
     mode: ShareMode
 
 
 class RedeemResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     share: WorkspaceShareResponse | None = Field(description="None for the workspace owner, who needs no share")
     workspace: WorkspaceResponse
