@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.services.jwt_service import JWTService
-from app.services.share_service import activate_pending_shares
+from app.services.share_service import activate_pending_collaborators
 from app.utils.session_cookie import set_session_cookie
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
-            activate_pending_shares(db, existing_user)
+            activate_pending_collaborators(db, existing_user)
             return existing_user
         else:
             new_user = User(
@@ -118,7 +118,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             db.refresh(new_user)
 
             logger.info(f"Created new {provider} user: {new_user.username}")
-            activate_pending_shares(db, new_user)
+            activate_pending_collaborators(db, new_user)
             return new_user
 
     except SQLAlchemyError as e:

@@ -120,7 +120,7 @@ async def get_optional_current_user(
     """Same as get_current_user, but returns None instead of raising when no/invalid token is present.
 
     Used by endpoints that behave differently for authenticated vs. anonymous callers
-    (e.g. redeeming a share link, which returns a preview to anonymous callers).
+    (e.g. redeeming a share, which returns a preview to anonymous callers).
     """
     token = request_token(request)
     if not token:

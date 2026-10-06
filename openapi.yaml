@@ -261,9 +261,9 @@ paths:
       summary: List all workspaces
       description: |
         Retrieves all workspaces the authenticated user has access to - both
-        workspaces they own and workspaces shared with them ("Shared with
+        workspaces they own and workspaces they collaborate on ("Shared with
         me"). Each workspace's `viewer_role` field indicates whether the
-        caller owns it ("owner") or the mode of their share ("readonly"),
+        caller owns it ("owner") or the mode of their collaboration ("readonly"),
         while `user_id`, `owner_username`, and `owner_full_name` identify the
         workspace owner.
       operationId: listWorkspaces
@@ -497,7 +497,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /workspaces/{workspaceId}/ws:
+  /workspaces/{workspaceId}/events:
     get:
       summary: Real-time workspace events (WebSocket)
       description: |
@@ -522,7 +522,7 @@ paths:
         | Code | Meaning | Editor reaction |
         |---|---|---|
         | `4001` | JWT missing, invalid or expired; also sent when it expires mid-connection or the user logs out | ask for a new login, then reconnect |
-        | `4003` | no access to the workspace, or access ended (`share.revoked` for this user, `workspace.deleted`) | stop |
+        | `4003` | no access to the workspace, or access ended (`collaborator.revoked` for this user, `workspace.deleted`) | stop |
         | `4009` | the server's buffer for this connection overflowed and events were dropped | reconnect at once and resync |
         | `1008` | the client sent data | stop |
 
@@ -1721,13 +1721,200 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /workspaces/{workspaceId}/shares:
+  /workspaces/{workspaceId}/collaborators:
     get:
-      summary: List all shares for a workspace
+      summary: List the collaborators of a workspace
       description: |
         Retrieves everyone with access to the workspace - both direct grants
-        and users who joined via a share link - along with their mode and
+        and users who joined through a share - along with their mode and
         status. Owner only.
+      operationId: listWorkspaceCollaborators
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: List of collaborators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Collaborator'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can view collaborators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Add collaborators by GitHub username
+      description: |
+        Grants one or more GitHub users access to the workspace at the given
+        mode. Owner only.
+
+        - If a given username already belongs to an onboarded CEOS-ARD user,
+          that person has access right away; it appears next time they view
+          their workspaces ("Shared with me").
+        - If a given username hasn't onboarded yet, the grant is recorded as
+          `pending` and activates automatically the moment that person signs
+          in with GitHub for the first time.
+        - Adding a username that already is a collaborator on this
+          workspace updates the existing entry's mode (and reactivates it if
+          it was previously `revoked`) rather than creating a duplicate.
+      operationId: addWorkspaceCollaborators
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollaboratorCreateRequest'
+      responses:
+        '201':
+          description: Collaborators added or updated successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Collaborator'
+        '400':
+          description: |
+            Invalid request data.
+
+            Possible errors:
+            - `github_usernames` empty or missing
+            - Invalid mode
+            - Owner's own username included in `github_usernames`
+            - One or more `github_usernames` do not correspond to a real GitHub user (validated
+              against the GitHub API; the response names exactly which ones failed). This check
+              runs before any collaborators are added - the whole request is rejected atomically if
+              any username is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can add collaborators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/collaborators/{collaboratorId}:
+    patch:
+      summary: Change a collaborator's access mode
+      description: Updates the mode (readonly) of an existing collaborator. Owner only. The affected user receives `collaborator.updated`.
+      operationId: updateWorkspaceCollaborator
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/CollaboratorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollaboratorUpdateRequest'
+      responses:
+        '200':
+          description: Collaborator updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collaborator'
+        '404':
+          description: Workspace or collaborator not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage collaborators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Revoke a collaborator's access
+      description: |
+        Revokes a person's access to the workspace, whether added by username or joined through a share.
+        Takes effect immediately on their next request. Revocation is sticky:
+        if they still hold a share for this workspace, opening it again will
+        not restore access - the owner must add them again. Owner only.
+      operationId: revokeWorkspaceCollaborator
+      tags:
+        - Sharing
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/CollaboratorId'
+      responses:
+        '204':
+          description: Collaborator revoked successfully
+        '404':
+          description: Workspace or collaborator not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the workspace owner can manage collaborators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/shares:
+    get:
+      summary: List shares for a workspace
+      description: Retrieves all shares of a workspace. Owner only.
       operationId: listWorkspaceShares
       tags:
         - Sharing
@@ -1735,13 +1922,13 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
       responses:
         '200':
-          description: List of workspace shares
+          description: List of shares
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/WorkspaceShare'
+                  $ref: '#/components/schemas/Share'
         '404':
           description: Workspace not found
           content:
@@ -1762,21 +1949,20 @@ paths:
                 $ref: '#/components/schemas/Error'
 
     post:
-      summary: Share a workspace with specific people
+      summary: Create a share
       description: |
-        Grants one or more GitHub users access to the workspace at the given
-        mode. Owner only.
+        Generates a mode-bound share for the workspace. Its token is random and
+        stored with the share, so rotating `SECRET_KEY` does not break existing
+        shares. Anyone who opens the share's link is granted access with this mode once they're
+        authenticated.
 
-        - If a given username already belongs to an onboarded CEOS-ARD user,
-          that person has access right away; it appears next time they view
-          their workspaces ("Shared with me").
-        - If a given username hasn't onboarded yet, the grant is recorded as
-          `pending` and activates automatically the moment that person signs
-          in with GitHub for the first time.
-        - Re-sharing to a username that already has a share on this
-          workspace updates the existing share's mode (and reactivates it if
-          it was previously `revoked`) rather than creating a duplicate.
-      operationId: createWorkspaceShares
+        A share is an invitation: whoever opens its link logs in with GitHub and is
+        then granted access with the share's mode. The mode is looked up on
+        every use, so the owner can change it without reissuing the URL;
+        it does not change the mode already granted to people who joined
+        earlier. Deleting a share is permanent and stops new people from
+        joining; those who joined keep their access.
+      operationId: createWorkspaceShare
       tags:
         - Sharing
       parameters:
@@ -1790,197 +1976,11 @@ paths:
               $ref: '#/components/schemas/ShareCreateRequest'
       responses:
         '201':
-          description: Shares created or updated successfully.
+          description: Share created
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/WorkspaceShare'
-        '400':
-          description: |
-            Invalid request data.
-
-            Possible errors:
-            - `github_usernames` empty or missing
-            - Invalid mode
-            - Owner's own username included in `github_usernames`
-            - One or more `github_usernames` do not correspond to a real GitHub user (validated
-              against the GitHub API; the response names exactly which ones failed). This check
-              runs before any shares are created - the whole request is rejected atomically if
-              any username is invalid.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Workspace not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Forbidden - only the workspace owner can share it
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /workspaces/{workspaceId}/shares/{shareId}:
-    patch:
-      summary: Change a collaborator's access mode
-      description: Updates the mode (readonly) of an existing share. Owner only. The affected user receives `share.updated`.
-      operationId: updateWorkspaceShare
-      tags:
-        - Sharing
-      parameters:
-        - $ref: '#/components/parameters/ClientId'
-        - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/ShareId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ShareUpdateRequest'
-      responses:
-        '200':
-          description: Share updated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceShare'
-        '404':
-          description: Workspace or share not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Forbidden - only the workspace owner can manage shares
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-    delete:
-      summary: Revoke a collaborator's access
-      description: |
-        Revokes a person's access to the workspace, direct share or share link.
-        Takes effect immediately on their next request. Revocation is sticky:
-        if they still hold a share link for this workspace, re-opening it will
-        not restore access - the owner must explicitly re-share. Owner only.
-      operationId: revokeWorkspaceShare
-      tags:
-        - Sharing
-      parameters:
-        - $ref: '#/components/parameters/ClientId'
-        - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/ShareId'
-      responses:
-        '204':
-          description: Share revoked successfully
-        '404':
-          description: Workspace or share not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Forbidden - only the workspace owner can manage shares
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /workspaces/{workspaceId}/share-links:
-    get:
-      summary: List share links for a workspace
-      description: Retrieves all share links of a workspace. Owner only.
-      operationId: listWorkspaceShareLinks
-      tags:
-        - Sharing
-      parameters:
-        - $ref: '#/components/parameters/WorkspaceId'
-      responses:
-        '200':
-          description: List of share links
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/WorkspaceShareLink'
-        '404':
-          description: Workspace not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Forbidden - only the workspace owner can view share links
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-    post:
-      summary: Create a share link
-      description: |
-        Generates a mode-bound share link for the workspace. Its token is random and
-        stored with the link, so rotating `SECRET_KEY` does not break links. Anyone
-        who opens the link is granted access with this mode once they're
-        authenticated.
-
-        A link is an invitation: whoever opens it logs in with GitHub and is
-        then granted access with the link's mode. The mode is looked up on
-        every use, so the owner can change it without reissuing the URL;
-        it does not change the mode already granted to people who joined
-        earlier. Deleting a link is permanent and stops new people from
-        joining; those who joined keep their share.
-      operationId: createWorkspaceShareLink
-      tags:
-        - Sharing
-      parameters:
-        - $ref: '#/components/parameters/ClientId'
-        - $ref: '#/components/parameters/WorkspaceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ShareLinkCreateRequest'
-      responses:
-        '201':
-          description: Share link created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkspaceShareLink'
+                $ref: '#/components/schemas/Share'
         '400':
           description: Invalid mode or expires_at
           content:
@@ -2000,40 +2000,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - only the workspace owner can create share links
+          description: Forbidden - only the workspace owner can create shares
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /workspaces/{workspaceId}/share-links/{linkId}:
+  /workspaces/{workspaceId}/shares/{shareId}:
     patch:
-      summary: Update a share link
+      summary: Update a share
       description: |
-        Changes a share link's mode and/or expiry. Owner only. To stop a link,
+        Changes a share's mode and/or expiry. Owner only. To stop a share,
         delete it.
-      operationId: updateWorkspaceShareLink
+      operationId: updateWorkspaceShare
       tags:
         - Sharing
       parameters:
         - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/ShareLinkId'
+        - $ref: '#/components/parameters/ShareId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ShareLinkUpdateRequest'
+              $ref: '#/components/schemas/ShareUpdateRequest'
       responses:
         '200':
-          description: Share link updated
+          description: Share updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkspaceShareLink'
+                $ref: '#/components/schemas/Share'
         '404':
-          description: Workspace or share link not found
+          description: Workspace or share not found
           content:
             application/json:
               schema:
@@ -2045,30 +2045,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - only the workspace owner can manage share links
+          description: Forbidden - only the workspace owner can manage shares
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
     delete:
-      summary: Delete a share link
+      summary: Delete a share
       description: |
-        Permanently deletes a share link. The URL stops working immediately
-        and is not reversible - sharing again means creating a new link,
+        Permanently deletes a share. Its URL stops working immediately
+        and is not reversible - sharing again means creating a new share,
         which produces a new URL. Owner only.
-      operationId: deleteWorkspaceShareLink
+      operationId: deleteWorkspaceShare
       tags:
         - Sharing
       parameters:
         - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/ShareLinkId'
+        - $ref: '#/components/parameters/ShareId'
       responses:
         '204':
-          description: Share link deleted successfully
+          description: Share deleted successfully
         '404':
-          description: Workspace or share link not found
+          description: Workspace or share not found
           content:
             application/json:
               schema:
@@ -2080,55 +2080,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - only the workspace owner can manage share links
+          description: Forbidden - only the workspace owner can manage shares
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /share-links/{token}:
+  /shares/{token}:
     get:
-      summary: Preview a share link
+      summary: Preview a share
       description: |
-        What a link leads to, for the share page before login. Public and free of
+        What a share leads to, for the share page before login. Public and free of
         sensitive data: the workspace title, the owner's name and the mode.
-      operationId: getShareLinkPreview
+      operationId: getSharePreview
       tags:
         - Sharing
       security: []
       parameters:
-        - $ref: '#/components/parameters/ShareLinkToken'
+        - $ref: '#/components/parameters/ShareToken'
       responses:
         '200':
-          description: Share link preview
+          description: Share preview
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ShareLinkPreview'
+                $ref: '#/components/schemas/SharePreview'
         '404':
-          description: Invalid, expired, or deleted share link
+          description: Invalid, expired, or deleted share
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /share-links/{token}/redeem:
+  /shares/{token}/redeem:
     post:
-      summary: Redeem a share link
+      summary: Redeem a share
       description: |
         Grants the logged-in GitHub user access to the shared workspace with
-        the link's mode. Visitors who aren't logged in get a plain `401`; the
-        share page shows them `GET /share-links/{token}` instead and redeems
+        the share's mode. Visitors who aren't logged in get a plain `401`; the
+        share page shows them `GET /shares/{token}` instead and redeems
         after the login.
-      operationId: redeemShareLink
+      operationId: redeemShare
       tags:
         - Sharing
       parameters:
         - $ref: '#/components/parameters/ClientId'
-        - $ref: '#/components/parameters/ShareLinkToken'
+        - $ref: '#/components/parameters/ShareToken'
       responses:
         '200':
-          description: Access granted (or already held); returns the resulting share and workspace
+          description: Access granted (or already held); returns the resulting collaborator entry and workspace
           content:
             application/json:
               schema:
@@ -2146,7 +2146,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Invalid, expired, or deleted share link
+          description: Invalid, expired, or deleted share
           content:
             application/json:
               schema:
@@ -2231,34 +2231,34 @@ components:
           - pdf
           - docx
 
+    CollaboratorId:
+      name: collaboratorId
+      in: path
+      required: true
+      description: Unique identifier of the collaborator entry
+      schema:
+        type: string
+        format: uuid
+
     ShareId:
       name: shareId
       in: path
       required: true
-      description: Unique identifier of the workspace share
+      description: Unique identifier of the share
       schema:
         type: string
         format: uuid
 
-    ShareLinkId:
-      name: linkId
-      in: path
-      required: true
-      description: Unique identifier of the share link
-      schema:
-        type: string
-        format: uuid
-
-    ShareLinkToken:
+    ShareToken:
       name: token
       in: path
       required: true
       description: |
-        Random, mode-bound share link token from `{clientUrl}/share/{token}`.
+        Random, mode-bound share token from `{clientUrl}/share/{token}`.
         Invitee-agnostic - not tied to any specific identity, and not a
         session/JWT access token. Grants no access by itself; only
-        `POST /share-links/{token}/redeem` (as a logged-in user) does, while
-        `GET /share-links/{token}` shows a public preview.
+        `POST /shares/{token}/redeem` (as a logged-in user) does, while
+        `GET /shares/{token}` shows a public preview.
       schema:
         type: string
 
@@ -2584,7 +2584,7 @@ components:
             The current authenticated user's effective role on this workspace.
 
             Computed per-request; not stored. Always "owner" for the workspace
-            creator. For collaborators, reflects their accepted share mode,
+            creator. For collaborators, reflects their accepted collaborator mode,
             clamped to "readonly" while the workspace is archived.
 
     WorkspaceEventType:
@@ -2599,8 +2599,8 @@ components:
         - workspace.synced
         - workspace.updated
         - preview.generated
-        - share.revoked
-        - share.updated
+        - collaborator.revoked
+        - collaborator.updated
         - workspace.archived
         - workspace.deleted
       description: |
@@ -2614,8 +2614,8 @@ components:
         - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic merge on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
         - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
         - `preview.generated`: the owner generated the preview via `POST .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
-        - `share.revoked`: access revoked via `DELETE .../shares/{shareId}`; sent only to the target (see `target_user_id`) and closes their connection.
-        - `share.updated`: the owner changed the target's mode via `PATCH .../shares/{shareId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
+        - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
+        - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
 
@@ -2652,8 +2652,8 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceSynced'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
         - $ref: '#/components/schemas/WorkspaceEventPreviewGenerated'
-        - $ref: '#/components/schemas/WorkspaceEventShareRevoked'
-        - $ref: '#/components/schemas/WorkspaceEventShareUpdated'
+        - $ref: '#/components/schemas/WorkspaceEventCollaboratorRevoked'
+        - $ref: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
       discriminator:
@@ -2668,8 +2668,8 @@ components:
           workspace.synced: '#/components/schemas/WorkspaceEventWorkspaceSynced'
           workspace.updated: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
           preview.generated: '#/components/schemas/WorkspaceEventPreviewGenerated'
-          share.revoked: '#/components/schemas/WorkspaceEventShareRevoked'
-          share.updated: '#/components/schemas/WorkspaceEventShareUpdated'
+          collaborator.revoked: '#/components/schemas/WorkspaceEventCollaboratorRevoked'
+          collaborator.updated: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
           workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
 
@@ -2835,9 +2835,9 @@ components:
                 $ref: '#/components/schemas/CommitChange'
               description: The changes included in the commit. Paths start from the workspace root (leading `/`).
 
-    WorkspaceEventShareRevoked:
+    WorkspaceEventCollaboratorRevoked:
       description: |
-        Access revoked via `DELETE .../shares/{shareId}`. Delivered only to the affected user
+        Access revoked via `DELETE .../collaborators/{collaboratorId}`. Delivered only to the affected user
         (see `target_user_id`) and closes their connection - terminal event.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
@@ -2846,14 +2846,14 @@ components:
             - target_user_id
           properties:
             type:
-              const: share.revoked
+              const: collaborator.revoked
             target_user_id:
               type: string
               description: The user id this event is delivered to (never broadcast to other subscribers).
 
-    WorkspaceEventShareUpdated:
+    WorkspaceEventCollaboratorUpdated:
       description: |
-        The owner changed this user's share mode via `PATCH .../shares/{shareId}`. Delivered only
+        The owner changed this user's access mode via `PATCH .../collaborators/{collaboratorId}`. Delivered only
         to the affected user (see `target_user_id`), who refetches the workspace for its new
         `viewer_role`.
       allOf:
@@ -2864,12 +2864,12 @@ components:
             - mode
           properties:
             type:
-              const: share.updated
+              const: collaborator.updated
             target_user_id:
               type: string
               description: The user id this event is delivered to (never broadcast to other subscribers).
             mode:
-              $ref: '#/components/schemas/ShareMode'
+              $ref: '#/components/schemas/AccessMode'
 
     WorkspaceEventWorkspaceArchived:
       description: |
@@ -3059,7 +3059,7 @@ components:
       pattern: ^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$
       example: NRB
 
-    ShareMode:
+    AccessMode:
       type: string
       enum:
         - readonly
@@ -3069,30 +3069,30 @@ components:
         - "readonly": Can view the workspace and its files, cannot make
           changes. Equivalent to viewing an archived workspace.
 
-    ShareStatus:
+    CollaboratorStatus:
       type: string
       enum:
         - pending
         - accepted
         - revoked
       description: |
-        Lifecycle status of a share.
+        Lifecycle status of a collaborator.
 
         - "pending": Granted by GitHub username to someone who hasn't
           onboarded to CEOS-ARD yet. Resolves to "accepted" automatically
           the moment they first sign in with GitHub.
         - "accepted": Active access, either granted immediately (existing
-          user, or via a redeemed share link) or auto-resolved from
+          user, or via a redeemed share) or auto-resolved from
           "pending".
-        - "revoked": Owner removed access. Sticky: reusing a share link the
+        - "revoked": Owner removed access. Sticky: reusing a share the
           person still holds does not restore it.
 
-    WorkspaceShare:
+    Collaborator:
       type: object
       description: |
         A single collaborator's access grant on a workspace, however it was
-        created - a direct share by username, or a redeemed share link (see
-        `share_link_id`). There is no separate "invitation" object: this row
+        created - added by username, or by redeeming a share (see
+        `share_id`). There is no separate "invitation" object: this row
         *is* the grant, from the moment it's created.
       required:
         - id
@@ -3106,28 +3106,28 @@ components:
         id:
           type: string
           format: uuid
-          description: Unique identifier of the share
+          description: Unique identifier of the collaborator entry
         workspace_id:
           type: string
           format: uuid
-          description: ID of the workspace this share belongs to
-        share_link_id:
+          description: ID of the workspace this collaborator belongs to
+        share_id:
           type:
             - string
             - "null"
           format: uuid
           description: |
-            ID of the share link this grant was created through, if any.
-            Null for shares created directly by username. Provenance only -
+            ID of the share this grant was created through, if any.
+            Null for collaborators added directly by username. Provenance only -
             does not affect permission evaluation.
           default: null
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
         status:
-          $ref: '#/components/schemas/ShareStatus'
+          $ref: '#/components/schemas/CollaboratorStatus'
         invitee_github_username:
           type: string
-          description: GitHub username this share was granted to
+          description: GitHub username this access was granted to
         invitee_user_id:
           type:
             - string
@@ -3135,39 +3135,39 @@ components:
           description: |
             User ID of the collaborator, once resolved.
 
-            Set immediately for shares granted to an existing CEOS-ARD user,
-            or on redeeming a share link. Null while `status` is "pending"
+            Set immediately for collaborators who already are CEOS-ARD users,
+            or on redeeming a share. Null while `status` is "pending"
             (the GitHub account has not logged in yet).
           default: null
         invited_by_user_id:
           type: string
-          description: User ID of the workspace owner who granted this share
+          description: User ID of the workspace owner who added this collaborator
         created_at:
           type: string
           format: date-time
-          description: When the share was created
+          description: When the collaborator was added
         accepted_at:
           type:
             - string
             - "null"
           format: date-time
-          description: When the share became active (immediately, or upon the invitee's first login if it started "pending")
+          description: When the access became active (immediately, or upon the invitee's first login if it started "pending")
           default: null
         revoked_at:
           type:
             - string
             - "null"
           format: date-time
-          description: When the owner revoked this share, if applicable
+          description: When the owner revoked this access, if applicable
           default: null
 
-    ShareCreateRequest:
+    CollaboratorCreateRequest:
       type: object
       description: |
         Grant one or more GitHub users access to a workspace. Access takes
         effect immediately (or automatically upon the invitee's next login,
         if they haven't onboarded yet). Each username is resolved to its
-        GitHub account id at creation and the share is bound to that id, so
+        GitHub account id at creation and the access is bound to that id, so
         a later rename of the username neither breaks nor transfers it.
       required:
         - github_usernames
@@ -3180,22 +3180,22 @@ components:
             type: string
           description: GitHub usernames to grant access to
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
 
-    ShareUpdateRequest:
+    CollaboratorUpdateRequest:
       type: object
       required:
         - mode
       properties:
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
 
-    WorkspaceShareLink:
+    Share:
       type: object
       description: |
-        A shareable, mode-bound, invitee-agnostic link for a workspace.
+        A mode-bound, invitee-agnostic share of a workspace, opened through its link.
         The mode is resolved live from this record on every use, not baked
-        into the token, so it can be changed without reissuing the link.
+        into the token, so it can be changed without reissuing the share.
       required:
         - id
         - workspace_id
@@ -3207,20 +3207,20 @@ components:
         id:
           type: string
           format: uuid
-          description: Unique identifier of the share link
+          description: Unique identifier of the share
         workspace_id:
           type: string
           format: uuid
-          description: ID of the workspace this link grants access to
+          description: ID of the workspace this share grants access to
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
         url:
           type: string
           format: uri
           description: The full shareable URL (`{clientUrl}/share/{token}`)
         created_by_user_id:
           type: string
-          description: User ID of the workspace owner who created the link
+          description: User ID of the workspace owner who created the share
         created_at:
           type: string
           format: date-time
@@ -3229,42 +3229,42 @@ components:
             - string
             - "null"
           format: date-time
-          description: Optional expiry. Null means the link does not expire.
+          description: Optional expiry. Null means the share does not expire.
           default: null
 
-    ShareLinkCreateRequest:
+    ShareCreateRequest:
       type: object
       required:
         - mode
       properties:
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
         expires_at:
           type:
             - string
             - "null"
           format: date-time
-          description: Optional expiry. Omit or set null for a link that does not expire.
+          description: Optional expiry. Omit or set null for a share that does not expire.
 
-    ShareLinkUpdateRequest:
+    ShareUpdateRequest:
       type: object
       description: All fields optional; only supplied fields are changed.
       properties:
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
         expires_at:
           type:
             - string
             - "null"
           format: date-time
 
-    ShareLinkPreview:
+    SharePreview:
       type: object
       description: |
-        Public, unauthenticated preview of a share link. Contains no
+        Public, unauthenticated preview of a share. Contains no
         sensitive workspace data - used by the client to render the share
         landing page and decide whether to prompt login or onboarding
-        before the link can be redeemed.
+        before the share can be redeemed.
       required:
         - workspace_title
         - owner_display_name
@@ -3277,18 +3277,18 @@ components:
           type: string
           description: Display name of the workspace owner
         mode:
-          $ref: '#/components/schemas/ShareMode'
+          $ref: '#/components/schemas/AccessMode'
 
     RedeemResponse:
       type: object
       required:
-        - share
+        - collaborator
         - workspace
       properties:
-        share:
+        collaborator:
           oneOf:
-            - $ref: '#/components/schemas/WorkspaceShare'
+            - $ref: '#/components/schemas/Collaborator'
             - type: "null"
-          description: Null when the requester is the workspace owner, who needs no share.
+          description: Null when the requester is the workspace owner, who needs no collaborator entry.
         workspace:
           $ref: '#/components/schemas/Workspace'

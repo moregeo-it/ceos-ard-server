@@ -28,7 +28,7 @@ class CloseSignal:
     reason: str
 
 
-# Queue overflow: closing beats dropping events silently (a lost share.revoked would leave the stream open).
+# Queue overflow: closing beats dropping events silently (a lost collaborator.revoked would leave the stream open).
 FORCE_RESYNC = CloseSignal(WS_CLOSE_RESYNC, "events dropped, resync")
 # Logout: the JWT cannot be invalidated, but its sockets can be closed.
 LOGGED_OUT = CloseSignal(WS_CLOSE_SESSION_EXPIRED, "logged out")

@@ -25,9 +25,9 @@ class EventType(str, Enum):
     WORKSPACE_UPDATED = "workspace.updated"
     # The owner generated the preview; every other client fetches GET .../previews/current.
     PREVIEW_GENERATED = "preview.generated"
-    SHARE_REVOKED = "share.revoked"
+    COLLABORATOR_REVOKED = "collaborator.revoked"
     # The owner changed this user's mode; sent only to that user, who refetches the workspace
-    SHARE_UPDATED = "share.updated"
+    COLLABORATOR_UPDATED = "collaborator.updated"
     WORKSPACE_ARCHIVED = "workspace.archived"
     WORKSPACE_DELETED = "workspace.deleted"
 
@@ -46,7 +46,7 @@ def build_event(
 
     `actor_user_id` is who caused the change. `old_path` is the pre-change path (file.renamed, and
     file.reverted when the revert undid a staged rename). `target_user_id`, if set, restricts
-    delivery to one subscriber (share.revoked). `seq`/`ts` are added on publish.
+    delivery to one subscriber (collaborator.revoked). `seq`/`ts` are added on publish.
 
     `actor_client_id` is the client that made the change (from the request context); the gateway
     withholds the event from that client's socket and strips the field before sending.
