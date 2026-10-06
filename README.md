@@ -319,6 +319,21 @@ SMTP_USER=your-email@example.com
 SMTP_PASSWORD=your-app-password
 ```
 
+#### 4. Idle Session Cleanup
+
+Revokes and clears the provider tokens of users without an authenticated request for a week (`users.last_seen_at`), so a leaked refresh token (valid six months unused) stops working. Affected users log in again with one click on their next visit.
+
+```bash
+# Preview
+pixi run python scripts/revoke_idle_tokens.py --dry-run
+
+# Run (default: 7 days idle)
+pixi run python scripts/revoke_idle_tokens.py
+
+# Other threshold
+pixi run python scripts/revoke_idle_tokens.py --days 14
+```
+
 #### Setting Up Cron Jobs
 
 **Recommended**: Set up automated cron jobs for all maintenance tasks.
@@ -339,6 +354,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 # Check token expiration weekly on Monday at 9 AM
 0 9 * * 1 cd /path/to/ceos-ard-server && pixi run python scripts/check_token_expiry.py >> logs/token_check.log 2>&1
+
+# Revoke the tokens of users idle for a week (weekly on Sunday at 3 AM)
+0 3 * * 0 cd /path/to/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
 ```
 
 **How it works:**

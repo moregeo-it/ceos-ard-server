@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.oauth.handler import oauth
+from app.services.github_service import GitHubService
 from app.utils.locks import refresh_locks
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,41 @@ class TokenRefreshService:
             "expires_in": expires_in,
             "refresh_token": user.refresh_token,
         }
+
+    @staticmethod
+    async def end_session(user: User, db: Session, github_service: GitHubService) -> None:
+        """Revoke the provider tokens (best effort) and clear them, which is what ends the session.
+
+        GitHub: the refresh token is rotated first, so any copy of it is dead for certain, then
+        the fresh access token is revoked and the fresh refresh token never stored.
+        """
+        provider = user.identity_provider
+        try:
+            if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
+                # The refresh token takes its access tokens with it; without one, revoke the access token
+                await TokenRefreshService.revoke_google_token(user.refresh_token or user.access_token)
+                logger.info(f"Revoked Google token for user {user.username}")
+            elif provider == IdentityProvider.github and (user.access_token or user.refresh_token):
+                token = user.access_token
+                if user.refresh_token:
+                    async with refresh_locks(user.id):
+                        try:
+                            rotated = await oauth.github.fetch_access_token(grant_type="refresh_token", refresh_token=user.refresh_token)
+                            token = rotated.get("access_token") or token
+                        except Exception as e:
+                            # Already rotated or expired: by a concurrent refresh, or by whoever holds a copy
+                            logger.warning(f"Refresh token of {user.username} could not be rotated before revocation: {e}")
+                if token:
+                    await github_service.revoke_oauth_token(token)
+                logger.info(f"Revoked GitHub token for user {user.username}")
+        except Exception as revoke_error:
+            logger.warning(f"Failed to revoke {provider.value} token for {user.username}: {revoke_error}")
+
+        user.access_token = None
+        user.refresh_token = None
+        user.token_expiry = None
+        user.updated_at = datetime.now(UTC)
+        db.commit()
 
     @staticmethod
     async def revoke_google_token(token: str) -> None:

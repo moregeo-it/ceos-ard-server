@@ -69,6 +69,16 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 0 9 * * 1 cd ~/ceos-ard-server && pixi run python scripts/check_token_expiry.py >> logs/token_check.log 2>&1
 
 # ============================================================================
+# 4. Idle Session Cleanup
+# ============================================================================
+# Revokes and clears the provider tokens of users with no activity for a week,
+# so a leaked refresh token stops working; they log in again on their next visit
+# Frequency: Weekly on Sunday at 3:00 AM
+# Duration: ~1 second per idle user (one or two GitHub calls each)
+#
+0 3 * * 0 cd ~/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
+
+# ============================================================================
 # Optional: Log Rotation (Clean up old log files)
 # ============================================================================
 # Delete log files older than 30 days to save disk space
@@ -85,11 +95,13 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 #   pixi run python scripts/check_pr_status.py --dry-run
 #   pixi run python scripts/cleanup_archived_workspaces.py --dry-run
 #   pixi run python scripts/check_token_expiry.py --force-email  # test email alerts
+#   pixi run python scripts/revoke_idle_tokens.py --dry-run
 #
 # To check if cron is running:
 #   tail -f logs/pr_status_check.log
 #   tail -f logs/workspace_cleanup.log
 #   tail -f logs/token_check.log
+#   tail -f logs/idle_tokens.log
 #
 # To check cron daemon on Linux:
 #   sudo systemctl status cron
