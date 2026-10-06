@@ -63,21 +63,43 @@ paths:
 
   /auth/login:
     get:
-      summary: Initiate GitHub login
-      description: Redirects to GitHub for authentication
+      summary: Initiate login
+      description: Redirects to the identity provider for authentication
       operationId: initiateLogin
       tags:
         - Authentication
       security: []
+      parameters:
+        - name: identity_provider
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - github
+              - google
+            default: github
+        - name: prompt
+          in: query
+          required: false
+          description: |
+            `select_account` makes GitHub show its account picker instead of reusing the browser's
+            GitHub session; the editor sends it when a tab has to switch back to its own account.
+          schema:
+            type: string
+            enum:
+              - select_account
       responses:
         '302':
-          description: Redirect to GitHub authentication
+          description: Redirect to the provider's authorization page
           headers:
             Location:
-              description: GitHub authentication URL
+              description: Provider authorization URL
               schema:
                 type: string
                 format: uri
+        '422':
+          description: Unknown identity provider
         '500':
           description: Internal server error
           content:
@@ -93,6 +115,10 @@ paths:
         the session cookie (the JWT, `HttpOnly; Secure; SameSite=Strict; Path=/`, for the JWT's
         lifetime) and redirects to the editor's `/auth/callback` without any parameters. The editor
         then reads the user and the session expiry from `GET /auth/user`.
+
+        GitHub is asked for an expiring token (`offline_access` scope): an 8-hour access token with
+        a refresh token, which the server uses to renew the session. A GitHub token issued without
+        an expiry cannot be renewed; that session ends after 8 hours.
 
         The editor and the API must be on the same site (same registrable domain, e.g.
         `editor.example.org` and `api.example.org`), otherwise the cookie is third-party and
@@ -139,9 +165,9 @@ paths:
     post:
       summary: Logout user
       description: |
-        Revokes the provider token, clears the session cookie and closes the user's realtime
-        sockets with `4001`. The JWT itself can't be invalidated, but it is refused afterwards
-        because the provider token is gone.
+        Revokes the provider token (best effort), clears the stored provider tokens and the session
+        cookie, and closes the user's realtime sockets with `4001`. The JWT itself can't be
+        invalidated, but it is refused afterwards because the provider token is gone.
       operationId: logout
       tags:
         - Authentication
@@ -155,6 +181,20 @@ paths:
               description: Expires the session cookie
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - message
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - success
+                  message:
+                    type: string
         '401':
           description: Unauthorized
           content:
@@ -165,7 +205,7 @@ paths:
   /auth/user:
     get:
       summary: Get current user information
-      description: The authenticated user and when the session ends. Browsers can't read the HttpOnly cookie, so `expires_at` is how the editor knows when to ask for a new login.
+      description: The authenticated user and when the session ends. Browsers can't read the HttpOnly cookie, so `expires_at` is how the editor knows when to ask for a new login. Renews an expired provider token first, like every authenticated request.
       operationId: getCurrentUser
       tags:
         - Authentication
@@ -207,7 +247,7 @@ paths:
                     format: date-time
                     description: When the JWT, and with it the session cookie, expires
         '401':
-          description: Unauthorized
+          description: The JWT is invalid, or the provider token expired and could not be renewed
           content:
             application/json:
               schema:
@@ -217,9 +257,10 @@ paths:
     post:
       summary: Validate the session and renew it if needed
       description: |
-        Validates the JWT (refreshing a Google provider token transparently) and renews it within
-        15 minutes of expiry. A cookie session is renewed with a fresh cookie; the JWT is returned
-        in the body (`access_token`) only to callers that sent it as a bearer header.
+        Validates the JWT, renewing an expired provider token transparently (Google, and GitHub
+        with expiring tokens), and renews the JWT within 15 minutes of expiry. A cookie session is
+        renewed with a fresh cookie; the JWT is returned in the body (`access_token`) only to
+        callers that sent it as a bearer header.
       operationId: validateSession
       tags:
         - Authentication
@@ -239,18 +280,38 @@ paths:
                 properties:
                   valid:
                     type: boolean
-                  expires_at:
+                  user_id:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+                  username:
+                    type: string
+                  provider:
+                    type: string
+                    enum:
+                      - github
+                      - google
+                  updated_at:
                     type: string
                     format: date-time
                   expires_in:
                     type: integer
+                  expires_at:
+                    type: string
+                    format: date-time
                   token_refreshed:
                     type: boolean
+                  token_type:
+                    type: string
+                    enum:
+                      - Bearer
+                    description: Bearer callers only
                   access_token:
                     type: string
-                    description: Bearer callers only
+                    description: Bearer callers only; the current JWT, or a fresh one when `token_refreshed` is true
         '401':
-          description: The JWT or the provider token expired
+          description: The JWT expired, or the provider token expired and could not be renewed
           content:
             application/json:
               schema:

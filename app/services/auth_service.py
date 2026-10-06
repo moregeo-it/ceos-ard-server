@@ -61,9 +61,10 @@ async def get_current_user(
 ) -> dict[str, Any]:
     """Validate the JWT and the user's provider token, and return the user.
 
-    Provider tokens are stored server-side and never exposed to clients. An expired Google token
-    is refreshed transparently; an expired GitHub token requires a new login (401). Because
-    logout clears the provider token, this is also what refuses a JWT after logout.
+    Provider tokens are stored server-side and never exposed to clients. An expired provider token
+    is renewed with its refresh token (Google always has one, GitHub since expiring tokens); without
+    one the session ends (401). Because logout clears the provider token, this is also what refuses
+    a JWT after logout.
 
     Returns:
         Dictionary with user object and provider name
@@ -73,27 +74,14 @@ async def get_current_user(
     """
     user = await _load_jwt_user(token, db)
 
-    if user.identity_provider == IdentityProvider.google:
-        # Google: Auto-refresh if token expired
-        if TokenRefreshService.is_token_expired(user):
-            logger.info(f"Google provider token expired for user {user.username}, auto-refreshing")
-            try:
-                await TokenRefreshService.refresh_google_token(user, db)
-                logger.info(f"Successfully auto-refreshed Google token for {user.username}")
-            except Exception as refresh_error:
-                logger.error(f"Failed to auto-refresh Google token for {user.username}: {refresh_error}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Provider token expired and refresh failed. Please log in again.",
-                ) from refresh_error
-    elif user.identity_provider == IdentityProvider.github:
-        # GitHub: No refresh available, check if token expired and require re-login
-        if TokenRefreshService.is_token_expired(user):
-            logger.warning(f"GitHub provider token expired for user {user.username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub access token expired. Please log in again.",
-            )
+    try:
+        await TokenRefreshService.ensure_fresh_token(user, db)
+    except HTTPException as refresh_error:
+        logger.warning(f"Provider token of {user.username} ({user.identity_provider.value}) could not be renewed: {refresh_error.detail}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Provider token expired and could not be renewed. Please log in again.",
+        ) from refresh_error
 
     logger.debug(f"JWT validated successfully for user {user.username} ({user.identity_provider})")
 
