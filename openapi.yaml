@@ -79,6 +79,16 @@ paths:
               - github
               - google
             default: github
+        - name: prompt
+          in: query
+          required: false
+          description: |
+            `select_account` makes GitHub show its account picker instead of reusing the browser's
+            GitHub session; the editor sends it when a tab has to switch back to its own account.
+          schema:
+            type: string
+            enum:
+              - select_account
       responses:
         '302':
           description: Redirect to the provider's authorization page

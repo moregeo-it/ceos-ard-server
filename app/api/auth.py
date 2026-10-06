@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
@@ -32,11 +33,19 @@ oauth_clients = {
 
 
 @router.get("/login", summary="Initiate login for a specific identity provider", description="Initiate login for a specific identity provider")
-async def initiate_login(request: Request, identity_provider: IdentityProvider = Query(IdentityProvider.github)):
+async def initiate_login(
+    request: Request,
+    identity_provider: IdentityProvider = Query(IdentityProvider.github),
+    prompt: Literal["select_account"] | None = Query(
+        None, description="GitHub only: show the account picker instead of reusing the browser's GitHub session"
+    ),
+):
     with internal_errors(f"initiate {identity_provider.value} login", logger):
         if identity_provider in oauth_clients:
             redirect_uri = f"{settings.CALLBACK_BASE_URI}/{identity_provider.value}"
-            return await oauth_clients[identity_provider].authorize_redirect(request, redirect_uri)
+            # GitHub only: Google sets its own prompt (see oauth.handler)
+            params = {"prompt": prompt} if prompt and identity_provider == IdentityProvider.github else {}
+            return await oauth_clients[identity_provider].authorize_redirect(request, redirect_uri, **params)
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
