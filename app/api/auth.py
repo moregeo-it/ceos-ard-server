@@ -133,8 +133,8 @@ async def current_user(current_user=Depends(get_current_user), token: str = Depe
 async def validate_auth(request: Request, response: Response, token: str = Depends(get_jwt_token), current_user=Depends(get_current_user)):
     """Validate the session and renew it within 15 minutes of expiry.
 
-    - Google: the provider token is refreshed transparently (in get_current_user)
-    - GitHub: 401 when the provider token expired (requires re-login)
+    - An expired provider token is renewed first (Google, and GitHub with expiring tokens)
+    - A provider token that cannot be renewed is a 401 (requires re-login)
 
     A cookie session is renewed by setting a fresh cookie; the JWT is returned in the body only to
     callers that sent it as a bearer header, so page scripts never get to read it.
@@ -154,11 +154,7 @@ async def validate_auth(request: Request, response: Response, token: str = Depen
 
         if token_refreshed:
             jwt_data = JWTService.create_access_token(user)
-            fresh_exp = datetime.fromisoformat(jwt_data["expires_at"])
-            # A GitHub session can't be extended past its provider token (see create_access_token)
-            token_refreshed = int(fresh_exp.timestamp()) > payload["exp"]
-            if token_refreshed:
-                token, jwt_exp = jwt_data["access_token"], fresh_exp
+            token, jwt_exp = jwt_data["access_token"], datetime.fromisoformat(jwt_data["expires_at"])
         logger.info(
             f"Token validation for {user.username} ({provider.value}): "
             f"JWT valid for {int(time_until_expiry.total_seconds() / 60)} minutes{', issued fresh JWT' if token_refreshed else ''}"
