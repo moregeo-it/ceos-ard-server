@@ -309,7 +309,7 @@ class GitHubService:
         """Look up a GitHub user by username.
 
         Returns the GitHub user object (including its canonical `login` casing) if the account
-        exists, or None if it doesn't. Used to validate GitHub usernames before granting workspace shares.
+        exists, or None if it doesn't. Used to validate GitHub usernames before granting workspace collaborations.
         """
         url = f"{self.base_url}/users/{username}"
         try:
