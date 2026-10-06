@@ -14,7 +14,7 @@ from yaml import load as yaml_load
 from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare
+from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator
 from app.schemas.events import EventType
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
@@ -123,22 +123,22 @@ class WorkspaceService:
             for workspace in owned:
                 workspace.annotate_viewer("owner", owner=user)
 
-            shares_by_workspace_id = {
+            collaborations_by_workspace_id = {
                 share.workspace_id: share
-                for share in db.query(WorkspaceShare)
-                .filter(WorkspaceShare.invitee_user_id == user.id, WorkspaceShare.status == ShareStatus.ACCEPTED)
+                for share in db.query(WorkspaceCollaborator)
+                .filter(WorkspaceCollaborator.invitee_user_id == user.id, WorkspaceCollaborator.status == CollaboratorStatus.ACCEPTED)
                 .all()
             }
-            shared = (
-                db.query(GitWorkspace).options(joinedload(GitWorkspace.user)).filter(GitWorkspace.id.in_(shares_by_workspace_id.keys())).all()
-                if shares_by_workspace_id
+            collaborations = (
+                db.query(GitWorkspace).options(joinedload(GitWorkspace.user)).filter(GitWorkspace.id.in_(collaborations_by_workspace_id.keys())).all()
+                if collaborations_by_workspace_id
                 else []
             )
-            for workspace in shared:
-                share = shares_by_workspace_id[workspace.id]
-                workspace.annotate_viewer(ShareMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else share.mode.value)
+            for workspace in collaborations:
+                collaboration = collaborations_by_workspace_id[workspace.id]
+                workspace.annotate_viewer(AccessMode.READONLY.value if workspace.status == WorkspaceStatus.ARCHIVED else collaboration.mode.value)
 
-            return owned + shared
+            return owned + collaborations
 
         except HTTPException:
             raise
@@ -147,7 +147,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user workspaces: {str(e)}") from e
 
     def get_workspace_by_id(
-        self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = ShareMode.READONLY.value
+        self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = AccessMode.READONLY.value
     ) -> GitWorkspace:
         try:
             if not workspace_id:
@@ -400,7 +400,7 @@ class WorkspaceService:
             self.broker.emit(workspace_id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id)
 
     async def sync_workspace(
-        self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = ShareMode.READONLY.value
+        self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = AccessMode.READONLY.value
     ) -> GitWorkspace | None:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role=min_role)
 

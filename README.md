@@ -193,11 +193,11 @@ pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 4096
 > multiple replicas): extra workers silently drop cross-worker events and their viewers miss live
 > updates. To scale horizontally, put a shared pub/sub (e.g. Redis) behind the `EventBroker`.
 
-> **Realtime WebSocket.** Clients never send data on `/workspaces/{id}/ws`, so `--ws-max-size 4096`
+> **Realtime WebSocket.** Clients never send data on `/workspaces/{id}/events`, so `--ws-max-size 4096`
 > caps inbound frames (larger frames are rejected with close code `1009`; any data frame at all closes
 > the socket with `1008`). The handshake checks the `Origin` header against `CORS_ORIGINS`, and the
 > server closes with `4001` when the JWT expires or the user logs out, `4003` when access is gone,
-> and `4009` when a client must reconnect and resync. See the `/workspaces/{workspaceId}/ws` entry in
+> and `4009` when a client must reconnect and resync. See the `/workspaces/{workspaceId}/events` entry in
 > `openapi.yaml`.
 
 The API will be available at:

@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.dependencies import get_share_service
 from app.schemas.share import (
+    CollaboratorCreateRequest,
+    CollaboratorResponse,
+    CollaboratorUpdateRequest,
     RedeemResponse,
     ShareCreateRequest,
-    ShareLinkCreateRequest,
-    ShareLinkPreview,
-    ShareLinkUpdateRequest,
+    SharePreview,
+    ShareResponse,
     ShareUpdateRequest,
-    WorkspaceShareLinkResponse,
-    WorkspaceShareResponse,
 )
 from app.schemas.workspace import WorkspaceResponse
 from app.services.auth_service import require_github_user
@@ -27,9 +27,79 @@ router = APIRouter(tags=["Sharing"])
 
 
 @router.get(
+    "/workspaces/{workspace_id}/collaborators",
+    summary="List the collaborators of a workspace",
+    response_model=list[CollaboratorResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_workspace_collaborators(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    share_service: ShareService = Depends(get_share_service),
+):
+    with internal_errors("list workspace collaborators", logger):
+        return await share_service.list_collaborators(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/collaborators",
+    summary="Add collaborators by GitHub username",
+    response_model=list[CollaboratorResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_workspace_collaborators(
+    workspace_id: str,
+    collaborator_data: CollaboratorCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    share_service: ShareService = Depends(get_share_service),
+):
+    with internal_errors("add workspace collaborators", logger):
+        return await share_service.add_collaborators(db=db, workspace_id=workspace_id, user=current_user["user"], request=collaborator_data)
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/collaborators/{collaborator_id}",
+    summary="Change a collaborator's access mode",
+    response_model=CollaboratorResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_workspace_collaborator(
+    workspace_id: str,
+    collaborator_id: str,
+    collaborator_data: CollaboratorUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    share_service: ShareService = Depends(get_share_service),
+):
+    with internal_errors("update workspace collaborator", logger):
+        return await share_service.update_collaborator(
+            db=db, workspace_id=workspace_id, collaborator_id=collaborator_id, user_id=current_user["user"].id, request=collaborator_data
+        )
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/collaborators/{collaborator_id}",
+    summary="Revoke a collaborator's access",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_workspace_collaborator(
+    workspace_id: str,
+    collaborator_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    share_service: ShareService = Depends(get_share_service),
+):
+    with internal_errors("revoke workspace collaborator", logger):
+        await share_service.revoke_collaborator(db=db, workspace_id=workspace_id, collaborator_id=collaborator_id, user_id=current_user["user"].id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
     "/workspaces/{workspace_id}/shares",
-    summary="List all shares for a workspace",
-    response_model=list[WorkspaceShareResponse],
+    summary="List the shares of a workspace",
+    response_model=list[ShareResponse],
     status_code=status.HTTP_200_OK,
 )
 async def list_workspace_shares(
@@ -44,25 +114,25 @@ async def list_workspace_shares(
 
 @router.post(
     "/workspaces/{workspace_id}/shares",
-    summary="Share a workspace with specific people",
-    response_model=list[WorkspaceShareResponse],
+    summary="Create a share",
+    response_model=ShareResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_workspace_shares(
+async def create_workspace_share(
     workspace_id: str,
     share_data: ShareCreateRequest,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    with internal_errors("create workspace shares", logger):
-        return await share_service.create_shares(db=db, workspace_id=workspace_id, user=current_user["user"], request=share_data)
+    with internal_errors("create workspace share", logger):
+        return await share_service.create_share(db=db, workspace_id=workspace_id, user=current_user["user"], request=share_data)
 
 
 @router.patch(
     "/workspaces/{workspace_id}/shares/{share_id}",
-    summary="Change a collaborator's access mode",
-    response_model=WorkspaceShareResponse,
+    summary="Update a share",
+    response_model=ShareResponse,
     status_code=status.HTTP_200_OK,
 )
 async def update_workspace_share(
@@ -81,117 +151,47 @@ async def update_workspace_share(
 
 @router.delete(
     "/workspaces/{workspace_id}/shares/{share_id}",
-    summary="Revoke a collaborator's access",
+    summary="Delete a share",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def revoke_workspace_share(
+async def delete_workspace_share(
     workspace_id: str,
     share_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    with internal_errors("revoke workspace share", logger):
-        await share_service.revoke_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id)
+    with internal_errors("delete workspace share", logger):
+        await share_service.delete_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
-    "/workspaces/{workspace_id}/share-links",
-    summary="List share links for a workspace",
-    response_model=list[WorkspaceShareLinkResponse],
-    status_code=status.HTTP_200_OK,
+    "/shares/{token}",
+    summary="Preview a share",
+    description="What a share leads to, for the share page before login. Public: no sensitive data.",
+    response_model=SharePreview,
 )
-async def list_workspace_share_links(
-    workspace_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(require_github_user),
-    share_service: ShareService = Depends(get_share_service),
-):
-    with internal_errors("list workspace share links", logger):
-        return await share_service.list_share_links(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+async def get_share_preview(token: str, db: Session = Depends(get_db), share_service: ShareService = Depends(get_share_service)):
+    with internal_errors("preview share", logger):
+        return await share_service.get_share_preview(db=db, token=token)
 
 
 @router.post(
-    "/workspaces/{workspace_id}/share-links",
-    summary="Create a share link",
-    response_model=WorkspaceShareLinkResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_workspace_share_link(
-    workspace_id: str,
-    link_data: ShareLinkCreateRequest,
-    db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(require_github_user),
-    share_service: ShareService = Depends(get_share_service),
-):
-    with internal_errors("create workspace share link", logger):
-        return await share_service.create_share_link(db=db, workspace_id=workspace_id, user=current_user["user"], request=link_data)
-
-
-@router.patch(
-    "/workspaces/{workspace_id}/share-links/{link_id}",
-    summary="Update a share link",
-    response_model=WorkspaceShareLinkResponse,
-    status_code=status.HTTP_200_OK,
-)
-async def update_workspace_share_link(
-    workspace_id: str,
-    link_id: str,
-    link_data: ShareLinkUpdateRequest,
-    db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(require_github_user),
-    share_service: ShareService = Depends(get_share_service),
-):
-    with internal_errors("update workspace share link", logger):
-        return await share_service.update_share_link(
-            db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id, request=link_data
-        )
-
-
-@router.delete(
-    "/workspaces/{workspace_id}/share-links/{link_id}",
-    summary="Delete a share link",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_workspace_share_link(
-    workspace_id: str,
-    link_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict[str, Any] = Depends(require_github_user),
-    share_service: ShareService = Depends(get_share_service),
-):
-    with internal_errors("delete workspace share link", logger):
-        await share_service.delete_share_link(db=db, workspace_id=workspace_id, link_id=link_id, user_id=current_user["user"].id)
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.get(
-    "/share-links/{token}",
-    summary="Preview a share link",
-    description="What a link leads to, for the share page before login. Public: no sensitive data.",
-    response_model=ShareLinkPreview,
-)
-async def get_share_link_preview(token: str, db: Session = Depends(get_db), share_service: ShareService = Depends(get_share_service)):
-    with internal_errors("preview share link", logger):
-        return await share_service.get_share_link_preview(db=db, token=token)
-
-
-@router.post(
-    "/share-links/{token}/redeem",
-    summary="Redeem a share link",
-    description="Grant the logged-in GitHub user the link's access to the workspace",
+    "/shares/{token}/redeem",
+    summary="Redeem a share",
+    description="Grant the logged-in GitHub user the share's access to the workspace",
     response_model=RedeemResponse,
 )
-async def redeem_share_link(
+async def redeem_share(
     token: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     share_service: ShareService = Depends(get_share_service),
 ):
-    with internal_errors("redeem share link", logger):
-        share, workspace = await share_service.redeem_share_link(db=db, token=token, user=current_user["user"])
+    with internal_errors("redeem share", logger):
+        collaborator, workspace = await share_service.redeem_share(db=db, token=token, user=current_user["user"])
         return RedeemResponse(
-            share=WorkspaceShareResponse.model_validate(share) if share else None,
+            collaborator=CollaboratorResponse.model_validate(collaborator) if collaborator else None,
             workspace=WorkspaceResponse.model_validate(workspace),
         )
