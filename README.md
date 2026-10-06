@@ -241,6 +241,7 @@ The application uses SQLite as the database backend:
 - **Automatic Creation**: Database and tables are created automatically on first run
 - **No Installation Required**: SQLite is built into Python
 - **Git Ignored**: Database files are automatically ignored by git
+- **Schema changes**: tables are created on first run, but an existing database is never altered. After pulling a change that adds a column, run `pixi run python scripts/migrate_schema.py`; it adds what is missing and is safe to repeat.
 
 ### Maintenance Tasks
 
@@ -431,6 +432,12 @@ Users authenticated with Google **cannot access workspace features**:
 - To use workspace features, users must authenticate with GitHub
 
 ## 🚧 Deployment
+
+### Updating an Existing Deployment
+
+1. Back up the database the WAL-safe way: `sqlite3 ceos_ard_server.db ".backup <dest>"`
+2. Add any new columns: `pixi run python scripts/migrate_schema.py`
+3. Start the new server; it creates any new tables itself
 
 ### Environment Variables for Production
 
