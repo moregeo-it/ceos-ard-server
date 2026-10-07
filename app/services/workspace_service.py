@@ -455,7 +455,9 @@ class WorkspaceService:
             update_dict = update_data.model_dump(exclude_unset=True)
 
             if not update_dict:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of description, title, or status must be provided")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of title, description, pfs or status must be provided"
+                )
 
             if "status" in update_dict and isinstance(update_dict["status"], str):
                 update_dict["status"] = update_dict["status"].upper()

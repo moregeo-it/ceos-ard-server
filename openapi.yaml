@@ -317,6 +317,7 @@ paths:
               type: object
               required:
                 - title
+                - pfs
               properties:
                 title:
                   type: string
@@ -328,6 +329,7 @@ paths:
                   description: Workspace description
                 pfs:
                   $ref: '#/components/schemas/pfs'
+                  minItems: 1
       responses:
         '201':
           description: Workspace created successfully
@@ -341,6 +343,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid request body, e.g. no PFS selected
         '401':
           description: Unauthorized
           content:
@@ -411,6 +415,7 @@ paths:
                   description: Workspace description
                 pfs:
                   $ref: '#/components/schemas/pfs'
+                  minItems: 1
                 status:
                   type: string
                   enum:
@@ -435,7 +440,7 @@ paths:
 
             Possible errors:
             - Cannot reactivate workspace with merged or closed pull request
-            - At least one of description, title, or status must be provided
+            - At least one of title, description, pfs or status must be provided
             - Invalid workspace status
           content:
             application/json:
@@ -446,6 +451,10 @@ paths:
                   summary: Cannot reactivate merged/closed workspace
                   value:
                     detail: Cannot reactivate an archived workspace with a merged or closed pull request
+        '422':
+          description: |
+            Invalid request body, e.g. an empty `pfs`. Only `description` can be cleared with null;
+            omit the other fields to keep them.
         '404':
           description: Workspace not found
           content:
