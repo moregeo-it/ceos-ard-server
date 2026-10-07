@@ -54,12 +54,12 @@ async def revoke_idle_tokens(days: int = 7, dry_run: bool = False) -> int:
                 logger.info(f"[DRY RUN] Would revoke the {user.identity_provider.value} tokens of {user.username} (idle {idle_days} days)")
                 continue
             try:
-                await TokenRefreshService.end_session(user, db, github_service)
+                await TokenRefreshService.end_session(user, db, github_service, keep_on_failure=True)
                 handled += 1
                 logger.info(f"Revoked the {user.identity_provider.value} tokens of {user.username} (idle {idle_days} days)")
             except Exception as e:
                 db.rollback()
-                logger.error(f"Failed to revoke the tokens of {user.username}: {e}")
+                logger.error(f"Could not revoke the tokens of {user.username}, kept for the next run: {e}")
     finally:
         db.close()
         await github_service.aclose()
