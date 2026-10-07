@@ -7,7 +7,7 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
-from app.db.types import UTCDateTime
+from app.db.types import EncryptedString, UTCDateTime
 
 
 class IdentityProvider(str, Enum):
@@ -24,8 +24,8 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     external_id = Column(String, unique=True, index=True, nullable=False)
     identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
-    access_token = Column(String, nullable=True)  # Provider's access token (stored server-side)
-    refresh_token = Column(String, nullable=True)  # Provider's refresh token (stored server-side)
+    access_token = Column(EncryptedString, nullable=True)  # Provider's access token (stored server-side, encrypted)
+    refresh_token = Column(EncryptedString, nullable=True)  # Provider's refresh token (stored server-side, encrypted)
     token_expiry = Column(UTCDateTime, nullable=True)  # Access token expiry
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
