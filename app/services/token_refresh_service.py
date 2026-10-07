@@ -149,8 +149,9 @@ class TokenRefreshService:
     async def end_session(user: User, db: Session, github_service: GitHubService) -> None:
         """Revoke the provider tokens (best effort) and clear them, which is what ends the session.
 
-        GitHub: the refresh token is rotated first, so any copy of it is dead for certain, then
-        the fresh access token is revoked and the fresh refresh token never stored.
+        GitHub: revoking a valid access token also kills its refresh token, but an expired one can't
+        be revoked (404), so it is renewed first and the fresh one revoked; the fresh refresh token is
+        never stored.
         """
         provider = user.identity_provider
         try:
@@ -160,7 +161,8 @@ class TokenRefreshService:
                 logger.info(f"Revoked Google token for user {user.username}")
             elif provider == IdentityProvider.github and (user.access_token or user.refresh_token):
                 token = user.access_token
-                if user.refresh_token:
+                # Same condition as ensure_fresh_token, so no concurrent refresh can run outside the lock
+                if user.refresh_token and TokenRefreshService.is_token_expired(user):
                     async with refresh_locks(user.id):
                         try:
                             rotated = await oauth.github.fetch_access_token(grant_type="refresh_token", refresh_token=user.refresh_token)
