@@ -7,9 +7,12 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from cryptography.fernet import InvalidToken
+from sqlalchemy import text
 
 from app.config import settings
 from app.db.database import engine
+from app.db.types import FERNET_PREFIX, token_cipher
 from app.utils import sandbox
 from app.utils.process import run
 
@@ -32,10 +35,12 @@ async def run_checks():
         "pixi": check_pixi,
         "Session cookie": check_session_cookie,
         "Database schema": check_database_schema,
+        "Token encryption": check_token_encryption,
     }
     # Missing tools only break builds, but a session misconfiguration exposes sessions in every environment,
-    # and an outdated schema breaks every request. Outside development, every check is fatal.
-    fatal_checks = {check_session_cookie, check_database_schema, check_toolchains_root}
+    # an outdated schema breaks every request, and a wrong token key fails every authenticated request.
+    # Outside development, every check is fatal.
+    fatal_checks = {check_session_cookie, check_database_schema, check_toolchains_root, check_token_encryption}
     failures = []
     fatal = False
     for check_name, check_func in checks.items():
@@ -68,6 +73,19 @@ async def check_session_cookie():
         raise Exception("CORS_ORIGINS must list exact origins, no wildcards")
     if settings.ENVIRONMENT != "development" and not settings.SESSION_COOKIE_SECURE:
         raise Exception("SESSION_COOKIE_SECURE=false is for local development over HTTP only")
+
+
+async def check_token_encryption():
+    """The key must be valid and decrypt the tokens already stored."""
+    cipher = token_cipher()
+    with engine.connect() as conn:
+        query = text("SELECT access_token FROM users WHERE access_token LIKE :prefix LIMIT 1")
+        stored = conn.execute(query, {"prefix": f"{FERNET_PREFIX}%"}).scalar()
+    if stored:
+        try:
+            cipher.decrypt(stored.encode())
+        except InvalidToken:
+            raise Exception("TOKEN_ENCRYPTION_KEY does not decrypt the stored tokens: list the previous key after it (README)") from None
 
 
 async def check_build_isolation():
