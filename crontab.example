@@ -73,10 +73,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 # ============================================================================
 # Revokes and clears the provider tokens of users with no activity for a week,
 # so a leaked refresh token stops working; they log in again on their next visit
-# Frequency: Weekly on Sunday at 3:00 AM
+# Frequency: Daily at 3:00 AM
 # Duration: ~1 second per idle user (one or two GitHub calls each)
 #
-0 3 * * 0 cd ~/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
+0 3 * * * cd ~/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
 
 # ============================================================================
 # Optional: Log Rotation (Clean up old log files)

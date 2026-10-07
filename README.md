@@ -356,8 +356,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 # Check token expiration weekly on Monday at 9 AM
 0 9 * * 1 cd /path/to/ceos-ard-server && pixi run python scripts/check_token_expiry.py >> logs/token_check.log 2>&1
 
-# Revoke the tokens of users idle for a week (weekly on Sunday at 3 AM)
-0 3 * * 0 cd /path/to/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
+# Revoke the tokens of users idle for a week (daily at 3 AM)
+0 3 * * * cd /path/to/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
 ```
 
 **How it works:**

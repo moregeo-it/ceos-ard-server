@@ -43,7 +43,13 @@ async def revoke_idle_tokens(days: int = 7, dry_run: bool = False) -> int:
         idle = db.query(User).filter((User.access_token.isnot(None)) | (User.refresh_token.isnot(None)), last_seen < cutoff).order_by(last_seen).all()
         logger.info(f"{len(idle)} user(s) with tokens and no activity since {cutoff.date()}")
         for user in idle:
-            idle_days = (datetime.now(UTC) - (user.last_seen_at or user.updated_at)).days
+            # The row was loaded before the GitHub calls for earlier users; a login since then is not idle
+            db.refresh(user)
+            seen = user.last_seen_at or user.updated_at
+            if seen >= cutoff or not (user.access_token or user.refresh_token):
+                logger.info(f"Skipped {user.username}: active since the query")
+                continue
+            idle_days = (datetime.now(UTC) - seen).days
             if dry_run:
                 logger.info(f"[DRY RUN] Would revoke the {user.identity_provider.value} tokens of {user.username} (idle {idle_days} days)")
                 continue
