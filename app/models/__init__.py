@@ -1,6 +1,6 @@
 from app.models.user import IdentityProvider, User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
-from app.models.workspace_share import ShareMode, ShareStatus, WorkspaceShare, WorkspaceShareLink
+from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator, WorkspaceShare
 
 __all__ = [
     "IdentityProvider",
@@ -8,8 +8,8 @@ __all__ = [
     "GitWorkspace",
     "PullRequestStatus",
     "WorkspaceStatus",
-    "ShareMode",
-    "ShareStatus",
+    "AccessMode",
+    "CollaboratorStatus",
+    "WorkspaceCollaborator",
     "WorkspaceShare",
-    "WorkspaceShareLink",
 ]

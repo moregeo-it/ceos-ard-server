@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workspaces", tags=["Realtime"])
 
 # Delivering one of these ends the connection: the viewer's access is gone, so it shouldn't reconnect.
-# This is also what makes mid-session revocation close the socket - `share.revoked` is targeted at the
-# revoked user (see share_service.revoke_share), so only their connection receives it and then closes.
-_CLOSING_EVENTS = {EventType.SHARE_REVOKED.value, EventType.WORKSPACE_DELETED.value}
+# This is also what makes mid-session revocation close the socket - `collaborator.revoked` is targeted at the
+# revoked user (see share_service.revoke_collaborator), so only their connection receives it and then closes.
+_CLOSING_EVENTS = {EventType.COLLABORATOR_REVOKED.value, EventType.WORKSPACE_DELETED.value}
 
 # Gateway-only fields, stripped before sending.
 _INTERNAL_FIELDS = frozenset({"actor_client_id"})
@@ -71,8 +71,8 @@ def _own_change(event: dict[str, Any], user_id: str, client_id: str | None) -> b
     return client_id is not None and event.get("actor_user_id") == user_id and event.get("actor_client_id") == client_id
 
 
-@router.websocket("/{workspace_id}/ws")
-async def workspace_ws(websocket: WebSocket, workspace_id: str):
+@router.websocket("/{workspace_id}/events")
+async def workspace_events(websocket: WebSocket, workspace_id: str):
     """Real-time workspace event stream over WebSocket.
 
     Handshake: Origin check → JWT from the session cookie (browsers send it on the handshake) or an
