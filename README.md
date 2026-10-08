@@ -31,6 +31,9 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 - **PFS Discovery**: List available PFS types from CEOS-ARD repository
 - **PFS Creation**: Create and manage PFS documents within workspaces
+- **PFS IDs**: 2 to 10 capital letters or digits (e.g. `NRB`), like every official PFS. No dashes or other
+  characters: IDs become file names and CLI arguments, and `-` joins them in build outputs. This may be
+  widened if CEOS needs it.
 - **Template Integration**: Work with standardized PFS templates
 
 ### Preview & Build System

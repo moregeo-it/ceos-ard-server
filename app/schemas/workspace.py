@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from app.config import settings
 
 # PFS ids become folder and file names and arguments of the ceos-ard CLI
-PFS_ID_PATTERN = r"^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$"
-PfsId = Annotated[str, StringConstraints(pattern=PFS_ID_PATTERN, max_length=10)]
+# Capital letters and digits only, like every official PFS id: "-" joins ids in build output names
+# (build_service.output_prefix). Widen it if CEOS ever needs other characters.
+PFS_ID_PATTERN = r"^[A-Z0-9]{2,10}$"
+PfsId = Annotated[str, StringConstraints(pattern=PFS_ID_PATTERN)]
 
 
 class WorkspaceError(BaseModel):
