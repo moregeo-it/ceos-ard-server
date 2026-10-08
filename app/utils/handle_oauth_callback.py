@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.services.jwt_service import JWTService
+from app.services.share_service import activate_pending_collaborators
 from app.services.token_refresh_service import TokenRefreshService
+from app.utils.session_cookie import set_session_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +41,10 @@ async def handle_oauth_callback(request: Request, db: Session, provider: str, oa
         # GitHub includes expires_in and a refresh token only with expiring tokens (offline_access scope)
         user_to_use = await create_or_update_user(db, user_info, provider, token)
 
-        # Generate JWT token for client (never expose provider token)
-        # JWT expiry is derived from provider token expiry stored in user.token_expiry
+        # The JWT goes into the HttpOnly session cookie only, never into the redirect URL
         jwt_data = JWTService.create_access_token(user_to_use)
-
-        # Build redirect URL with JWT token (not provider token)
-        redirect_url = (
-            f"{settings.AUTH_SUCCESS_CLIENT_REDIRECT}"
-            f"?access_token={jwt_data['access_token']}"
-            f"&token_type={jwt_data['token_type']}"
-            f"&expires_in={jwt_data['expires_in']}"
-            f"&user_id={user_to_use.id}"
-            f"&username={user_to_use.username}"
-            f"&provider={provider}"
-        )
-
-        response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
+        response = RedirectResponse(url=settings.AUTH_SUCCESS_CLIENT_REDIRECT, status_code=status.HTTP_302_FOUND)
+        set_session_cookie(response, jwt_data["access_token"], datetime.fromisoformat(jwt_data["expires_at"]))
 
         logger.info(f"User {user_to_use.username} logged in successfully via {provider}")
         return response
@@ -105,9 +95,11 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             existing_user.refresh_token = refresh_token
             existing_user.token_expiry = token_expiry
             existing_user.updated_at = datetime.now(UTC)
+            existing_user.last_seen_at = datetime.now(UTC)
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
+            activate_pending_collaborators(db, existing_user)
             return existing_user
         else:
             new_user = User(
@@ -121,6 +113,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
                 token_expiry=token_expiry,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
+                last_seen_at=datetime.now(UTC),
             )
 
             db.add(new_user)
@@ -128,6 +121,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             db.refresh(new_user)
 
             logger.info(f"Created new {provider} user: {new_user.username}")
+            activate_pending_collaborators(db, new_user)
             return new_user
 
     except SQLAlchemyError as e:

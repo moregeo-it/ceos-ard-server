@@ -8,6 +8,10 @@ from fastapi import HTTPException, status
 
 from app.schemas.error import create_error_detail
 
+# For workspace files and previews, which users write: opened as a page on the API origin, they get an
+# opaque origin and can't run scripts, so they can't act with the viewer's session cookie
+USER_CONTENT_HEADERS = {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
+
 
 @contextmanager
 def internal_errors(operation: str, logger: logging.Logger) -> Generator[None]:

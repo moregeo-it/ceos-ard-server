@@ -10,12 +10,14 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
+from app.schemas.events import EventType
 from app.schemas.workspace import FilePatchRequest, SyncStatus
+from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
-from app.utils.git_utils import get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.locks import run_exclusive
 from app.utils.pfs_utils import PlainStringSafeLoader
 from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
@@ -25,9 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 class FileService:
-    def __init__(self, git_service: GitService | None = None, workspace_service: WorkspaceService | None = None):
+    def __init__(self, git_service: GitService | None = None, workspace_service: WorkspaceService | None = None, broker: EventBroker | None = None):
         self.git_service = git_service or GitService()
-        self.workspace_service = workspace_service or WorkspaceService()
+        self.broker = broker or event_broker
+        self.workspace_service = workspace_service or WorkspaceService(git_service=self.git_service, broker=self.broker)
         self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
@@ -185,7 +188,7 @@ class FileService:
         elif request_data.type not in ["file", "folder"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         name = validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
         target_path = folder / name
@@ -203,7 +206,11 @@ class FileService:
             else:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
 
-        return await run_exclusive(workspace_id, transaction)
+        result = await run_exclusive(workspace_id, transaction)
+
+        # Published after the lock is released
+        self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result)
+        return result
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -214,7 +221,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
 
         async def transaction():
@@ -241,13 +248,16 @@ class FileService:
             except Exception as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
 
-        return await run_exclusive(workspace_id, transaction)
+        result = await run_exclusive(workspace_id, transaction)
+
+        self.broker.emit(workspace_id, EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result)
+        return result
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not file_path:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File path is required")
 
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
 
         async def transaction():
             target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
@@ -329,14 +339,39 @@ class FileService:
                 },
             }
 
-        return await run_exclusive(workspace_id, transaction)
+        result = await run_exclusive(workspace_id, transaction)
+
+        self.broker.emit(
+            workspace_id,
+            EventType.FILE_DELETED,
+            actor_user_id=user_id,
+            path=result["file_details"]["path"],
+            file=result["file_details"],
+            tracked=result["tracked"],
+        )
+        return result
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if operation_request.operation == "rename":
-            return await run_exclusive(workspace_id, lambda: self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target))
+            result = await run_exclusive(
+                workspace_id, lambda: self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+            )
+            self.broker.emit(workspace_id, EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path)
+            return result
         elif operation_request.operation == "revert":
-            return await run_exclusive(workspace_id, lambda: self._revert_file_changes(workspace.abs_path, file_path))
+            result = await run_exclusive(workspace_id, lambda: self._revert_file_changes(workspace.abs_path, file_path))
+            # old_path is only meaningful when the revert undid a staged rename.
+            reverted_rename = result.get("path") != file_path
+            self.broker.emit(
+                workspace_id,
+                EventType.FILE_REVERTED,
+                actor_user_id=user_id,
+                path=file_path,
+                file=result,
+                old_path=file_path if reverted_rename else None,
+            )
+            return result
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
 
@@ -470,7 +505,8 @@ class FileService:
         return search_results
 
     async def get_changed_files(self, db: Session, workspace_id: str, user_id: str):
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        # The changed-files list is exclusively surfaced in the Propose view, which is owner-only.
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         repo = get_repo(workspace.abs_path)
         return get_repo_changes(repo)
 
@@ -529,7 +565,7 @@ class FileService:
         logger.warning(f"No parent commit to revert to for workspace {workspace_id} ({reason})")
 
     async def persist_changes(self, db: Session, workspace_id: str, user: User, message: str) -> tuple[pygit2.Commit, bool]:
-        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id)
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
 
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot commit changes for an archived workspace")
@@ -550,9 +586,18 @@ class FileService:
         async def transaction():
             repo = get_repo(workspace.abs_path)
 
+            # Capture the staged change list before committing - the index diff is empty afterwards.
+            # Paths from git are repo-relative; normalize them to the /-rooted form used everywhere else.
+            changes = get_repo_changes(repo)
+            for change in changes:
+                change["path"] = "/" + change["path"].lstrip("/")
+                if "source" in change:
+                    change["source"] = "/" + change["source"].lstrip("/")
+
             # Commit and push changes to the repository
             commit = await self.git_service.commit_changes(repo, message, user=user)
-            merged_remote = False
+            # Set when the recovery sync below also brought remote changes into the working tree
+            remote_sync: SyncStatus | None = None
 
             try:
                 # Recreates the fork first if it has been deleted on GitHub, then retries. Anything
@@ -577,7 +622,7 @@ class FileService:
                     raise push_error from None
 
                 if sync_result.status == SyncStatus.MERGED:
-                    merged_remote = True
+                    remote_sync = SyncStatus.MERGED
                     try:
                         await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
                     except HTTPException:
@@ -601,15 +646,24 @@ class FileService:
                     # The commit is on GitHub after all: the failed push was applied there, or the
                     # sync pushed it. Reverting it now would commit the same changes twice.
                     # A fast-forward on top of it also brought remote changes into the workspace.
-                    merged_remote = sync_result.status == SyncStatus.UPDATED
+                    if sync_result.status == SyncStatus.UPDATED:
+                        remote_sync = SyncStatus.UPDATED
                 else:
                     # The commit did not reach GitHub: undo it, leaving the changes staged
                     self._revert_commit(repo, workspace_id, commit.id, reason="the push was rejected and the commit never reached GitHub")
                     raise push_error from None
 
-            return commit, merged_remote
+            return commit, remote_sync, changes
 
-        return await run_exclusive(workspace_id, transaction)
+        commit, remote_sync, changes = await run_exclusive(workspace_id, transaction)
+
+        # Only after the transaction: a reverted commit (rejected push, conflict) never happened
+        # from the subscribers' point of view. Published outside the lock.
+        self.broker.emit(workspace_id, EventType.FILE_COMMITTED, actor_user_id=user.id, commit=format_commit(commit), changes=changes)
+        if remote_sync:
+            self.broker.emit(workspace_id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=remote_sync.value)
+
+        return commit, remote_sync is not None
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
         """

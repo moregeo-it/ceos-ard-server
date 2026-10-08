@@ -7,7 +7,7 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 ### Authentication & Authorization
 
 - **OAuth Integration**: Support for GitHub and Google OAuth providers
-- **JWT Token Management**: Secure token-based authentication
+- **Session Cookie**: The JWT lives in an HttpOnly cookie, never in the browser's storage or in URLs
 - **User Management**: Automatic user creation and profile management
 - **GitHub-Only Workspaces**: All workspace features exclusively available to GitHub users
 
@@ -31,6 +31,9 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 - **PFS Discovery**: List available PFS types from CEOS-ARD repository
 - **PFS Creation**: Create and manage PFS documents within workspaces
+- **PFS IDs**: 2 to 10 capital letters or digits (e.g. `NRB`), like every official PFS. No dashes or other
+  characters: IDs become file names and CLI arguments, and `-` joins them in build outputs. This may be
+  widened if CEOS needs it.
 - **Template Integration**: Work with standardized PFS templates
 
 ### Preview & Build System
@@ -106,6 +109,15 @@ The following properties should be changed at least:
 - `SECRET_KEY` (for JWT token signing)
 - `ENVIRONMENT` (development/production)
 
+The editor and the API must run on the **same site**, i.e. under the same registrable domain
+(`editor.ceos-ard.moregeo.it` and `api.ceos-ard.moregeo.it`; in development both on `localhost`).
+The session cookie is then first-party, so browsers don't block it as a third-party cookie.
+`CORS_ORIGINS` must list the exact editor origin (e.g. `http://localhost:5173`), no wildcards.
+
+For local development over plain HTTP in **Safari**, set `SESSION_COOKIE_SECURE=false`: Safari drops
+`Secure` cookies on `http://localhost`. Chrome and Firefox accept them there, so the default works.
+Only for `ENVIRONMENT=development`; the server refuses to start with it otherwise.
+
 ### 5. OAuth Setup
 
 #### GitHub OAuth App (Required)
@@ -169,21 +181,34 @@ For automated maintenance scripts (PR status checker and workspace cleanup), you
 pixi run dev
 
 # Or use uvicorn directly
-pixi run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+pixi run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --ws-max-size 4096
 ```
 
 ### Production Mode
 
 ```bash
 # Start the production server
-pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000
+pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 4096
 ```
+
+> **Run a single worker process.** The realtime event stream uses an in-memory broker that is not
+> shared across processes, so do **not** pass `--workers N` (or run gunicorn with multiple workers /
+> multiple replicas): extra workers silently drop cross-worker events and their viewers miss live
+> updates. To scale horizontally, put a shared pub/sub (e.g. Redis) behind the `EventBroker`.
+
+> **Realtime WebSocket.** Clients never send data on `/workspaces/{id}/events`, so `--ws-max-size 4096`
+> caps inbound frames (larger frames are rejected with close code `1009`; any data frame at all closes
+> the socket with `1008`). The handshake checks the `Origin` header against `CORS_ORIGINS`, and the
+> server closes with `4001` when the JWT expires or the user logs out, `4003` when access is gone,
+> and `4009` when a client must reconnect and resync. See the `/workspaces/{workspaceId}/events` entry in
+> `openapi.yaml`.
 
 The API will be available at:
 
 - **API**: <http://localhost:8000>
-- **Interactive Docs**: <http://localhost:8000/docs>
-- **ReDoc**: <http://localhost:8000/redoc>
+
+The API contract is [`openapi.yaml`](openapi.yaml); open it in any OpenAPI viewer. The server serves no
+docs pages of its own.
 
 ## 🧪 Development
 
@@ -219,6 +244,7 @@ The application uses SQLite as the database backend:
 - **Automatic Creation**: Database and tables are created automatically on first run
 - **No Installation Required**: SQLite is built into Python
 - **Git Ignored**: Database files are automatically ignored by git
+- **Schema changes**: tables are created on first run, but an existing database is never altered. After pulling a change that adds a column, run `pixi run python scripts/migrate_schema.py`; it adds what is missing and is safe to repeat.
 
 ### Maintenance Tasks
 
@@ -297,6 +323,21 @@ SMTP_USER=your-email@example.com
 SMTP_PASSWORD=your-app-password
 ```
 
+#### 4. Idle Session Cleanup
+
+Revokes and clears the provider tokens of users without an authenticated request for a week (`users.last_seen_at`), so a leaked refresh token (valid six months unused) stops working. Affected users log in again with one click on their next visit.
+
+```bash
+# Preview
+pixi run python scripts/revoke_idle_tokens.py --dry-run
+
+# Run (default: 7 days idle)
+pixi run python scripts/revoke_idle_tokens.py
+
+# Other threshold
+pixi run python scripts/revoke_idle_tokens.py --days 14
+```
+
 #### Setting Up Cron Jobs
 
 **Recommended**: Set up automated cron jobs for all maintenance tasks.
@@ -317,6 +358,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 # Check token expiration weekly on Monday at 9 AM
 0 9 * * 1 cd /path/to/ceos-ard-server && pixi run python scripts/check_token_expiry.py >> logs/token_check.log 2>&1
+
+# Revoke the tokens of users idle for a week (daily at 3 AM)
+0 3 * * * cd /path/to/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
 ```
 
 **How it works:**
@@ -344,9 +388,16 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 ## 🔐 Security Features
 
 - **OAuth 2.0**: Secure authentication via GitHub/Google
-- **JWT Tokens**: Stateless authentication tokens
-- **Session Security**: Signed session cookies with `itsdangerous`
-- **CORS Protection**: Configurable cross-origin resource sharing
+- **Session Cookie**: The JWT in an `HttpOnly; Secure; SameSite=Strict` `__Host-session` cookie; scripts and
+  tests can still send it as an `Authorization: Bearer` header
+- **Cross-Site Request Protection**: POST, PUT, PATCH and DELETE requests authenticated by the cookie must send
+  `X-Client-Id`, which a foreign page can't add without passing the CORS check. So must the three GET requests that
+  change data (workspace and proposal refresh the pull request state, download builds the document)
+- **User Content Sandbox**: Workspace files and previews are served with `Content-Security-Policy: sandbox`, so a
+  script in them can't run on the API origin with the session cookie
+- **OAuth State**: Signed `__Host-oauth_state` cookie with `itsdangerous` between login and callback; the prefix keeps
+  sibling hosts of the same site from planting their own state
+- **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only
 - **Input Sanitization**: Protection against malicious input
 - **User Isolation**: Workspaces are isolated per user
 - **Provider-based Authorization**: Workspace access restricted to GitHub users only
@@ -385,6 +436,12 @@ Users authenticated with Google **cannot access workspace features**:
 
 ## 🚧 Deployment
 
+### Updating an Existing Deployment
+
+1. Back up the database the WAL-safe way: `sqlite3 ceos_ard_server.db ".backup <dest>"`
+2. Add any new columns: `pixi run python scripts/migrate_schema.py`
+3. Start the new server; it creates any new tables itself
+
 ### Environment Variables for Production
 
 ```bash
@@ -399,6 +456,9 @@ ENVIRONMENT=production
 
 # Use a strong secret key
 SECRET_KEY=your-production-secret-key
+
+# The exact editor origin, on the same site as SERVER_URL (see Environment Configuration)
+CORS_ORIGINS=https://yourdomain.com
 
 # Use absolute path for database in production
 DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
@@ -417,8 +477,13 @@ RUN curl -fsSL https://pixi.sh/install.sh | bash
 RUN pixi install
 
 EXPOSE 8000
-CMD ["pixi", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["pixi", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--ws-max-size", "4096"]
 ```
+
+> **Single worker only.** Keep the server to one worker process (no `--workers`, no multi-worker
+> gunicorn, a single replica). The realtime `EventBroker` is in-memory and per-process, so extra
+> workers or replicas silently drop cross-worker realtime events. Horizontal scaling requires a shared
+> pub/sub (e.g. Redis) behind the broker.
 
 ## 🤝 Contributing
 

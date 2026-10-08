@@ -44,6 +44,8 @@ class GitWorkspace(Base):
     archived_at = Column(UTCDateTime, nullable=True)
 
     user = relationship("User", back_populates="workspaces")
+    collaborators = relationship("WorkspaceCollaborator", back_populates="workspace", cascade="all, delete-orphan")
+    shares = relationship("WorkspaceShare", back_populates="workspace", cascade="all, delete-orphan")
 
     @property
     def abs_path(self) -> Path:
@@ -52,6 +54,14 @@ class GitWorkspace(Base):
     @property
     def branch_name(self) -> str:
         return f"workspace/{self.id}"
+
+    def annotate_viewer(self, role: str, owner=None) -> "GitWorkspace":
+        """Set the per-request response fields (not columns): the caller's role and the owner's names."""
+        owner = owner if owner is not None else self.user
+        self.viewer_role = role
+        self.owner_username = owner.username if owner else None
+        self.owner_full_name = owner.full_name if owner else None
+        return self
 
     @property
     def deletion_at(self):

@@ -1,9 +1,16 @@
 from datetime import datetime
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.config import settings
+
+# PFS ids become folder and file names and arguments of the ceos-ard CLI
+# Capital letters and digits only, like every official PFS id: "-" joins ids in build output names
+# (build_service.output_prefix). Widen it if CEOS ever needs other characters.
+PFS_ID_PATTERN = r"^[A-Z0-9]{2,10}$"
+PfsId = Annotated[str, StringConstraints(pattern=PFS_ID_PATTERN)]
 
 
 class WorkspaceError(BaseModel):
@@ -14,6 +21,11 @@ class WorkspaceError(BaseModel):
 class WorkspaceStatus(str, Enum):
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+class ViewerRole(str, Enum):
+    OWNER = "owner"
+    READONLY = "readonly"
 
 
 class SyncStatus(str, Enum):
@@ -38,14 +50,14 @@ class SyncResult(BaseModel):
 
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
-    pfs: list[str] | None = Field(None, max_length=10, description="PFS to preview")
+    pfs: list[PfsId] | None = Field(None, max_length=10, description="PFS to preview")
     description: str | None = Field(None, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
     description: str | None = Field(None, max_length=1000, description="New workspace description (send null to clear)")
-    pfs: list[str] | None = Field(None, max_length=10, description="PFS to update (send null to clear)")
+    pfs: list[PfsId] | None = Field(None, max_length=10, description="PFS to update (send null to clear)")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
 
 
@@ -68,6 +80,9 @@ class WorkspaceResponse(BaseModel):
     updated_at: datetime
     archived_at: datetime | None
     deletion_at: datetime | None  # Computed from archived_at + 1 month
+    viewer_role: ViewerRole = Field(description="The current authenticated user's effective role on this workspace")
+    owner_username: str | None = Field(None, description="GitHub username of the workspace owner")
+    owner_full_name: str | None = Field(None, description="Full name of the workspace owner")
 
 
 class ProposalRequest(BaseModel):
@@ -133,11 +148,11 @@ class RequirementCategory(BaseModel):
 
 
 class CreatePFSRequest(BaseModel):
-    id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
+    id: PfsId = Field(..., description="PFS ID")
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
     version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
-    base: str | None = Field(None, description="Base PFS ID")
+    base: PfsId | None = Field(None, description="Base PFS ID")
     type: str | None = Field(None, description="PFS type")
     introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
 
@@ -151,7 +166,7 @@ class PfsType(BaseModel):
 
 
 class PFSTypesResponse(BaseModel):
-    pfsTypes: list[PfsType]
+    pfs_types: list[PfsType]
 
 
 class FileResponse(BaseModel):

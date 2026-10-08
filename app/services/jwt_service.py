@@ -33,7 +33,7 @@ class JWTService:
         logged out after 8 hours.
 
         The backend handles provider token differences transparently:
-        - GitHub: 8-hour provider token, renewed with its refresh token (a token without one ends the session)
+        - GitHub: 8-hour provider token, renewed with its refresh token; a token without one ends the session when it expires
         - Google: 1-hour provider token, auto-refreshed (JWT independent of provider)
 
         Args:
