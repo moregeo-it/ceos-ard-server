@@ -95,6 +95,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
             existing_user.refresh_token = refresh_token
             existing_user.token_expiry = token_expiry
             existing_user.updated_at = datetime.now(UTC)
+            existing_user.last_seen_at = datetime.now(UTC)
 
             db.commit()
             logger.info(f"Updated existing {provider} user: {existing_user.username}")
@@ -112,6 +113,7 @@ async def create_or_update_user(db: Session, user_info: dict[str, Any], provider
                 token_expiry=token_expiry,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
+                last_seen_at=datetime.now(UTC),
             )
 
             db.add(new_user)

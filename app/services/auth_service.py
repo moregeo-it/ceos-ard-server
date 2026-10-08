@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
@@ -82,6 +83,12 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Provider token expired and could not be renewed. Please log in again.",
         ) from refresh_error
+
+    # Activity for the idle cleanup, written at most once an hour
+    now = datetime.now(UTC)
+    if user.last_seen_at is None or now - user.last_seen_at > timedelta(hours=1):
+        user.last_seen_at = now
+        db.commit()
 
     logger.debug(f"JWT validated successfully for user {user.username} ({user.identity_provider})")
 

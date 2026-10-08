@@ -3,12 +3,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+from authlib.integrations.base_client import OAuthError
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import IdentityProvider, User
 from app.oauth.handler import oauth
+from app.services.github_service import GitHubService
 from app.utils.locks import refresh_locks
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,88 @@ class TokenRefreshService:
             "expires_in": expires_in,
             "refresh_token": user.refresh_token,
         }
+
+    @staticmethod
+    async def end_session(user: User, db: Session, github_service: GitHubService, keep_on_failure: bool = False) -> None:
+        """Revoke the provider tokens and clear them, which is what ends the session.
+
+        GitHub: revoking a valid access token also kills its refresh token, but an expired one can't
+        be revoked (404), so it is renewed first and the fresh one revoked; the fresh refresh token is
+        never stored.
+
+        Logout clears the tokens even when the provider can't confirm the revocation; with
+        keep_on_failure (the idle cleanup) that raises instead and the tokens stay for the next run.
+        """
+        provider = user.identity_provider
+        try:
+            if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
+                await TokenRefreshService._revoke_google_tokens(user)
+            elif provider == IdentityProvider.github and (user.access_token or user.refresh_token):
+                await TokenRefreshService._revoke_github_tokens(user, db, github_service)
+        except Exception as revoke_error:
+            if keep_on_failure:
+                raise
+            logger.warning(f"Failed to revoke {provider.value} token for {user.username}: {revoke_error}")
+
+        user.access_token = None
+        user.refresh_token = None
+        user.token_expiry = None
+        user.updated_at = datetime.now(UTC)
+        db.commit()
+
+    @staticmethod
+    async def _revoke_google_tokens(user: User) -> None:
+        """Raises unless the tokens are revoked or already invalid."""
+        try:
+            # The refresh token takes its access tokens with it; without one, revoke the access token
+            await TokenRefreshService.revoke_google_token(user.refresh_token or user.access_token)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 400:
+                raise
+            logger.info(f"Google token of {user.username} was already invalid")
+            return
+        logger.info(f"Revoked Google token for user {user.username}")
+
+    @staticmethod
+    async def _revoke_github_tokens(user: User, db: Session, github_service: GitHubService) -> None:
+        """Raises unless the tokens are known to be dead: revoked, rotated or already invalid."""
+        token = user.access_token
+        # Same condition as ensure_fresh_token; the lock is per process, so it doesn't cover the cron script
+        if user.refresh_token and TokenRefreshService.is_token_expired(user):
+            async with refresh_locks(user.id):
+                # A request may have renewed the pair while we waited
+                db.refresh(user)
+                token = user.access_token
+                if user.refresh_token and TokenRefreshService.is_token_expired(user):
+                    try:
+                        rotated = await oauth.github.fetch_access_token(grant_type="refresh_token", refresh_token=user.refresh_token)
+                    except OAuthError as e:
+                        if e.error != "bad_refresh_token":
+                            raise
+                        # Nothing left to revoke on our side, and revoking can't stop the copy that renewed it
+                        logger.error(
+                            f"Refresh token of {user.username} was already used or revoked: a copy may be in use "
+                            "elsewhere, or the app was revoked on GitHub. Follow up with the user."
+                        )
+                        return
+                    # The old pair is dead now; nobody else holds the fresh one
+                    try:
+                        if rotated.get("access_token"):
+                            await github_service.revoke_oauth_token(rotated["access_token"])
+                    except Exception as e:
+                        logger.warning(f"Rotated GitHub token of {user.username} not revoked, nobody holds it: {e}")
+                    logger.info(f"Revoked GitHub token for user {user.username}")
+                    return
+        if not token:
+            return
+        try:
+            await github_service.revoke_oauth_token(token)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+            logger.info(f"GitHub token of {user.username} was already invalid")
+            return
+        logger.info(f"Revoked GitHub token for user {user.username}")
 
     @staticmethod
     async def revoke_google_token(token: str) -> None:

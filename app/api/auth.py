@@ -72,26 +72,8 @@ async def logout(
 ):
     with internal_errors("logout user", logger):
         user = current_user["user"]
-        provider = current_user["provider"]
 
-        # Best effort: clearing the tokens below is what ends the session, even when the provider is unreachable
-        try:
-            if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
-                # The refresh token takes its access tokens with it; without one, revoke the access token
-                await TokenRefreshService.revoke_google_token(user.refresh_token or user.access_token)
-                logger.info(f"Revoked Google token for user {user.username}")
-            elif provider == IdentityProvider.github and user.access_token:
-                await github_service.revoke_oauth_token(user.access_token)
-                logger.info(f"Revoked GitHub token for user {user.username}")
-        except Exception as revoke_error:
-            logger.warning(f"Failed to revoke {provider.value} token for {user.username}: {revoke_error}")
-
-        # Clear provider tokens from database
-        user.access_token = None
-        user.refresh_token = None
-        user.token_expiry = None
-        user.updated_at = datetime.now(UTC)
-        db.commit()
+        await TokenRefreshService.end_session(user, db, github_service)
 
         # The JWT cannot be invalidated; its realtime sockets close with 4001 (re-login before reconnecting).
         closed_sockets = get_event_broker().close_user_connections(user.id)

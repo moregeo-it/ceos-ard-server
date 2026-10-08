@@ -29,6 +29,7 @@ class User(Base):
     token_expiry = Column(UTCDateTime, nullable=True)  # Access token expiry
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
+    last_seen_at = Column(UTCDateTime, nullable=True)  # Last authenticated request, kept to the hour
 
     workspaces = relationship("GitWorkspace", back_populates="user")
 
