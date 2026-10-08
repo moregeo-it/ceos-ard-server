@@ -107,6 +107,7 @@ The following properties should be changed at least:
 - `GITHUB_CLIENT_SECRET` (for OAuth login)
 - `GITHUB_SERVICE_TOKEN` (for automated maintenance tasks - see setup below)
 - `SECRET_KEY` (for JWT token signing)
+- `TOKEN_ENCRYPTION_KEY` (encrypts the provider tokens in the database; see [.env.example](./.env.example))
 - `ENVIRONMENT` (development/production)
 
 The editor and the API must run on the **same site**, i.e. under the same registrable domain
@@ -402,6 +403,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 - **User Isolation**: Workspaces are isolated per user
 - **Provider-based Authorization**: Workspace access restricted to GitHub users only
 - **Token Refresh**: Provider tokens are renewed with their refresh token (Google, and GitHub with expiring tokens); a GitHub token without one requires a new login after 8 hours
+- **Tokens Encrypted at Rest**: Provider tokens are encrypted with `TOKEN_ENCRYPTION_KEY` from `.env`. A copied
+  database, such as a backup, is useless without it, but a compromised server has both, so keep backups apart from
+  `.env`. Run `scripts/encrypt_tokens.py` after upgrading or rotating the key. A lost key means clearing the tokens
+  (`UPDATE users SET access_token = NULL, refresh_token = NULL, token_expiry = NULL`); everyone logs in again
 
 ## 🔑 Authorization Model
 

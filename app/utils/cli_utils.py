@@ -4,7 +4,12 @@ import subprocess
 import sys
 import tomllib
 
+from cryptography.fernet import InvalidToken
+from sqlalchemy import text
+
 from app.config import settings
+from app.db.database import engine
+from app.db.types import FERNET_PREFIX, token_cipher
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +57,11 @@ async def run_checks():
         "CEOS-ARD CLI": check_ceos_ard_cli,
         "Playwright": check_playwright,
         "Session cookie": check_session_cookie,
+        "Token encryption": check_token_encryption,
     }
     # Missing tools only break builds, but a session misconfiguration exposes sessions in every environment
-    fatal_checks = {check_session_cookie}
+    # and a wrong token key fails every authenticated request
+    fatal_checks = {check_session_cookie, check_token_encryption}
     failures = []
     fatal = False
     for check_name, check_func in checks.items():
@@ -78,6 +85,19 @@ async def check_session_cookie():
         raise Exception("CORS_ORIGINS must list exact origins, no wildcards")
     if settings.ENVIRONMENT != "development" and not settings.SESSION_COOKIE_SECURE:
         raise Exception("SESSION_COOKIE_SECURE=false is for local development over HTTP only")
+
+
+async def check_token_encryption():
+    """The key must be valid and decrypt the tokens already stored."""
+    cipher = token_cipher()
+    with engine.connect() as conn:
+        query = text("SELECT access_token FROM users WHERE access_token LIKE :prefix LIMIT 1")
+        stored = conn.execute(query, {"prefix": f"{FERNET_PREFIX}%"}).scalar()
+    if stored:
+        try:
+            cipher.decrypt(stored.encode())
+        except InvalidToken:
+            raise Exception("TOKEN_ENCRYPTION_KEY does not decrypt the stored tokens: list the previous key after it (README)") from None
 
 
 async def check_playwright():
