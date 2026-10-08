@@ -1267,13 +1267,12 @@ paths:
         `preview.generated` event.
 
         Owner only: a build writes into the workspace, and this build is what everyone else sees.
-        Other users fetch it with `GET .../previews/current`.
+        Other users fetch it with `GET .../previews/current`. Builds the workspace's saved PFS list.
       operationId: generatePreview
       tags:
         - Previews
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/PfsType'
         - $ref: '#/components/parameters/ClientId'
       responses:
         '200':
@@ -1283,6 +1282,12 @@ paths:
               schema:
                 type: string
                 description: HTML content of the preview
+        '400':
+          description: The workspace has no PFS selected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '202':
           description: Preview generation in progress
           content:
@@ -1355,7 +1360,6 @@ paths:
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/FilePath'
-        - $ref: '#/components/parameters/PfsType'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
@@ -1724,13 +1728,13 @@ paths:
                 - title
               properties:
                 base:
-                  type:
-                    - string
-                    - "null"
+                  anyOf:
+                    - $ref: '#/components/schemas/pfsId'
+                    - type: "null"
                   description: Existing PFS to base the new one on
                   default: null
                 id:
-                  type: string
+                  $ref: '#/components/schemas/pfsId'
                   description: ID for the new PFS
                 title:
                   type: string
@@ -2272,14 +2276,11 @@ components:
       in: query
       style: form
       explode: true
-      description: |-
-        PFS type for preview generation.
-
-        If not provided, uses the default PFS type(s) that have been selected during workspace creation.
+      description: PFS of the document; anyone but the owner must send the workspace's PFS list
       schema:
         type: array
         items:
-          type: string
+          $ref: '#/components/schemas/pfsId'
 
     DocumentFormat:
       name: format
@@ -3116,8 +3117,9 @@ components:
 
     pfsId:
       type: string
-      description: PFS type identifier
+      description: PFS type identifier, the name of its folder under `pfs/`; other values are rejected
       pattern: ^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$
+      maxLength: 10
       example: NRB
 
     AccessMode:

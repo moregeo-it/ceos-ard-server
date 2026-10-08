@@ -34,26 +34,28 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
         return build_info["output_file"]
 
-    async def generate_preview(self, db: Session, pfs: list[str] | None, workspace_id: str, user_id: str):
-        # Owner only: a build writes into the workspace, and this build is what everyone else sees
+    async def generate_preview(self, db: Session, workspace_id: str, user_id: str):
+        # Owner only: a build writes into the workspace, and this build is what everyone else sees.
+        # Always the saved selection, which is what GET .../previews/current reads back.
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        pfs_selection = pfs or workspace.pfs
 
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
-            prefix = await self._build(workspace, pfs_selection)
+            prefix = await self._build(workspace, workspace.pfs)
             html = await self._get_preview_files(workspace.abs_path, file_prefix=prefix)
 
-        self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(pfs_selection or []))
+        self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(workspace.pfs))
         return html
 
     async def get_current_preview(self, db: Session, workspace_id: str, user_id: str):
         """The owner's last build for the workspace's PFS list, without building."""
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        if not workspace.pfs:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
         prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
 
         async with build_locks(workspace_id):
-            if not workspace.pfs or not Path(prefix + ".html").exists():
+            if not Path(prefix + ".html").exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
             return await self._get_preview_files(workspace.abs_path, file_prefix=prefix)
 

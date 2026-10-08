@@ -1,9 +1,14 @@
 from datetime import datetime
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.config import settings
+
+# PFS ids become folder and file names and arguments of the ceos-ard CLI
+PFS_ID_PATTERN = r"^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$"
+PfsId = Annotated[str, StringConstraints(pattern=PFS_ID_PATTERN, max_length=10)]
 
 
 class WorkspaceError(BaseModel):
@@ -43,14 +48,14 @@ class SyncResult(BaseModel):
 
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
-    pfs: list[str] | None = Field(None, max_length=10, description="PFS to preview")
+    pfs: list[PfsId] | None = Field(None, max_length=10, description="PFS to preview")
     description: str | None = Field(None, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
     description: str | None = Field(None, max_length=1000, description="New workspace description (send null to clear)")
-    pfs: list[str] | None = Field(None, max_length=10, description="PFS to update (send null to clear)")
+    pfs: list[PfsId] | None = Field(None, max_length=10, description="PFS to update (send null to clear)")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
 
 
@@ -141,11 +146,11 @@ class RequirementCategory(BaseModel):
 
 
 class CreatePFSRequest(BaseModel):
-    id: str = Field(..., min_length=1, max_length=10, description="PFS ID")
+    id: PfsId = Field(..., description="PFS ID")
     title: str = Field(..., min_length=1, max_length=100, description="PFS title")
     version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
     applies_to: str | None = Field(None, description="Description of the PFS")
-    base: str | None = Field(None, description="Base PFS ID")
+    base: PfsId | None = Field(None, description="Base PFS ID")
     type: str | None = Field(None, description="PFS type")
     introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
 

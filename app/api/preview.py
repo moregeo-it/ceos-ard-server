@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_preview_service
+from app.schemas.workspace import PfsId
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
 from app.utils.http_utils import USER_CONTENT_HEADERS, compute_file_etag, if_none_match_matches, internal_errors
@@ -27,12 +28,11 @@ router = APIRouter(prefix="/workspaces", tags=["Previews"])
 async def generate_preview(
     workspace_id: str,
     db: Session = Depends(get_db),
-    pfs: list[str] | None = Query(default=None, min_items=1, max_items=50),
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
 ):
     with internal_errors("generate preview", logger):
-        generated_previews = await preview_service.generate_preview(db=db, pfs=pfs, workspace_id=workspace_id, user_id=current_user["user"].id)
+        generated_previews = await preview_service.generate_preview(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
 
         # Preview HTML is regenerated on every request; never let the browser cache it.
         return Response(
@@ -114,7 +114,7 @@ async def download_preview_document(
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
     format: str = Query(..., enum=["pdf", "docx"]),
-    pfs: list[str] = Query(min_items=1, max_items=50),
+    pfs: list[PfsId] = Query(min_items=1, max_items=50),
 ):
     media_types = {
         "pdf": "application/pdf",

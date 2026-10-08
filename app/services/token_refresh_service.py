@@ -147,32 +147,48 @@ class TokenRefreshService:
         }
 
     @staticmethod
-    async def end_session(user: User, db: Session, github_service: GitHubService, keep_on_failure: bool = False) -> None:
-        """Revoke the provider tokens and clear them, which is what ends the session.
+    async def end_session(user: User, db: Session, github_service: GitHubService, unattended: bool = False) -> bool:
+        """Revoke the provider tokens and clear them, which is what ends the session; False if it was left.
 
         GitHub: revoking a valid access token also kills its refresh token, but an expired one can't
         be revoked (404), so it is renewed first and the fresh one revoked; the fresh refresh token is
         never stored.
 
-        Logout clears the tokens even when the provider can't confirm the revocation; with
-        keep_on_failure (the idle cleanup) that raises instead and the tokens stay for the next run.
+        Logout always clears. Unattended (the idle cleanup), a revocation the provider can't confirm
+        raises, and a session renewed meanwhile by a login is left alone; both keep the tokens.
         """
         provider = user.identity_provider
+        # Changes with every login and refresh, so it identifies the session being ended
+        session_expiry = user.token_expiry
         try:
             if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
                 await TokenRefreshService._revoke_google_tokens(user)
             elif provider == IdentityProvider.github and (user.access_token or user.refresh_token):
-                await TokenRefreshService._revoke_github_tokens(user, db, github_service)
+                await TokenRefreshService._revoke_github_tokens(user, db, github_service, unattended)
         except Exception as revoke_error:
-            if keep_on_failure:
+            if unattended:
                 raise
             logger.warning(f"Failed to revoke {provider.value} token for {user.username}: {revoke_error}")
+
+        if unattended:
+            # One statement, so a login landing during the revocation above keeps its new tokens
+            rows = (
+                db.query(User)
+                .filter(User.id == user.id, User.token_expiry.is_not_distinct_from(session_expiry))
+                .update(
+                    {User.access_token: None, User.refresh_token: None, User.token_expiry: None, User.updated_at: datetime.now(UTC)},
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            return rows == 1
 
         user.access_token = None
         user.refresh_token = None
         user.token_expiry = None
         user.updated_at = datetime.now(UTC)
         db.commit()
+        return True
 
     @staticmethod
     async def _revoke_google_tokens(user: User) -> None:
@@ -188,14 +204,17 @@ class TokenRefreshService:
         logger.info(f"Revoked Google token for user {user.username}")
 
     @staticmethod
-    async def _revoke_github_tokens(user: User, db: Session, github_service: GitHubService) -> None:
+    async def _revoke_github_tokens(user: User, db: Session, github_service: GitHubService, unattended: bool = False) -> None:
         """Raises unless the tokens are known to be dead: revoked, rotated or already invalid."""
         token = user.access_token
         # Same condition as ensure_fresh_token; the lock is per process, so it doesn't cover the cron script
         if user.refresh_token and TokenRefreshService.is_token_expired(user):
             async with refresh_locks(user.id):
                 # A request may have renewed the pair while we waited
+                seen_expiry = user.token_expiry
                 db.refresh(user)
+                if unattended and user.token_expiry != seen_expiry:
+                    return  # a login's new session, not the idle one; end_session leaves it
                 token = user.access_token
                 if user.refresh_token and TokenRefreshService.is_token_expired(user):
                     try:
