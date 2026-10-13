@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, StringConstraints, model_validator
 
 from app.config import settings
 
@@ -50,15 +50,23 @@ class SyncResult(BaseModel):
 
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
-    pfs: list[PfsId] | None = Field(None, max_length=10, description="PFS to preview")
+    pfs: list[str] = Field(..., min_length=1, max_length=10, description="PFS to preview, at least one")
     description: str | None = Field(None, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
     description: str | None = Field(None, max_length=1000, description="New workspace description (send null to clear)")
-    pfs: list[PfsId] | None = Field(None, max_length=10, description="PFS to update (send null to clear)")
+    pfs: list[str] | None = Field(None, min_length=1, max_length=10, description="New PFS to preview, at least one")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
+
+    @field_validator("title", "pfs", "status")
+    @classmethod
+    def not_null(cls, value):
+        """Omitting a field keeps it; only the description can be cleared with null."""
+        if value is None:
+            raise ValueError("cannot be null, omit it to keep the current value")
+        return value
 
 
 class WorkspaceResponse(BaseModel):
