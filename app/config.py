@@ -54,6 +54,8 @@ class Settings:
     CEOS_ARD_BRANCH: str = os.getenv("CEOS_ARD_BRANCH", "main")
 
     SECRET_KEY: str = os.getenv("SECRET_KEY")
+    # Fernet keys for the provider tokens at rest, comma-separated: the first encrypts, all decrypt (key rotation)
+    TOKEN_ENCRYPTION_KEYS: list[str] = [key.strip() for key in os.getenv("TOKEN_ENCRYPTION_KEY", "").split(",") if key.strip()]
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ceos_ard_server.db")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI", f"{SERVER_URL}/auth/callback")
