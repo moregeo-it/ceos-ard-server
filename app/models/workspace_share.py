@@ -19,7 +19,6 @@ class AccessMode(str, Enum):
 class CollaboratorStatus(str, Enum):
     PENDING = "pending"
     ACCEPTED = "accepted"
-    REVOKED = "revoked"
 
 
 class WorkspaceCollaborator(Base):
@@ -40,7 +39,6 @@ class WorkspaceCollaborator(Base):
     created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
     updated_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     accepted_at = Column(UTCDateTime, nullable=True)
-    revoked_at = Column(UTCDateTime, nullable=True)
 
     workspace = relationship("GitWorkspace", back_populates="collaborators")
     invitee_user = relationship("User", foreign_keys=[invitee_user_id])

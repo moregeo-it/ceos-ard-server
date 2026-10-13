@@ -1848,8 +1848,8 @@ paths:
           `pending` and activates automatically the moment that person signs
           in with GitHub for the first time.
         - Adding a username that already is a collaborator on this
-          workspace updates the existing entry's mode (and reactivates it if
-          it was previously `revoked`) rather than creating a duplicate.
+          workspace updates the existing entry's mode rather than creating a
+          duplicate.
       operationId: addWorkspaceCollaborators
       tags:
         - Sharing
@@ -1950,12 +1950,11 @@ paths:
                 $ref: '#/components/schemas/Error'
 
     delete:
-      summary: Revoke a collaborator's access
+      summary: Remove a collaborator
       description: |
-        Revokes a person's access to the workspace, whether added by username or joined through a share.
-        Takes effect immediately on their next request. Revocation is sticky:
-        if they still hold a share for this workspace, opening it again will
-        not restore access - the owner must add them again. Owner only.
+        Removes a person's access to the workspace, whether added by username or joined through a share.
+        Takes effect immediately on their next request. Like in Google Docs, a share they still hold
+        lets them join again: delete the share to keep them out. Owner only.
       operationId: revokeWorkspaceCollaborator
       tags:
         - Sharing
@@ -1965,7 +1964,7 @@ paths:
         - $ref: '#/components/parameters/CollaboratorId'
       responses:
         '204':
-          description: Collaborator revoked successfully
+          description: Collaborator removed
         '404':
           description: Workspace or collaborator not found
           content:
@@ -2214,7 +2213,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Logged in with another provider than GitHub, or this user's access was previously revoked by the owner
+          description: Logged in with another provider than GitHub
           content:
             application/json:
               schema:
@@ -3147,7 +3146,6 @@ components:
       enum:
         - pending
         - accepted
-        - revoked
       description: |
         Lifecycle status of a collaborator.
 
@@ -3157,8 +3155,6 @@ components:
         - "accepted": Active access, either granted immediately (existing
           user, or via a redeemed share) or auto-resolved from
           "pending".
-        - "revoked": Owner removed access. Sticky: reusing a share the
-          person still holds does not restore it.
 
     Collaborator:
       type: object
@@ -3225,13 +3221,6 @@ components:
             - "null"
           format: date-time
           description: When the access became active (immediately, or upon the invitee's first login if it started "pending")
-          default: null
-        revoked_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-          description: When the owner revoked this access, if applicable
           default: null
 
     CollaboratorCreateRequest:

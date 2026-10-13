@@ -28,7 +28,6 @@ class CollaboratorResponse(BaseModel):
     invited_by_user_id: str
     created_at: datetime
     accepted_at: datetime | None = None
-    revoked_at: datetime | None = None
 
 
 class ShareCreateRequest(BaseModel):

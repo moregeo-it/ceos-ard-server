@@ -81,7 +81,7 @@ async def update_workspace_collaborator(
 
 @router.delete(
     "/workspaces/{workspace_id}/collaborators/{collaborator_id}",
-    summary="Revoke a collaborator's access",
+    summary="Remove a collaborator",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def revoke_workspace_collaborator(

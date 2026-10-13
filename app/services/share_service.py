@@ -200,13 +200,8 @@ class ShareService:
             if collaborator:
                 collaborator.mode = mode
                 collaborator.invitee_github_username = canonical_username
-                collaborator.revoked_at = None
                 if existing_ceos_user:
                     collaborator.accept(existing_ceos_user.id, canonical_username, now)
-                elif collaborator.status == CollaboratorStatus.REVOKED:
-                    collaborator.status = CollaboratorStatus.PENDING
-                    collaborator.invitee_user_id = None
-                    collaborator.accepted_at = None
             else:
                 collaborator = WorkspaceCollaborator(
                     workspace_id=workspace.id,
@@ -250,20 +245,17 @@ class ShareService:
             )
         return collaborator
 
-    async def revoke_collaborator(self, db: Session, workspace_id: str, collaborator_id: str, user_id: str) -> WorkspaceCollaborator:
+    async def revoke_collaborator(self, db: Session, workspace_id: str, collaborator_id: str, user_id: str) -> None:
         self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, exists=False, min_role="owner")
         collaborator = self._get_child_or_404(db, WorkspaceCollaborator, collaborator_id, workspace_id, "Collaborator not found")
 
-        collaborator.status = CollaboratorStatus.REVOKED
-        collaborator.revoked_at = datetime.now(UTC)
+        invitee_user_id = collaborator.invitee_user_id
+        db.delete(collaborator)
         db.commit()
-        db.refresh(collaborator)
 
         # Only the affected user is told; the gateway closes their connection after delivery
-        if collaborator.invitee_user_id:
-            self.broker.emit(workspace_id, EventType.COLLABORATOR_REVOKED, actor_user_id=user_id, target_user_id=collaborator.invitee_user_id)
-
-        return collaborator
+        if invitee_user_id:
+            self.broker.emit(workspace_id, EventType.COLLABORATOR_REVOKED, actor_user_id=user_id, target_user_id=invitee_user_id)
 
     # --- Shares ---
 
@@ -362,9 +354,6 @@ class ShareService:
             .filter(WorkspaceCollaborator.workspace_id == workspace.id, WorkspaceCollaborator.invitee_github_id == user.external_id)
             .first()
         )
-
-        if collaborator and collaborator.status == CollaboratorStatus.REVOKED:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access to this workspace was previously revoked by the owner")
 
         if not collaborator or collaborator.status != CollaboratorStatus.ACCEPTED:
             now = datetime.now(UTC)
