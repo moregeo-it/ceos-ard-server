@@ -2283,6 +2283,7 @@ components:
     PfsType:
       name: pfs
       in: query
+      required: true
       style: form
       explode: true
       description: PFS of the document; anyone but the owner must send the workspace's PFS list
@@ -2553,6 +2554,7 @@ components:
         - created
         - pr
         - user_id
+        - viewer_role
       properties:
         id:
           type: string
