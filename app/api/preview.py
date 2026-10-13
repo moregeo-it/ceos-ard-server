@@ -103,7 +103,6 @@ async def get_preview_static_file(
 @router.get(
     "/{workspace_id}/download",
     summary="Download Previews PDF Document or DOCX",
-    # Builds the document for the owner
     dependencies=[Depends(require_client_id)],
     description="Download Previews PDF Document or DOCX for a workspace",
     status_code=status.HTTP_200_OK,
@@ -122,13 +121,7 @@ async def download_preview_document(
     }
     media_type = media_types.get(format, "application/octet-stream")
     with internal_errors("download preview document", logger):
-        document_file = await preview_service.download_preview_document(
+        content, filename = await preview_service.download_preview_document(
             db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
         )
-
-        return FileResponse(
-            path=document_file["path"],
-            filename=document_file["name"],
-            media_type=media_type,
-            headers={"Content-Disposition": f"attachment; filename={document_file['name']}"},
-        )
+        return Response(content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
