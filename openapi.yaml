@@ -2234,7 +2234,8 @@ components:
       description: |
         The browser session: the JWT in an HttpOnly cookie set by the OAuth callback. Requests
         that change data (POST, PUT, PATCH, DELETE) authenticated this way must send
-        `X-Client-Id`, otherwise they are rejected with `403`. GET requests never change data.
+        `X-Client-Id`, otherwise they are rejected with `403`; so must the few GET requests that change
+        data, which list that `403`.
         With `SESSION_COOKIE_SECURE=false` (local HTTP development only) the cookie is called
         `ceos_ard_session` and is not `Secure`.
     bearerAuth:

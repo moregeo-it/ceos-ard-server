@@ -40,8 +40,9 @@ def request_token(connection: HTTPConnection) -> str | None:
 def lacks_client_id(request: Request) -> bool:
     """Cross-site request protection for the session cookie: another page, even on a sibling host of the same
     site, can make the browser send the cookie, but can't add a custom header without a CORS preflight, which
-    only CORS_ORIGINS pass. A bearer header is not sent automatically, so those requests need no client id."""
-    return not request.headers.get(CLIENT_ID_HEADER) and not bearer_token(request)
+    only CORS_ORIGINS pass. A bearer header is not sent automatically, so those requests need no client id,
+    nor do requests without the cookie, which authentication then refuses."""
+    return bool(request.cookies.get(settings.SESSION_COOKIE_NAME)) and not request.headers.get(CLIENT_ID_HEADER) and not bearer_token(request)
 
 
 async def require_client_id(request: Request) -> None:

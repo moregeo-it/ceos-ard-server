@@ -50,14 +50,14 @@ class SyncResult(BaseModel):
 
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
-    pfs: list[str] = Field(..., min_length=1, max_length=10, description="PFS to preview, at least one")
+    pfs: list[PfsId] = Field(..., min_length=1, max_length=10, description="PFS to preview, at least one")
     description: str | None = Field(None, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
     description: str | None = Field(None, max_length=1000, description="New workspace description (send null to clear)")
-    pfs: list[str] | None = Field(None, min_length=1, max_length=10, description="New PFS to preview, at least one")
+    pfs: list[PfsId] | None = Field(None, min_length=1, max_length=10, description="New PFS to preview, at least one")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
 
     @field_validator("title", "pfs", "status")

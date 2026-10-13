@@ -170,6 +170,10 @@ class ShareService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"GitHub username(s) not found: {', '.join(invalid_usernames)}",
             )
+        # Organizations and bots can't log in, so their invite would stay pending forever
+        not_users = [gh_user["login"] for gh_user in github_users if gh_user.get("type") != "User"]
+        if not_users:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Not personal GitHub accounts: {', '.join(not_users)}")
 
         now = datetime.now(UTC)
         try:

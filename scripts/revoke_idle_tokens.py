@@ -75,5 +75,7 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=7, help="Days without activity before tokens are revoked (default: 7)")
     parser.add_argument("--dry-run", action="store_true", help="List the users without revoking anything")
     args = parser.parse_args()
+    if args.days < 1:
+        parser.error("--days must be at least 1")
     handled = asyncio.run(revoke_idle_tokens(days=args.days, dry_run=args.dry_run))
     logger.info(f"Done: {handled} user(s) revoked")
