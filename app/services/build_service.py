@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -23,7 +24,10 @@ class BuildService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one PFS for the preview")
         if not all(re.fullmatch(PFS_ID_PATTERN, pfs_id) for pfs_id in pfs):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PFS id")
-        return str((build_dir or workspace_path / "build") / "-".join(pfs))
+        name = "-".join(pfs)
+        if len(name) > 200:  # a file name holds at most 255 bytes
+            name = hashlib.sha256(name.encode()).hexdigest()
+        return str((build_dir or workspace_path / "build") / name)
 
     async def build(
         self, workspace_path: Path, workspace_id: str, pfs: list[str], include_format: str | None = None, build_dir: Path | None = None

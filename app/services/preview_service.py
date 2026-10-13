@@ -101,8 +101,8 @@ class PreviewService:
                 detail="An error occurred while retrieving the preview static file. Please try again later." + str(e),
             ) from e
 
-    async def download_preview_document(self, db: Session, pfs: list[str], format: str, workspace_id: str, user_id: str) -> tuple[bytes, str]:
-        """Build the document for anyone with access and return its content and file name.
+    async def download_preview_document(self, db: Session, pfs: list[str], format: str, workspace_id: str, user_id: str) -> Path:
+        """Build the document for anyone with access and return its path; the caller removes its folder once sent.
 
         Each download builds into its own folder, so it needs no `build_locks`, and no other build can rewrite it while it is sent.
         """
@@ -113,6 +113,7 @@ class PreviewService:
             document = Path(f"{prefix}.{format}")
             if not document.exists():
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no document")
-            return await asyncio.to_thread(document.read_bytes), document.name
-        finally:
+            return document
+        except BaseException:
             await asyncio.to_thread(shutil.rmtree, build_dir, ignore_errors=True)
+            raise

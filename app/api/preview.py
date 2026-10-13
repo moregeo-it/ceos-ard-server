@@ -1,10 +1,12 @@
 import logging
+import shutil
 from email.utils import formatdate
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.db.database import get_db
 from app.dependencies import get_preview_service
@@ -113,7 +115,7 @@ async def download_preview_document(
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
     format: str = Query(..., enum=["pdf", "docx"]),
-    pfs: list[PfsId] = Query(min_items=1, max_items=50),
+    pfs: list[PfsId] = Query(min_length=1),
 ):
     media_types = {
         "pdf": "application/pdf",
@@ -121,7 +123,10 @@ async def download_preview_document(
     }
     media_type = media_types.get(format, "application/octet-stream")
     with internal_errors("download preview document", logger):
-        content, filename = await preview_service.download_preview_document(
+        document = await preview_service.download_preview_document(
             db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
         )
-        return Response(content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
+        # Streamed from disk; the folder goes once sent, also when the client left early.
+        return FileResponse(
+            document, filename=document.name, media_type=media_type, background=BackgroundTask(shutil.rmtree, document.parent, ignore_errors=True)
+        )
