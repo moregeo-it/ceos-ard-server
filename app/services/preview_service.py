@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.workspace import GitWorkspace
+from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.events import EventType
 from app.services.build_service import BuildService
 from app.services.events_service import EventBroker, event_broker
@@ -42,7 +42,7 @@ class PreviewService:
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
             prefix = await self._build(workspace, workspace.pfs)
-            html = await self._get_preview_files(workspace.abs_path, file_prefix=prefix)
+            html = await self._get_preview_files(workspace, file_prefix=prefix)
 
         self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(workspace.pfs))
         return html
@@ -57,9 +57,10 @@ class PreviewService:
         async with build_locks(workspace_id):
             if not Path(prefix + ".html").exists():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
-            return await self._get_preview_files(workspace.abs_path, file_prefix=prefix)
+            return await self._get_preview_files(workspace, file_prefix=prefix)
 
-    async def _get_preview_files(self, workspace_path: Path, file_prefix: str | None = None):
+    async def _get_preview_files(self, workspace: GitWorkspace, file_prefix: str):
+        workspace_path = workspace.abs_path
         build_dir = workspace_path / "build"
 
         if not build_dir.exists():
@@ -67,13 +68,15 @@ class PreviewService:
 
         filepath = Path(file_prefix + ".html")
         html_content = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
+        # Only the owner of an active workspace can edit; everyone else opens the file read-only
+        label = "Edit" if workspace.viewer_role == "owner" and workspace.status != WorkspaceStatus.ARCHIVED else "View"
 
         def replace_edit_tags(match):
             path = Path(match.group(1))
             if not path.is_absolute():
                 path = workspace_path / path
             file_path = normalize_workspace_path(path, workspace_path)
-            return f'<a name="{file_path}"></a><button class="edit" value="{file_path}">Edit</button>'
+            return f'<a name="{file_path}"></a><button class="edit" value="{file_path}">{label}</button>'
 
         # \ and : are needed for Windows compatibility
         html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\:]+)\s*-->", replace_edit_tags, html_content)

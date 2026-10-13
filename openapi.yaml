@@ -1330,9 +1330,10 @@ paths:
     get:
       summary: Get the current preview
       description: |
-        The owner's last generated preview for the workspace's PFS list, as `POST .../previews`
-        returned it, without building anything. For any user with access. Clients call it on
-        `preview.generated` and when `workspace.updated` changes `pfs`.
+        The owner's last generated preview for the workspace's PFS list, without building anything.
+        For any user with access. Its source buttons read "Edit" for the owner of an active workspace
+        and "View source" for everyone else. Clients call it on `preview.generated` and when
+        `workspace.updated` changes `pfs`.
       operationId: getCurrentPreview
       tags:
         - Previews
