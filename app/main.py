@@ -9,7 +9,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import dependencies
 from app.api import auth, collab, core, file, preview, share, workspace
 from app.config import settings
-from app.db.database import Base, engine
 from app.utils.cli_utils import load_project_info, run_checks
 from app.utils.request_context import CLIENT_ID_HEADER, reset_client_id, set_client_id, validate_client_id
 from app.utils.session_cookie import lacks_client_id
@@ -33,8 +32,6 @@ async def lifespan(app: FastAPI):
 # No generated docs: /docs and /redoc would load CDN scripts onto the origin that holds the session cookie.
 # The API contract is openapi.yaml.
 app = FastAPI(title=title, version=version, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-
-Base.metadata.create_all(bind=engine)
 
 # Holds the OAuth state between /auth/login and the callback; Lax, because GitHub redirects back cross-site
 app.add_middleware(

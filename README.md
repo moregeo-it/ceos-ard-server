@@ -177,6 +177,9 @@ For automated maintenance scripts (PR status checker and workspace cleanup), you
 ### Development Mode
 
 ```bash
+# Create the database or bring it to the newest schema
+pixi run migrate
+
 # Start the development server with auto-reload
 pixi run dev
 
@@ -241,10 +244,10 @@ pixi run pre-commit-install
 The application uses SQLite as the database backend:
 
 - **File Location**: `./ceos_ard_server.db` (in project root)
-- **Automatic Creation**: Database and tables are created automatically on first run
+- **Creation**: `pixi run migrate` creates the database and its tables
 - **No Installation Required**: SQLite is built into Python
 - **Git Ignored**: Database files are automatically ignored by git
-- **Schema changes**: tables are created on first run, but an existing database is never altered. After pulling a change that adds a column, run `pixi run python scripts/migrate_schema.py`; it adds what is missing and is safe to repeat.
+- **Schema changes**: every change is an [Alembic](https://alembic.sqlalchemy.org) revision in `migrations/versions`, and the server refuses to start until the database is at the newest one. After pulling, run `pixi run migrate`. To change the schema, edit the model, run `pixi run alembic revision --autogenerate --rev-id 0003 -m "<short name>"` with the next number, review the generated file and commit it.
 
 ### Maintenance Tasks
 
@@ -439,8 +442,10 @@ Users authenticated with Google **cannot access workspace features**:
 ### Updating an Existing Deployment
 
 1. Back up the database the WAL-safe way: `sqlite3 ceos_ard_server.db ".backup <dest>"`
-2. Add any new columns: `pixi run python scripts/migrate_schema.py`
-3. Start the new server; it creates any new tables itself
+2. Migrate it: `pixi run migrate`
+3. Start the new server
+
+**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`. A development database already on the newest schema is marked with `pixi run alembic stamp head`; `pixi run alembic check` then lists any difference to fix, or start from a fresh database.
 
 ### Environment Variables for Production
 
