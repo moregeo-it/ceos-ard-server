@@ -350,6 +350,9 @@ crontab -e
 # IMPORTANT: Cron uses a minimal PATH - add pixi's location (check with: which pixi)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pixi/bin
 
+# Back up the database daily at 1 AM (WAL-safe), keeping 14 days
+0 1 * * * cd /path/to/ceos-ard-server && mkdir -p backups && (sqlite3 ceos_ard_server.db ".backup backups/ceos_ard_server-$(date +\%F).db" && find backups -name '*.db' -mtime +14 -delete) >> logs/db_backup.log 2>&1
+
 # Check PR status daily at midnight
 0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
 
@@ -365,6 +368,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 **How it works:**
 - Cron just needs to `cd` to project directory and run the script.
+- Backups stay on the server's disk: copy `backups/` elsewhere too, or they go down with the disk.
 - Ensure `.env` file exists in project root with `GITHUB_SERVICE_TOKEN` and `GITHUB_SERVICE_TOKEN_EXPIRES_AT` set.
 - Token checker sends email alerts if configured (see above).
 

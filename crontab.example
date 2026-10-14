@@ -79,6 +79,18 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 0 3 * * * cd ~/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
 
 # ============================================================================
+# 5. Database Backup
+# ============================================================================
+# WAL-safe copy of the database into backups/, keeping 14 days
+# Frequency: Daily at 1:00 AM, before the cleanup deletes anything
+# Duration: ~1 second
+# Requirements: the sqlite3 command-line tool
+# Backups stay on this disk: copy backups/ elsewhere too, or they go down with it.
+# Restore: stop the server, copy a backup over ceos_ard_server.db, delete its -wal/-shm files, start.
+#
+0 1 * * * cd ~/ceos-ard-server && mkdir -p backups && (sqlite3 ceos_ard_server.db ".backup backups/ceos_ard_server-$(date +\%F).db" && find backups -name '*.db' -mtime +14 -delete) >> logs/db_backup.log 2>&1
+
+# ============================================================================
 # Optional: Log Rotation (Clean up old log files)
 # ============================================================================
 # Delete log files older than 30 days to save disk space
@@ -102,6 +114,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 #   tail -f logs/workspace_cleanup.log
 #   tail -f logs/token_check.log
 #   tail -f logs/idle_tokens.log
+#   tail -f logs/db_backup.log
 #
 # To check cron daemon on Linux:
 #   sudo systemctl status cron
