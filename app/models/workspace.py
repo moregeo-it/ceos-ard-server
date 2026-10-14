@@ -32,7 +32,7 @@ class GitWorkspace(Base):
     title = Column(String(50), nullable=False)
     description = Column(String(500), nullable=True)
     pfs = Column(JSON, nullable=True)
-    user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)
     pull_request_number = Column(String, nullable=True)  # Todo: Change from String to Integer when moving to a stricter DB eg. PostgresSQL

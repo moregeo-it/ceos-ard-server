@@ -247,7 +247,7 @@ The application uses SQLite as the database backend:
 - **Creation**: `pixi run migrate` creates the database and its tables
 - **No Installation Required**: SQLite is built into Python
 - **Git Ignored**: Database files are automatically ignored by git
-- **Schema changes**: every change is an [Alembic](https://alembic.sqlalchemy.org) revision in `migrations/versions`, and the server refuses to start until the database is at the newest one. After pulling, run `pixi run migrate`. To change the schema, edit the model, run `pixi run alembic revision --autogenerate --rev-id 0003 -m "<short name>"` with the next number, review the generated file and commit it.
+- **Schema changes**: every change is an [Alembic](https://alembic.sqlalchemy.org) revision in `migrations/versions`, and the server refuses to start until the database is at the newest one. After pulling, run `pixi run migrate`. To change the schema, edit the model, run `pixi run alembic revision --autogenerate --rev-id 0004 -m "<short name>"` with the next number, review the generated file and commit it.
 
 ### Maintenance Tasks
 
@@ -445,7 +445,7 @@ Users authenticated with Google **cannot access workspace features**:
 2. Migrate it: `pixi run migrate`
 3. Start the new server
 
-**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`. A development database already on the newest schema is marked with `pixi run alembic stamp head`; `pixi run alembic check` then lists any difference to fix, or start from a fresh database.
+**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`.
 
 ### Environment Variables for Production
 
