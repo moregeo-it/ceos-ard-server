@@ -1410,11 +1410,9 @@ paths:
     get:
       summary: Download preview document
       description: |
-        Downloads the preview document for the current workspace state.
-
-        The owner builds the document; other users get the document of the owner's last preview
-        build for the workspace's PFS list (404 if there is none) and a 403 for any other `pfs`
-        value.
+        Builds and downloads the document for the current workspace state, for anyone with
+        access and any `pfs` selection. Each download builds on its own, so it doesn't wait for
+        or change the owner's preview.
       operationId: downloadPreviewDocument
       tags:
         - Previews
@@ -1436,7 +1434,7 @@ paths:
                 type: string
                 format: binary
         '403':
-          description: Forbidden - missing `X-Client-Id`, or only the workspace owner can change the PFS selection
+          description: Forbidden - missing `X-Client-Id`
           content:
             application/json:
               schema:
@@ -1449,6 +1447,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The document could not be built
           content:
             application/json:
               schema:
@@ -2287,7 +2291,7 @@ components:
       required: true
       style: form
       explode: true
-      description: PFS of the document; anyone but the owner must send the workspace's PFS list
+      description: PFS of the document
       schema:
         type: array
         items:

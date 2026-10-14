@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -13,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 class BuildService:
     @staticmethod
-    def output_prefix(workspace_path: Path, pfs: list[str] | None) -> str:
-        """Where a selection's outputs go (`<prefix>.html`, `.pdf`, `.docx`).
+    def output_prefix(workspace_path: Path, pfs: list[str] | None, build_dir: Path | None = None) -> str:
+        """Where a selection's outputs go (`<prefix>.html`, `.pdf`, `.docx`): `build_dir`, else the workspace's `build/`.
 
         Every build and read goes through here, so the ids are checked here too, stored ones included:
         `../` in an id would reach another workspace, a leading `-` would be a CLI option.
@@ -23,16 +24,21 @@ class BuildService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one PFS for the preview")
         if not all(re.fullmatch(PFS_ID_PATTERN, pfs_id) for pfs_id in pfs):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PFS id")
-        return str(workspace_path / "build" / "-".join(pfs))
+        name = "-".join(pfs)
+        if len(name) > 200:  # a file name holds at most 255 bytes
+            name = hashlib.sha256(name.encode()).hexdigest()
+        return str((build_dir or workspace_path / "build") / name)
 
-    async def build(self, workspace_path: Path, workspace_id: str, pfs: list[str], include_format: str | None = None) -> dict[str, Any]:
+    async def build(
+        self, workspace_path: Path, workspace_id: str, pfs: list[str], include_format: str | None = None, build_dir: Path | None = None
+    ) -> dict[str, Any]:
         if not workspace_path or not workspace_id:
             raise ValueError("Workspace path and ID must be provided")
 
         if not workspace_path.exists():
             raise FileNotFoundError(f"Workspace path {workspace_path} does not exist")
 
-        output_file = self.output_prefix(workspace_path, pfs)
+        output_file = self.output_prefix(workspace_path, pfs, build_dir)
 
         logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)}")
 

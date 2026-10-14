@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import re
+import shutil
+import tempfile
 from pathlib import Path
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -25,10 +27,10 @@ class PreviewService:
         self.workspace_service = workspace_service or WorkspaceService()
         self.broker = broker or event_broker
 
-    async def _build(self, workspace: GitWorkspace, pfs: list[str] | None, include_format: str | None = None) -> str:
-        """Run the build (the caller holds `build_locks`) and return the output prefix."""
+    async def _build(self, workspace: GitWorkspace, pfs: list[str] | None, include_format: str | None = None, build_dir: Path | None = None) -> str:
+        """Run the build and return the output prefix; into the workspace's `build/` only under `build_locks`."""
         build_info = await self.build_service.build(
-            workspace_path=workspace.abs_path, workspace_id=workspace.id, pfs=pfs, include_format=include_format
+            workspace_path=workspace.abs_path, workspace_id=workspace.id, pfs=pfs, include_format=include_format, build_dir=build_dir
         )
         if build_info.get("status") != "success":
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
@@ -102,41 +104,19 @@ class PreviewService:
                 detail="An error occurred while retrieving the preview static file. Please try again later." + str(e),
             ) from e
 
-    async def download_preview_document(self, db: Session, pfs: list[str] | None, format: str, workspace_id: str, user_id: str) -> dict[str, Any]:
-        if not workspace_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
+    async def download_preview_document(self, db: Session, pfs: list[str], format: str, workspace_id: str, user_id: str) -> Path:
+        """Build the document for anyone with access and return its path; the caller removes its folder once sent.
 
-        if not user_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
-
+        Each download builds into its own folder, so it needs no `build_locks`, and no other build can rewrite it while it is sent.
+        """
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:
-            workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-
-            if workspace.viewer_role == "owner":
-                async with build_locks(workspace_id):
-                    prefix = await self._build(workspace, pfs or workspace.pfs, include_format=format)
-            else:
-                # Everyone else gets the owner's last build (both formats), for the owner's PFS selection only
-                if pfs and set(pfs) != set(workspace.pfs or []):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can change the PFS selection of the preview"
-                    )
-                prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
-
-            document_file = Path(f"{prefix}.{format}")
-            if not document_file.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested document file not found")
-
-            return {
-                "path": document_file,
-                "name": document_file.name,
-            }
-
-        except HTTPException:
+            prefix = await self._build(workspace, pfs, include_format=format, build_dir=build_dir)
+            document = Path(f"{prefix}.{format}")
+            if not document.exists():
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no document")
+            return document
+        except BaseException:
+            await asyncio.to_thread(shutil.rmtree, build_dir, ignore_errors=True)
             raise
-        except Exception as e:
-            logger.error(f"Error downloading preview document for workspace {workspace_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An error occurred while downloading the preview document. Please try again later." + str(e),
-            ) from e
