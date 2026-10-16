@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column, String
+from sqlalchemy import Column, Integer, String
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
@@ -30,6 +30,7 @@ class User(Base):
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     last_seen_at = Column(UTCDateTime, nullable=True)  # Last authenticated request, kept to the hour
+    session_version = Column(Integer, nullable=False, default=0, server_default="0")  # Bumped on logout: JWTs with another sv are refused
 
     workspaces = relationship("GitWorkspace", back_populates="user")
 

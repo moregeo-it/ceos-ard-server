@@ -1,4 +1,4 @@
-"""Sharing: collaborators, shares and users.last_seen_at
+"""Sharing and sessions: collaborators, shares, users.last_seen_at and users.session_version
 
 Revision ID: 0002
 Revises: 0001
@@ -81,10 +81,12 @@ def upgrade() -> None:
 
     with op.batch_alter_table("users", schema=None) as batch_op:
         batch_op.add_column(sa.Column("last_seen_at", sa.DateTime(), nullable=True))
+        batch_op.add_column(sa.Column("session_version", sa.Integer(), server_default="0", nullable=False))
 
 
 def downgrade() -> None:
     with op.batch_alter_table("users", schema=None) as batch_op:
+        batch_op.drop_column("session_version")
         batch_op.drop_column("last_seen_at")
 
     with op.batch_alter_table("workspace_collaborators", schema=None) as batch_op:
