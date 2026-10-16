@@ -27,7 +27,7 @@
 # Coexistence with the running server:
 # - The database runs in WAL mode with a 5s busy timeout, so these scripts and the server can
 #   write concurrently. WAL leaves ceos_ard_server.db-wal/-shm sidecar files next to the
-#   database; back up with `sqlite3 ceos_ard_server.db ".backup <dest>"`, never a bare cp.
+#   database; back up with scripts/backup_database.py (section 5), never a bare cp.
 # - The cleanup script takes the server's per-workspace file lock (workspaces/.locks/<id>.lock,
 #   flock) before deleting a workspace, waiting up to 60s and skipping the workspace until the
 #   next run if the server is mid-operation on it. Don't delete the .locks directory while the
@@ -79,6 +79,18 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 0 3 * * * cd ~/ceos-ard-server && pixi run python scripts/revoke_idle_tokens.py >> logs/idle_tokens.log 2>&1
 
 # ============================================================================
+# 5. Database Backup
+# ============================================================================
+# WAL-safe copy of the database DATABASE_URL names into backups/, keeping the last 14 days
+# Fails, keeping the old backups, when that database is missing or empty
+# Frequency: Daily at 1:00 AM, before the cleanup deletes anything
+# Duration: ~1 second
+# Backups stay on this disk: copy backups/ elsewhere too, or they go down with it.
+# Restore: stop the server, copy a backup over the file DATABASE_URL names, delete its -wal/-shm files, start.
+#
+0 1 * * * cd ~/ceos-ard-server && pixi run python scripts/backup_database.py >> logs/db_backup.log 2>&1
+
+# ============================================================================
 # Optional: Log Rotation (Clean up old log files)
 # ============================================================================
 # Delete log files older than 30 days to save disk space
@@ -96,12 +108,14 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 #   pixi run python scripts/cleanup_archived_workspaces.py --dry-run
 #   pixi run python scripts/check_token_expiry.py --force-email  # test email alerts
 #   pixi run python scripts/revoke_idle_tokens.py --dry-run
+#   pixi run python scripts/backup_database.py
 #
 # To check if cron is running:
 #   tail -f logs/pr_status_check.log
 #   tail -f logs/workspace_cleanup.log
 #   tail -f logs/token_check.log
 #   tail -f logs/idle_tokens.log
+#   tail -f logs/db_backup.log
 #
 # To check cron daemon on Linux:
 #   sudo systemctl status cron
