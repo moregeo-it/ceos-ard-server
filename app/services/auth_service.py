@@ -30,7 +30,7 @@ async def _load_jwt_user(token: str, db: Session) -> User:
     try:
         payload = JWTService.decode_access_token(token)
 
-        user_id = payload.get("user_id")
+        user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -43,6 +43,12 @@ async def _load_jwt_user(token: str, db: Session) -> User:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
+            )
+        # Issued before the user's last logout, or before session versions existed
+        if payload.get("sv") != user.session_version:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session ended. Please log in again.",
             )
         return user
 
@@ -74,6 +80,7 @@ async def get_current_user(
         HTTPException: 401 if the JWT is invalid, the user is unknown, or the provider token is unusable
     """
     user = await _load_jwt_user(token, db)
+    session_version = user.session_version
 
     try:
         await TokenRefreshService.ensure_fresh_token(user, db)
@@ -83,6 +90,13 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Provider token expired and could not be renewed. Please log in again.",
         ) from refresh_error
+
+    # Logged out (and maybe in again) while the provider token was renewed: this JWT's session is over
+    if user.session_version != session_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session ended. Please log in again.",
+        )
 
     # Activity for the idle cleanup, written at most once an hour
     now = datetime.now(UTC)

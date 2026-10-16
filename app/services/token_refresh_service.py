@@ -186,6 +186,8 @@ class TokenRefreshService:
         user.access_token = None
         user.refresh_token = None
         user.token_expiry = None
+        # Every JWT issued so far is refused, also after the next login
+        user.session_version = User.session_version + 1  # In SQL, so concurrent logouts each add 1
         user.updated_at = datetime.now(UTC)
         db.commit()
         return True
