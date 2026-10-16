@@ -47,17 +47,13 @@ class JWTService:
         expires_delta = timedelta(hours=JWTService.JWT_EXPIRY_HOURS)
         expiry_time = datetime.now(UTC) + expires_delta
 
-        # Create JWT payload
+        # No profile data: the user is loaded from the database on every request
         payload = {
-            "sub": user.id,  # Subject (user ID)
-            "user_id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "external_id": user.external_id,
-            "provider": user.identity_provider.value,  # Serialize enum to string
-            "exp": expiry_time,
-            "iat": datetime.now(UTC),  # Issued at
+            "sub": user.id,
+            "sv": user.session_version,  # Refused once a logout bumps it
             "type": "access",
+            "iat": datetime.now(UTC),
+            "exp": expiry_time,
         }
 
         # Generate JWT
@@ -99,7 +95,7 @@ class JWTService:
                 )
 
             # Validate required fields
-            required_fields = ["user_id", "provider", "exp"]
+            required_fields = ["sub", "exp"]
             if not all(field in payload for field in required_fields):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
