@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # (table, column, SQL type), in the order they were introduced
 COLUMNS = [
     ("users", "last_seen_at", "DATETIME"),
+    ("users", "session_version", "INTEGER NOT NULL DEFAULT '0'"),
 ]
 
 
