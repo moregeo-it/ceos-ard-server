@@ -338,6 +338,18 @@ pixi run python scripts/revoke_idle_tokens.py
 pixi run python scripts/revoke_idle_tokens.py --days 14
 ```
 
+#### 5. Database Backup
+
+Copies the database that `DATABASE_URL` names, WAL-safe, to `backups/<name>-<UTC date>.db` and removes backups older than 14 days. It fails, keeping the old backups, when that database is missing or empty. To restore, stop the server, copy a backup over that file, delete its `-wal`/`-shm` files and start the server.
+
+```bash
+# Run (default: keep 14 days)
+pixi run python scripts/backup_database.py
+
+# Other folder or retention
+pixi run python scripts/backup_database.py --dir /mnt/backups --keep-days 30
+```
+
 #### Setting Up Cron Jobs
 
 **Recommended**: Set up automated cron jobs for all maintenance tasks.
@@ -351,7 +363,7 @@ crontab -e
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pixi/bin
 
 # Back up the database daily at 1 AM (WAL-safe), keeping 14 days
-0 1 * * * cd /path/to/ceos-ard-server && mkdir -p backups && (sqlite3 ceos_ard_server.db ".backup backups/ceos_ard_server-$(date +\%F).db" && find backups -name '*.db' -mtime +14 -delete) >> logs/db_backup.log 2>&1
+0 1 * * * cd /path/to/ceos-ard-server && pixi run python scripts/backup_database.py >> logs/db_backup.log 2>&1
 
 # Check PR status daily at midnight
 0 0 * * * cd /path/to/ceos-ard-server && pixi run python scripts/check_pr_status.py >> logs/pr_status_check.log 2>&1
@@ -442,7 +454,7 @@ Users authenticated with Google **cannot access workspace features**:
 
 ### Updating an Existing Deployment
 
-1. Back up the database the WAL-safe way: `sqlite3 ceos_ard_server.db ".backup <dest>"`
+1. Back up the database: `pixi run python scripts/backup_database.py`
 2. Add any new columns: `pixi run python scripts/migrate_schema.py`
 3. Start the new server; it creates any new tables itself
 
