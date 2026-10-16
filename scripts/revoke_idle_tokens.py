@@ -32,8 +32,7 @@ logger = logging.getLogger(__name__)
 async def revoke_idle_tokens(days: int = 7, dry_run: bool = False) -> int:
     """Revoke and clear the tokens of users idle for `days`; returns how many were handled."""
     if not inspect(engine).has_table("users"):
-        # The server creates the schema at startup; a fresh database has nothing to clean yet
-        logger.error("No users table: start the server once to create the schema, then rerun")
+        logger.error("No users table: run `pixi run migrate` to create the schema, then rerun")
         return 0
     cutoff = datetime.now(UTC) - timedelta(days=days)
     db = SessionLocal()

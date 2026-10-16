@@ -4,7 +4,12 @@ import subprocess
 import sys
 import tomllib
 
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+
 from app.config import settings
+from app.db.database import engine
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +57,11 @@ async def run_checks():
         "CEOS-ARD CLI": check_ceos_ard_cli,
         "Playwright": check_playwright,
         "Session cookie": check_session_cookie,
+        "Database schema": check_database_schema,
     }
-    # Missing tools only break builds, but a session misconfiguration exposes sessions in every environment
-    fatal_checks = {check_session_cookie}
+    # Missing tools only break builds, but a session misconfiguration exposes sessions in every environment,
+    # and an outdated schema breaks every request
+    fatal_checks = {check_session_cookie, check_database_schema}
     failures = []
     fatal = False
     for check_name, check_func in checks.items():
@@ -70,6 +77,15 @@ async def run_checks():
             sys.exit(1)
     else:
         logger.info("All prerequisite checks passed.")
+
+
+async def check_database_schema():
+    """The server never changes the schema itself: the database must be at the newest migration."""
+    head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+    with engine.connect() as connection:
+        current = MigrationContext.configure(connection).get_current_revision()
+    if current != head:
+        raise Exception(f"Database at revision {current or 'none'}, the code needs {head}: back it up, then run `pixi run migrate`")
 
 
 async def check_session_cookie():
