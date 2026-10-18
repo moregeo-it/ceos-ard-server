@@ -1,3 +1,4 @@
+---
 # --- Identity and paths -----------------------------------------------------
 app_name: ceos-ard-server
 app_user: server
@@ -17,7 +18,9 @@ app_data_relocated: false
 # so flipping app_data_relocated moves the whole configuration consistently.
 app_workspaces_root: "{{ (app_data_dir ~ '/workspaces') if app_data_relocated else (app_dir ~ '/workspaces') }}"
 app_db_path: "{{ (app_data_dir ~ '/ceos_ard_server.db') if app_data_relocated else (app_dir ~ '/ceos_ard_server.db') }}"
-app_database_url: "{{ ('sqlite:////' ~ app_db_path.lstrip('/')) if app_data_relocated else 'sqlite:///./ceos_ard_server.db' }}"
+app_database_url: >-
+  {{ ('sqlite:////' ~ app_db_path.lstrip('/')) if app_data_relocated
+     else 'sqlite:///./ceos_ard_server.db' }}
 
 # --- Service ----------------------------------------------------------------
 # Both default to true: the service is currently down only because it was never

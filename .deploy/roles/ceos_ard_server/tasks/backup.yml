@@ -1,3 +1,4 @@
+---
 - name: Install the backup script
   become: true
   ansible.builtin.template:
@@ -20,7 +21,8 @@
     - { src: backup.timer.j2, dest: "{{ app_name }}-backup.timer" }
   notify: Reload systemd
 
-- ansible.builtin.meta: flush_handlers
+- name: Apply pending unit changes before enabling them
+  ansible.builtin.meta: flush_handlers
 
 - name: Enable the backup timer
   become: true

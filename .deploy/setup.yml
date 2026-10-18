@@ -1,3 +1,4 @@
+---
 # Converges everything AROUND the code: service, timers, Caddy, TLS, data
 # directories, backups, swap. It never touches the git checkout, so running it
 # cannot change which version is deployed.
