@@ -1,0 +1,14 @@
+# Managed by Ansible ({{ app_name }} role).
+[Unit]
+Description={{ item.description }}
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ app_user }}
+Group={{ app_group }}
+WorkingDirectory={{ app_dir }}
+EnvironmentFile={{ app_dir }}/.env
+Environment="PATH={{ app_home }}/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart={{ pixi_bin }} run python {{ item.script }}
+SyslogIdentifier={{ app_name }}-{{ item.name }}

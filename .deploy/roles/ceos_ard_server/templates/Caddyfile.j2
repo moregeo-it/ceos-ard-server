@@ -1,0 +1,19 @@
+# Managed by Ansible ({{ app_name }} role). Local edits are overwritten.
+{% if caddy_acme_email %}
+{
+    email {{ caddy_acme_email }}
+}
+{% endif %}
+
+{{ app_domain }} {
+    # Caddy sets X-Forwarded-{For,Proto,Host} and handles the WebSocket
+    # upgrade on its own, so the app needs no extra directives here. It does
+    # need uvicorn's --proxy-headers to trust them; see the unit template.
+    reverse_proxy localhost:{{ app_port }}
+
+    encode gzip
+
+    log {
+        output file /var/log/caddy/access.log
+    }
+}

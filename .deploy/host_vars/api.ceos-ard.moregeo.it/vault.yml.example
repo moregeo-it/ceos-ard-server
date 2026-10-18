@@ -1,0 +1,14 @@
+# Copy to vault.yml and encrypt:
+#   ansible-vault encrypt host_vars/api.ceos-ard.moregeo.it/vault.yml
+# Edit later with:
+#   ansible-vault edit host_vars/api.ceos-ard.moregeo.it/vault.yml
+#
+# Take the current values straight from the server's existing .env.
+vault_secret_key: ""
+vault_github_client_id: ""
+vault_github_client_secret: ""
+vault_github_service_token: ""
+vault_github_service_token_expires_at: ""   # YYYY-MM-DD
+vault_google_client_id: ""
+vault_google_client_secret: ""
+vault_smtp_password: ""

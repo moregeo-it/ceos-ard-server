@@ -1,0 +1,11 @@
+# Managed by Ansible ({{ app_name }} role).
+[Unit]
+Description=Daily {{ app_name }} backup
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

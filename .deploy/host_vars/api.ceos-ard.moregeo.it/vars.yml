@@ -1,0 +1,50 @@
+# Non-secret configuration for the production host. Secrets live in vault.yml.
+
+# --- Code version -----------------------------------------------------------
+# The exact commit deployed. setup.yml never changes the checkout; only
+# deploy.yml moves the code, and only to this ref. Bump deliberately.
+app_version: 2d8bc3c1778ccacd2cd7112ae7cceaaab76a3bfc
+
+# --- Data location ----------------------------------------------------------
+# false  = database and workspaces still live inside the git checkout (today).
+# true   = they live under app_data_dir, after migrate-data.yml has moved them.
+# Flip this ONLY as part of running migrate-data.yml. See .deploy/README.md.
+app_data_relocated: false
+
+# --- Public identity --------------------------------------------------------
+app_server_url: https://api.ceos-ard.moregeo.it
+app_client_url: https://editor.ceos-ard.moregeo.it
+app_cors_origins: https://editor.ceos-ard.moregeo.it
+app_environment: production
+
+# --- Upstream repository the app forks from ---------------------------------
+app_ceos_ard_org: ceos-org
+app_ceos_ard_repo: ceos-ard
+
+# --- Alerting ---------------------------------------------------------------
+app_alert_email_to: m.mohr@moregeo.it
+app_alert_email_from: no-reply@ceos-ard.moregeo.it
+app_smtp_host: w02124e6.kasserver.com
+app_smtp_port: 465
+app_smtp_mode: ssl
+app_smtp_user: no-reply@ceos-ard.moregeo.it
+
+# --- TLS (Caddy issues and renews certificates itself) -----------------------
+caddy_acme_email: m.mohr@moregeo.it
+
+# --- Maintenance jobs -------------------------------------------------------
+# Only the scripts that exist at app_version. revoke_idle_tokens arrived after
+# 2d8bc3c; add it when the deployed version includes it.
+app_timers:
+  - name: pr-status
+    script: scripts/check_pr_status.py
+    calendar: "*-*-* 00:00:00"
+    description: Check pull request status
+  - name: workspace-cleanup
+    script: scripts/cleanup_archived_workspaces.py
+    calendar: "*-*-* 02:00:00"
+    description: Delete archived workspaces
+  - name: token-expiry
+    script: scripts/check_token_expiry.py
+    calendar: "Mon *-*-* 09:00:00"
+    description: Warn before the GitHub service token expires

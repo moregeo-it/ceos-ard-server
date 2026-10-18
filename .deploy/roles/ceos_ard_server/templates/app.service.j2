@@ -1,0 +1,50 @@
+# Managed by Ansible ({{ app_name }} role).
+[Unit]
+Description=CEOS-ARD FastAPI Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ app_user }}
+Group={{ app_group }}
+WorkingDirectory={{ app_dir }}
+EnvironmentFile={{ app_dir }}/.env
+Environment="PATH={{ app_home }}/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart={{ pixi_bin }} run uvicorn app.main:app \
+    --host 127.0.0.1 --port {{ app_port }} \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 \
+    --ws-max-size 4096
+
+# A single worker is mandatory: the realtime EventBroker is in-memory and
+# per-process, so a second worker silently drops cross-worker events.
+
+Restart=always
+RestartSec=3
+# Without a start limit, a bad config (or an unmigrated database, which newer
+# versions treat as fatal) crash-loops every 3s forever instead of failing.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# No swap on this host, so keep the long-lived server off the OOM killer's list.
+OOMScoreAdjust=-500
+
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+{% if app_hardening_strict %}
+# Verify PDF export still works before leaving these on: Playwright's Chromium
+# is sensitive to sandboxing restrictions.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths={{ app_dir }} {{ app_data_dir }}
+{% else %}
+ProtectSystem=full
+{% endif %}
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{ app_name }}
+
+[Install]
+WantedBy=multi-user.target

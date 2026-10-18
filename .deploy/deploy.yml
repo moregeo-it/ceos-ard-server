@@ -1,0 +1,94 @@
+# Moves the code to app_version and restarts. Run after bumping app_version in
+# host_vars. Rollback is the same playbook with the previous commit.
+- name: Deploy {{ app_version | default('(unset)') }}
+  hosts: ceos_ard_servers
+  gather_facts: true
+  serial: 1
+
+  tasks:
+    - name: Stop the maintenance timers
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}-{{ item.name }}.timer"
+        state: stopped
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Stop the service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}"
+        state: stopped
+
+    # Before anything else touches the data, and with nothing writing.
+    - name: Back up
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: /usr/local/bin/{{ app_name }}-backup
+      register: backup
+      changed_when: true
+
+    - name: Show where the backup went
+      ansible.builtin.debug:
+        var: backup.stdout_lines
+
+    - name: Fetch the repository
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.git:
+        repo: "{{ app_repo }}"
+        dest: "{{ app_dir }}"
+        version: "{{ app_version }}"
+        # Never force: the checkout holds .env, .pixi and (until relocation)
+        # the database and every workspace.
+        force: false
+      register: checkout
+
+    - name: Install dependencies
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command:
+        cmd: "{{ pixi_bin }} install"
+        chdir: "{{ app_dir }}"
+      register: pixi_install
+      changed_when: "'No changes' not in pixi_install.stdout"
+
+    # Alembic arrives with #126; `alembic upgrade head` is a no-op at head.
+    - name: Migrate the database
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command:
+        cmd: "{{ pixi_bin }} run migrate"
+        chdir: "{{ app_dir }}"
+      register: migrate
+      changed_when: "'Running upgrade' in migrate.stderr"
+      when: app_has_alembic | default(false)
+
+    - name: Start the service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}"
+        state: started
+
+    - name: Restart the maintenance timers
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}-{{ item.name }}.timer"
+        state: started
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Wait for the service to answer
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_port }}/"
+        status_code: [200, 404]
+      register: health
+      retries: 10
+      delay: 3
+      until: health is succeeded
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ app_name }} now at {{ checkout.after | default(app_version) }}"
