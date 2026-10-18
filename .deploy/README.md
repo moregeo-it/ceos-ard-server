@@ -13,15 +13,12 @@ migrate-data.yml  ONE-TIME: move database and workspaces out of the checkout.
 
 ## First time
 
-1. `pip install ansible` (or `pipx install ansible`), plus
-   `ansible-galaxy collection install community.general ansible.posix`
-2. Copy `host_vars/<host>/vault.yml.example` to `vault.yml`, fill it from the
-   server's existing `.env`, then
-   `ansible-vault encrypt host_vars/<host>/vault.yml`
-3. Put the vault password in `~/.ansible/ceos-ard-vault-pass` (referenced by
-   `ansible.cfg`, never committed)
-4. Dry run: `ansible-playbook setup.yml --check --diff`
-5. Apply: `ansible-playbook setup.yml`
+1. Install Ansible: `pipx install ansible`, then `ansible-galaxy collection install -r requirements.yml`
+2. Copy `host_vars/<host>/vault.yml.example` to `vault.yml` and fill it from the server's existing `.env`
+3. Encrypt it: `ansible-vault encrypt host_vars/<host>/vault.yml`
+4. Point `ANSIBLE_VAULT_PASSWORD_FILE` at a file holding the vault password, kept out of git
+5. Dry run: `ansible-playbook setup.yml --check --diff`
+6. Apply: `ansible-playbook setup.yml`
 
 ## Deploying a new version
 

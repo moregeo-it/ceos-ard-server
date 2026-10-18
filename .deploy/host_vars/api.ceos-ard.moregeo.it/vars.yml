@@ -1,3 +1,4 @@
+---
 # Non-secret configuration for the production host. Secrets live in vault.yml.
 
 # --- Code version -----------------------------------------------------------

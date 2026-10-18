@@ -1,3 +1,4 @@
+---
 - name: Fail early when the deployed revision is not pinned
   ansible.builtin.assert:
     that:
@@ -7,28 +8,36 @@
       app_version must name the exact commit this host runs. setup.yml never
       changes the checkout, but deploy.yml uses this value.
 
-- ansible.builtin.import_tasks: packages.yml
+- name: Install packages
+  ansible.builtin.import_tasks: packages.yml
   tags: [packages]
 
-- ansible.builtin.import_tasks: swap.yml
+- name: Provide swap
+  ansible.builtin.import_tasks: swap.yml
   when: manage_swap
   tags: [swap]
 
-- ansible.builtin.import_tasks: directories.yml
+- name: Create the data directories
+  ansible.builtin.import_tasks: directories.yml
   tags: [directories]
 
-- ansible.builtin.import_tasks: config.yml
+- name: Write the application configuration
+  ansible.builtin.import_tasks: config.yml
   tags: [config]
 
-- ansible.builtin.import_tasks: service.yml
+- name: Install and run the service
+  ansible.builtin.import_tasks: service.yml
   tags: [service]
 
-- ansible.builtin.import_tasks: timers.yml
+- name: Install the maintenance timers
+  ansible.builtin.import_tasks: timers.yml
   tags: [timers]
 
-- ansible.builtin.import_tasks: backup.yml
+- name: Install the backups
+  ansible.builtin.import_tasks: backup.yml
   tags: [backup]
 
-- ansible.builtin.import_tasks: caddy.yml
+- name: Configure Caddy
+  ansible.builtin.import_tasks: caddy.yml
   when: manage_caddy
   tags: [caddy]

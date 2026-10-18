@@ -23,7 +23,7 @@
     - name: Render the host-wide templates
       ansible.builtin.template:
         src: "{{ role_templates }}/{{ item }}"
-        dest: "{{ render_dir }}/{{ item | regex_replace('\.j2$', '') }}"
+        dest: "{{ render_dir }}/{{ item | regex_replace('[.]j2$', '') }}"
         mode: "0600"
       loop:
         - env.j2
@@ -38,7 +38,7 @@
     - name: Render the per-job templates
       ansible.builtin.template:
         src: "{{ role_templates }}/{{ tpl }}"
-        dest: "{{ render_dir }}/{{ item.name }}-{{ tpl | regex_replace('\.j2$', '') }}"
+        dest: "{{ render_dir }}/{{ item.name }}-{{ tpl | regex_replace('[.]j2$', '') }}"
         mode: "0600"
       loop: "{{ app_timers }}"
       loop_control:
@@ -47,7 +47,8 @@
         tpl: job.service.j2
 
     - name: Show what was rendered
-      ansible.builtin.command: cat {{ render_dir }}/.env
+      # env.j2 renders to 'env' here; on the host the template task names it .env
+      ansible.builtin.command: cat {{ render_dir }}/env
       register: rendered_env
       changed_when: false
 

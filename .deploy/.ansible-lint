@@ -1,0 +1,11 @@
+---
+exclude_paths:
+  - host_vars/   # may hold vault-encrypted files
+  - ci/
+
+skip_list:
+  # One role in this repo, so a ceos_ard_server_ prefix on every variable buys
+  # no collision safety and makes host_vars considerably harder to read.
+  - var-naming[no-role-prefix]
+  # Task names deliberately interpolate app_version.
+  - name[template]

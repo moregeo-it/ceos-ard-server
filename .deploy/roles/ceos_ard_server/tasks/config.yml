@@ -1,3 +1,4 @@
+---
 - name: Require every secret to be present
   ansible.builtin.assert:
     that:
