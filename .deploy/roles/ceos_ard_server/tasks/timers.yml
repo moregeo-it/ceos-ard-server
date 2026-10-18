@@ -1,0 +1,51 @@
+# Replaces the hand-installed crontab: presence is now diffable, failures land
+# in the journal, and a missed run catches up after a reboot.
+- name: Install maintenance units
+  become: true
+  ansible.builtin.template:
+    src: job.service.j2
+    dest: /etc/systemd/system/{{ app_name }}-{{ item.name }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ app_timers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Reload systemd
+
+- name: Install maintenance timers
+  become: true
+  ansible.builtin.template:
+    src: job.timer.j2
+    dest: /etc/systemd/system/{{ app_name }}-{{ item.name }}.timer
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ app_timers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Reload systemd
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable maintenance timers
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ app_name }}-{{ item.name }}.timer"
+    enabled: true
+    state: started
+  loop: "{{ app_timers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Remove the superseded crontab
+  become: true
+  ansible.builtin.cron:
+    user: "{{ app_user }}"
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - Check PR status daily at midnight
+    - Cleanup archived workspaces daily at 2 AM
+    - Check token expiration weekly on Monday at 9 AM
+  when: remove_legacy_crontab | default(false)

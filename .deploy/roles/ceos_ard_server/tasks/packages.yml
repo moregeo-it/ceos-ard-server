@@ -1,0 +1,34 @@
+- name: Install base packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - git
+      - sqlite3          # required for WAL-safe backups
+      - curl
+      - ca-certificates
+      - unattended-upgrades
+      - rsync
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable unattended security upgrades
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Check that pixi is installed for {{ app_user }}
+  ansible.builtin.stat:
+    path: "{{ pixi_bin }}"
+  register: pixi_stat
+
+- name: Fail when pixi is missing
+  ansible.builtin.assert:
+    that: pixi_stat.stat.exists
+    fail_msg: >-
+      {{ pixi_bin }} not found. Install it once as {{ app_user }}:
+      curl -fsSL https://pixi.sh/install.sh | bash

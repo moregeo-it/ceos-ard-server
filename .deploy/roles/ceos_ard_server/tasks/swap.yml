@@ -1,0 +1,46 @@
+# 3.8 GiB RAM with no swap: `pixi install` and Chromium previews can push the
+# box into the OOM killer, whose likeliest victim is the long-lived server.
+- name: Check for existing swap
+  become: true
+  ansible.builtin.stat:
+    path: /swapfile
+  register: swapfile_stat
+
+- name: Create swapfile
+  become: true
+  ansible.builtin.command:
+    cmd: "fallocate -l {{ swap_size_mb }}M /swapfile"
+    creates: /swapfile
+  when: not swapfile_stat.stat.exists
+
+- name: Secure the swapfile
+  become: true
+  ansible.builtin.file:
+    path: /swapfile
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Format the swapfile
+  become: true
+  ansible.builtin.command: mkswap /swapfile
+  when: not swapfile_stat.stat.exists
+  register: mkswap_result
+  changed_when: mkswap_result.rc == 0
+
+- name: Enable swap at boot
+  become: true
+  ansible.posix.mount:
+    name: none
+    src: /swapfile
+    fstype: swap
+    opts: sw
+    state: present
+
+- name: Enable swap now
+  become: true
+  ansible.builtin.command: swapon /swapfile
+  when: not swapfile_stat.stat.exists
+  register: swapon_result
+  changed_when: swapon_result.rc == 0
+  failed_when: swapon_result.rc != 0 and 'already' not in swapon_result.stderr
