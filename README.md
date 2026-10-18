@@ -473,153 +473,48 @@ Users authenticated with Google **cannot access workspace features**:
 
 ## 🚧 Deployment
 
-### Environment Variables for Production
+Production is configured with Ansible from [`.deploy/`](.deploy/) — not by hand. The playbooks
+manage the systemd service, the maintenance timers, Caddy, TLS, the data directories and the
+backups, so the documented state and the running state cannot drift apart.
+
+| Playbook | Purpose |
+| --- | --- |
+| `setup.yml` | Converge the host around the code. Never touches the git checkout, so it cannot change the deployed version. |
+| `deploy.yml` | Move the code to `app_version`, migrate the database, restart. |
+| `migrate-data.yml` | One-time: move the database and workspaces out of the checkout. |
+
+See [`.deploy/README.md`](.deploy/README.md) for prerequisites, the vault and the first run.
+
+### Updating an existing deployment
+
+Bump `app_version` in `.deploy/host_vars/<host>/vars.yml` to the commit you want, then:
 
 ```bash
-# Set production URL of the server / API
-SERVER_URL=https://api.yourdomain.com
-
-# Set production URLs of the client
-CLIENT_URL=https://yourdomain.com
-
-# Set environment
-ENVIRONMENT=production
-
-# Use a strong secret key
-SECRET_KEY=your-production-secret-key
-
-# The exact editor origin, on the same site as SERVER_URL (see Environment Configuration)
-CORS_ORIGINS=https://yourdomain.com
-
-# Use absolute path for database in production
-DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
+cd .deploy && ansible-playbook deploy.yml
 ```
 
-### Running the Production Server Persistently
+The playbook stops the service and its timers, takes a WAL-safe database backup, checks out the
+new revision, installs dependencies, migrates the schema, restarts and waits for the server to
+answer. Rolling back is the same command with the previous commit.
 
-The application runs via `uvicorn`, managed through `pixi`.
+### What is still manual
 
-For deployment, use **systemd**. It will:
+- Installing `pixi` on a brand-new host (`curl -fsSL https://pixi.sh/install.sh | bash`)
+- The one-time `pixi run alembic stamp 0001` on a database that predates migrations, before the
+  first `pixi run migrate`
+- Copying backups off the host; the automated copies live on the same disk as the originals
 
-- Keep the server running after you log out or close your terminal
-- Automatically restart the server if it crashes
-- Start the server automatically on system boot
-- Centralize logs via `journalctl`
+### How production is wired
 
-#### 1. Prerequisites
+Caddy terminates TLS on ports 80/443 and reverse-proxies to `uvicorn` on `127.0.0.1:8000`, which
+is not reachable from outside. Certificates are issued and renewed by Caddy itself. Application
+configuration is templated to `.env` from `host_vars`, with secrets held in an `ansible-vault`
+file; edit those rather than the file on the server, which is overwritten on every run.
 
-- `pixi` must be installed for the user the service will run as (not root). This is typically a dedicated service account, e.g. `server`.
-- The project must already be checked out on the server, e.g. at `/home/server/ceos-ard-server`.
-- Run `pixi install` once inside the project directory to make sure the environment resolves correctly before relying on the service to do it:
-
-  ```bash
-  cd /home/server/ceos-ard-server
-  pixi install
-  ```
-
-#### 2. Create the service file
-
-Create `/etc/systemd/system/ceos-ard-server.service`:
-
-```ini
-[Unit]
-Description=CEOS-ARD FastAPI Server
-After=network.target
-
-[Service]
-Type=simple
-User=server
-WorkingDirectory=/home/server/ceos-ard-server
-Environment="PATH=/home/server/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/server/.pixi/bin/pixi run uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --ws-max-size 4096
-Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=ceos-ard-server
-
-[Install]
-WantedBy=multi-user.target
-```
-
-If your deployment differs from the defaults above, update:
-
-| Field | Meaning | Adjust if... |
-|-------|---------|--------------|
-| `User` | System user the process runs as | You use a different service account than `server` |
-| `WorkingDirectory` | Path to the checked-out project | Your install path differs |
-| `Environment="PATH=..."` | Must include the pixi binary path for `User` | pixi is installed elsewhere, or for a different user |
-| `ExecStart` | Full path to `pixi` + the run command | Same as above, or if host/port should differ |
-
-#### 3. Enable and start the service
-
-```bash
-sudo systemctl daemon-reload            # re-read unit files after creating/editing one
-sudo systemctl enable ceos-ard-server   # start automatically on boot
-sudo systemctl start ceos-ard-server    # start it now
-```
-
-#### 4. Managing the running server
-
-| Action | Command |
-|--------|---------|
-| Check status | `sudo systemctl status ceos-ard-server` |
-| Stop the server | `sudo systemctl stop ceos-ard-server` |
-| Restart the server | `sudo systemctl restart ceos-ard-server` |
-| Disable auto-start on boot | `sudo systemctl disable ceos-ard-server` |
-| Tail logs live | `journalctl -u ceos-ard-server -f` |
-| View last 100 log lines | `journalctl -u ceos-ard-server -n 100` |
-
-#### 5. Updating the server with new code
-
-To deploy new changes to an already-running server:
-
-```bash
-cd /home/server/ceos-ard-server
-sudo systemctl stop ceos-ard-server
-mkdir -p ~/backups
-sqlite3 ceos_ard_server.db ".backup $HOME/backups/ceos_ard_server-$(date +%F).db"
-git pull
-pixi install          # only strictly needed if pixi.toml/pixi.lock changed.
-pixi run migrate      # brings the database to the newest schema; does nothing if it already is
-sudo systemctl start ceos-ard-server
-```
-
-The server is stopped first, so nothing writes to the database while it is backed up and migrated.
-
-**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`.
-
-After starting, confirm it came back up cleanly:
-
-```bash
-sudo systemctl status ceos-ard-server
-journalctl -u ceos-ard-server -n 30
-```
-
-At startup the log shows `All prerequisite checks passed.` Otherwise it shows `CHECKS FAILED` with the reason, e.g. a
-database that isn't migrated, and systemd keeps restarting the server until the cause is fixed.
-
-### Configuring a Reverse Proxy (Caddy)
-
-The service listens on `127.0.0.1:8000` only. [Caddy](https://caddyserver.com/docs/install) sits in front of it, handles
-HTTPS (it issues and renews the certificate itself) and forwards all requests, the realtime WebSocket included, with no
-extra configuration.
-
-`/etc/caddy/Caddyfile`:
-
-```caddyfile
-api.yourdomain.com {
-    reverse_proxy localhost:8000
-    encode gzip
-
-    log {
-        output file /var/log/caddy/access.log
-    }
-}
-```
-
-The domain must match `SERVER_URL` and point at the server, with ports 80 and 443 open. Apply changes with
-`sudo systemctl reload caddy`; a reload closes open WebSocket connections, which the editor reopens by itself.
+> **Single worker only.** Keep the server to one worker process (no `--workers`, no multi-worker
+> gunicorn, a single replica). The realtime `EventBroker` is in-memory and per-process, so extra
+> workers or replicas silently drop cross-worker realtime events. Horizontal scaling requires a shared
+> pub/sub (e.g. Redis) behind the broker.
 
 ## 🤝 Contributing
 

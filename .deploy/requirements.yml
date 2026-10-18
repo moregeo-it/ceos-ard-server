@@ -1,0 +1,4 @@
+---
+collections:
+  - name: community.general   # ufw
+  - name: ansible.posix       # mount (swap)
