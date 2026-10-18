@@ -1,0 +1,45 @@
+# --- Identity and paths -----------------------------------------------------
+app_name: ceos-ard-server
+app_user: server
+app_group: server
+app_home: /home/server
+app_dir: "{{ app_home }}/ceos-ard-server"
+app_repo: https://github.com/moregeo-it/ceos-ard-server.git
+pixi_bin: "{{ app_home }}/.pixi/bin/pixi"
+app_port: 8000
+
+# --- Data -------------------------------------------------------------------
+app_data_dir: /var/lib/ceos-ard-server
+app_backup_dir: /var/backups/ceos-ard-server
+app_data_relocated: false
+
+# Derived: where the data actually is right now. Everything else reads these,
+# so flipping app_data_relocated moves the whole configuration consistently.
+app_workspaces_root: "{{ (app_data_dir ~ '/workspaces') if app_data_relocated else (app_dir ~ '/workspaces') }}"
+app_db_path: "{{ (app_data_dir ~ '/ceos_ard_server.db') if app_data_relocated else (app_dir ~ '/ceos_ard_server.db') }}"
+app_database_url: "{{ ('sqlite:////' ~ app_db_path.lstrip('/')) if app_data_relocated else 'sqlite:///./ceos_ard_server.db' }}"
+
+# --- Service ----------------------------------------------------------------
+# Both default to true: the service is currently down only because it was never
+# enabled when the host rebooted. Set false to converge without touching it.
+app_service_enabled: true
+app_service_started: true
+
+# Playwright's Chromium is sensitive to sandboxing, so hardening stays moderate
+# here. Tighten only after verifying PDF export still works.
+app_hardening_strict: false
+
+# --- Backups ----------------------------------------------------------------
+app_backup_db_keep: 30          # daily database copies to retain
+app_backup_workspaces_keep: 4   # weekly workspace archives to retain
+
+# --- Host-level -------------------------------------------------------------
+manage_swap: true
+swap_size_mb: 2048
+manage_caddy: true
+manage_firewall: true
+
+# Derived from app_server_url
+app_domain: "{{ app_server_url | urlsplit('hostname') }}"
+caddy_acme_email: ""
+caddy_package_state: latest
