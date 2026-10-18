@@ -1,3 +1,4 @@
+---
 # ONE-TIME: moves the database and workspaces out of the git checkout, so the
 # code directory becomes safely replaceable.
 #
@@ -61,7 +62,9 @@
     # --- Record the before state, to compare against afterwards -------------
     - name: Count workspace directories before
       become: true
-      ansible.builtin.shell: ls -1 {{ app_dir }}/workspaces | wc -l
+      ansible.builtin.shell:
+        cmd: set -o pipefail && ls -1 {{ app_dir }}/workspaces | wc -l
+        executable: /bin/bash
       register: ws_before
       changed_when: false
 
@@ -89,7 +92,9 @@
       args:
         creates: "{{ app_backup_dir }}/pre-migration-db.sqlite"
 
-    - name: Take a safety copy of the workspaces
+    # tar, not the archive module: it streams, where archive would need the
+    # whole 781 MB staged in memory on a 3.8 GiB host.
+    - name: Take a safety copy of the workspaces  # noqa: command-instead-of-module
       become: true
       become_user: "{{ app_user }}"
       ansible.builtin.command:
@@ -98,7 +103,9 @@
 
     # --- Move ---------------------------------------------------------------
     # Copy, verify, then remove: a move that fails halfway leaves nothing behind.
-    - name: Copy the workspaces to the data directory
+    # rsync, not synchronize: this is a local copy, and synchronize insists on
+    # building an SSH command even when source and destination are the host.
+    - name: Copy the workspaces to the data directory  # noqa: command-instead-of-module
       become: true
       ansible.builtin.command:
         cmd: rsync -a --delete {{ app_dir }}/workspaces/ {{ app_data_dir }}/workspaces/
@@ -115,7 +122,9 @@
     # --- Verify -------------------------------------------------------------
     - name: Count workspace directories after
       become: true
-      ansible.builtin.shell: ls -1 {{ app_data_dir }}/workspaces | wc -l
+      ansible.builtin.shell:
+        cmd: set -o pipefail && ls -1 {{ app_data_dir }}/workspaces | wc -l
+        executable: /bin/bash
       register: ws_after
       changed_when: false
 

@@ -1,3 +1,4 @@
+---
 # Replaces the hand-installed crontab: presence is now diffable, failures land
 # in the journal, and a missed run catches up after a reboot.
 - name: Install maintenance units
@@ -26,7 +27,8 @@
     label: "{{ item.name }}"
   notify: Reload systemd
 
-- ansible.builtin.meta: flush_handlers
+- name: Apply pending unit changes before enabling them
+  ansible.builtin.meta: flush_handlers
 
 - name: Enable maintenance timers
   become: true

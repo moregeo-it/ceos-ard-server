@@ -1,3 +1,4 @@
+---
 # Caddy terminates TLS and issues/renews certificates itself; there is no
 # certbot and no /etc/letsencrypt on this host.
 #

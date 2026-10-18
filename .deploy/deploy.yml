@@ -1,3 +1,4 @@
+---
 # Moves the code to app_version and restarts. Run after bumping app_version in
 # host_vars. Rollback is the same playbook with the previous commit.
 - name: Deploy {{ app_version | default('(unset)') }}
