@@ -1,0 +1,30 @@
+- name: Install the backup script
+  become: true
+  ansible.builtin.template:
+    src: backup.sh.j2
+    dest: /usr/local/bin/{{ app_name }}-backup
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install backup units
+  become: true
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: /etc/systemd/system/{{ item.dest }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: backup.service.j2, dest: "{{ app_name }}-backup.service" }
+    - { src: backup.timer.j2, dest: "{{ app_name }}-backup.timer" }
+  notify: Reload systemd
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable the backup timer
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ app_name }}-backup.timer"
+    enabled: true
+    state: started

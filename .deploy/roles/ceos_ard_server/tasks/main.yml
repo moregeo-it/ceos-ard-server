@@ -1,0 +1,34 @@
+- name: Fail early when the deployed revision is not pinned
+  ansible.builtin.assert:
+    that:
+      - app_version is defined
+      - app_version | length >= 7
+    fail_msg: >-
+      app_version must name the exact commit this host runs. setup.yml never
+      changes the checkout, but deploy.yml uses this value.
+
+- ansible.builtin.import_tasks: packages.yml
+  tags: [packages]
+
+- ansible.builtin.import_tasks: swap.yml
+  when: manage_swap
+  tags: [swap]
+
+- ansible.builtin.import_tasks: directories.yml
+  tags: [directories]
+
+- ansible.builtin.import_tasks: config.yml
+  tags: [config]
+
+- ansible.builtin.import_tasks: service.yml
+  tags: [service]
+
+- ansible.builtin.import_tasks: timers.yml
+  tags: [timers]
+
+- ansible.builtin.import_tasks: backup.yml
+  tags: [backup]
+
+- ansible.builtin.import_tasks: caddy.yml
+  when: manage_caddy
+  tags: [caddy]
