@@ -49,3 +49,9 @@ app_timers:
     script: scripts/check_token_expiry.py
     calendar: "Mon *-*-* 09:00:00"
     description: Warn before the GitHub service token expires
+
+# --- Host-level overrides ---------------------------------------------------
+# Deferred until the rest is proven: there is no firewall on this host today,
+# so leaving it off changes nothing, and enabling one remotely on a box with
+# awkward console access is the single step that could lock us out.
+manage_firewall: false
