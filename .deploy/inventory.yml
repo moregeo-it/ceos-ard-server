@@ -1,3 +1,4 @@
+---
 # One host for now. Add further servers under `hosts:` with their own host_vars.
 all:
   children:
