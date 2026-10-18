@@ -30,7 +30,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     # Not the app's engine: batch mode rebuilds SQLite tables, which its foreign_keys=ON would block
-    engine = create_engine(settings.DATABASE_URL)
+    engine = create_engine(settings.DATABASE_URL, connect_args={"timeout": 5})
     with engine.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True, render_item=render_item)
         with context.begin_transaction():
