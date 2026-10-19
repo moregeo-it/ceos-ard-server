@@ -102,7 +102,8 @@ async def get_current_user(
     now = datetime.now(UTC)
     if user.last_seen_at is None or now - user.last_seen_at > timedelta(hours=1):
         user.last_seen_at = now
-        db.commit()
+    # Also ends the read transaction, so the endpoint's slow work doesn't hold a pooled connection
+    db.commit()
 
     logger.debug(f"JWT validated successfully for user {user.username} ({user.identity_provider})")
 

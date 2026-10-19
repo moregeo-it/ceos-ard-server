@@ -80,7 +80,6 @@ class WorkspaceService:
             # multi-second clone would block every other SQLite writer.
             db.add(workspace)
             db.commit()
-            db.refresh(workspace)
             workspace.annotate_viewer("owner", owner=user)
 
             # Under the workspace lock so nothing can operate on the half-cloned tree
@@ -149,6 +148,7 @@ class WorkspaceService:
     def get_workspace_by_id(
         self, db: Session, workspace_id: str, user_id: str, exists=True, min_role: str = AccessMode.READONLY.value
     ) -> GitWorkspace:
+        """The workspace with the caller's role. Commits, so callers' slow work after it holds no pooled connection: stage no changes before it."""
         try:
             if not workspace_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
@@ -174,7 +174,9 @@ class WorkspaceService:
             elif exists and not workspace.abs_path.is_dir():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is not a directory")
 
-            return workspace.annotate_viewer(role)
+            workspace.annotate_viewer(role)
+            db.commit()
+            return workspace
         except HTTPException:
             raise
         except Exception as e:
