@@ -166,8 +166,8 @@ paths:
       summary: Logout user
       description: |
         Revokes the provider token (best effort), clears the stored provider tokens and the session
-        cookie, and closes the user's realtime sockets with `4001`. The JWT itself can't be
-        invalidated, but it is refused afterwards because the provider token is gone.
+        cookie, and closes the user's realtime sockets with `4001`. This JWT and every other JWT of the
+        user issued before are refused afterwards, also after the next login.
       operationId: logout
       tags:
         - Authentication
@@ -247,7 +247,7 @@ paths:
                     format: date-time
                     description: When the JWT, and with it the session cookie, expires
         '401':
-          description: The JWT is invalid, or the provider token expired and could not be renewed
+          description: The JWT is invalid or was issued before the user's last logout, or the provider token expired and could not be renewed
           content:
             application/json:
               schema:
@@ -311,7 +311,7 @@ paths:
                     type: string
                     description: Bearer callers only; the current JWT, or a fresh one when `token_refreshed` is true
         '401':
-          description: The JWT expired, or the provider token expired and could not be renewed
+          description: The JWT expired or was issued before the user's last logout, or the provider token expired and could not be renewed
           content:
             application/json:
               schema:

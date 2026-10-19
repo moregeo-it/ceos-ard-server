@@ -75,7 +75,7 @@ async def logout(
 
         await TokenRefreshService.end_session(user, db, github_service)
 
-        # The JWT cannot be invalidated; its realtime sockets close with 4001 (re-login before reconnecting).
+        # Its realtime sockets close with 4001; their JWT is refused from now on, so they reconnect only after a login
         closed_sockets = get_event_broker().close_user_connections(user.id)
 
         clear_session_cookie(response)
