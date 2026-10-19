@@ -38,8 +38,11 @@ class TokenRefreshService:
         """
         if not TokenRefreshService.is_token_expired(user):
             return
+        # Neither the lock wait nor the provider call may hold a pooled connection
+        db.commit()
         async with refresh_locks(user.id):
             db.refresh(user)
+            db.commit()
             if TokenRefreshService.is_token_expired(user):
                 await TokenRefreshService.refresh_token_for_user(user, db)
 
@@ -160,6 +163,8 @@ class TokenRefreshService:
         provider = user.identity_provider
         # Changes with every login and refresh, so it identifies the session being ended
         session_expiry = user.token_expiry
+        # The provider calls below must not hold a pooled connection
+        db.commit()
         try:
             if provider == IdentityProvider.google and (user.refresh_token or user.access_token):
                 await TokenRefreshService._revoke_google_tokens(user)
@@ -215,6 +220,7 @@ class TokenRefreshService:
                 # A request may have renewed the pair while we waited
                 seen_expiry = user.token_expiry
                 db.refresh(user)
+                db.commit()
                 if unattended and user.token_expiry != seen_expiry:
                     return  # a login's new session, not the idle one; end_session leaves it
                 token = user.access_token

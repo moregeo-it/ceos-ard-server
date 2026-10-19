@@ -98,6 +98,7 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
         try:
             user_id, token_expires_at = await _authenticate(token, db)
         except _Rejected as e:
+            db.close()  # before talking to the client
             await _reject(websocket, e.code, e.reason)
             return
 
@@ -106,6 +107,7 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
             get_workspace_service().get_workspace_by_id(db, workspace_id, user_id)
         except HTTPException:
             broker.unsubscribe(workspace_id, queue, user_id)
+            db.close()
             await _reject(websocket, WS_CLOSE_ACCESS_REVOKED, "no access to this workspace")
             return
     finally:
