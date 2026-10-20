@@ -55,7 +55,6 @@
       register: pixi_install
       changed_when: "'No changes' not in pixi_install.stdout"
 
-    # Alembic arrives with #126; `alembic upgrade head` is a no-op at head.
     - name: Migrate the database
       become: true
       become_user: "{{ app_user }}"
@@ -64,7 +63,6 @@
         chdir: "{{ app_dir }}"
       register: migrate
       changed_when: "'Running upgrade' in migrate.stderr"
-      when: app_has_alembic | default(false)
 
     - name: Start the service
       become: true

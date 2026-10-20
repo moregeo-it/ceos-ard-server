@@ -32,6 +32,10 @@ app_service_started: true
 # here. Tighten only after verifying PDF export still works.
 app_hardening_strict: false
 
+# --- Application ------------------------------------------------------------
+app_sharing_modes_enabled: readonly   # comma-separated
+app_build_concurrency: 2
+
 # --- Backups ----------------------------------------------------------------
 app_backup_db_keep: 30          # daily database copies to retain
 app_backup_workspaces_keep: 4   # weekly workspace archives to retain
