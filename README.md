@@ -500,8 +500,6 @@ answer. Rolling back is the same command with the previous commit.
 ### What is still manual
 
 - Installing `pixi` on a brand-new host (`curl -fsSL https://pixi.sh/install.sh | bash`)
-- The one-time `pixi run alembic stamp 0001` on a database that predates migrations, before the
-  first `pixi run migrate`
 - Copying backups off the host; the automated copies live on the same disk as the originals
 
 ### How production is wired

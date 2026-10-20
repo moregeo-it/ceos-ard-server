@@ -31,11 +31,6 @@ Rollback is the same thing with the previous commit. The deploy stops the
 service and timers, backs up, checks out, installs dependencies, migrates,
 restarts and waits for a response.
 
-Set `app_has_alembic: true` once the deployed version includes the Alembic
-migrations, so `deploy.yml` runs `pixi run migrate`. The first such deploy also
-needs a one-time `pixi run alembic stamp 0001` — see the deployment section of
-the main README.
-
 ## Where the data lives
 
 Until `migrate-data.yml` has run, the database and every workspace sit inside
