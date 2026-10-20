@@ -1,0 +1,18 @@
+---
+- name: Reload systemd
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart app
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ app_name }}"
+    state: restarted
+  when: app_service_started
+
+- name: Reload caddy
+  become: true
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: reloaded

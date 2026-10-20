@@ -1,0 +1,60 @@
+---
+# Non-secret configuration for the production host. Secrets live in vault.yml.
+
+# --- Code version -----------------------------------------------------------
+# The exact commit deployed. setup.yml never changes the checkout; only
+# deploy.yml moves the code, and only to this ref. Bump deliberately.
+app_version: 6341171ddbeecdf8c3a1c816a4f8119b3191ba6a
+
+# --- Data location ----------------------------------------------------------
+# false  = database and workspaces still live inside the git checkout (today).
+# true   = they live under app_data_dir, after migrate-data.yml has moved them.
+# Flip this ONLY as part of running migrate-data.yml. See .deploy/README.md.
+app_data_relocated: false
+
+# --- Public identity --------------------------------------------------------
+app_server_url: https://api.ceos-ard.moregeo.it
+app_client_url: https://editor.ceos-ard.moregeo.it
+app_cors_origins: https://editor.ceos-ard.moregeo.it
+app_environment: production
+
+# --- Upstream repository the app forks from ---------------------------------
+app_ceos_ard_org: ceos-org
+app_ceos_ard_repo: ceos-ard
+
+# --- Alerting ---------------------------------------------------------------
+app_alert_email_to: m.mohr@moregeo.it
+app_alert_email_from: no-reply@ceos-ard.moregeo.it
+app_smtp_host: w02124e6.kasserver.com
+app_smtp_port: 465
+app_smtp_mode: ssl
+app_smtp_user: no-reply@ceos-ard.moregeo.it
+
+# --- TLS (Caddy issues and renews certificates itself) -----------------------
+caddy_acme_email: m.mohr@moregeo.it
+
+# --- Maintenance jobs -------------------------------------------------------
+# Only the scripts that exist at app_version.
+app_timers:
+  - name: pr-status
+    script: scripts/check_pr_status.py
+    calendar: "*-*-* 00:00:00"
+    description: Check pull request status
+  - name: workspace-cleanup
+    script: scripts/cleanup_archived_workspaces.py
+    calendar: "*-*-* 02:00:00"
+    description: Delete archived workspaces
+  - name: token-expiry
+    script: scripts/check_token_expiry.py
+    calendar: "Mon *-*-* 09:00:00"
+    description: Warn before the GitHub service token expires
+  - name: idle-tokens
+    script: scripts/revoke_idle_tokens.py
+    calendar: "*-*-* 03:00:00"
+    description: Revoke the tokens of idle users
+
+# --- Host-level overrides ---------------------------------------------------
+# Deferred until the rest is proven: there is no firewall on this host today,
+# so leaving it off changes nothing, and enabling one remotely on a box with
+# awkward console access is the single step that could lock us out.
+manage_firewall: false

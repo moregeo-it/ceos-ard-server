@@ -1,0 +1,27 @@
+---
+- name: Create the data directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ app_data_dir }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0750"
+
+- name: Create the workspaces directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ app_workspaces_root }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0750"
+
+- name: Create the backup directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ app_backup_dir }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0750"

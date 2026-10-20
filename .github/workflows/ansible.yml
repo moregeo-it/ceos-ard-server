@@ -1,0 +1,54 @@
+name: Deployment config
+
+on:
+  push:
+    paths:
+      - '.deploy/**'
+      - '.github/workflows/ansible.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.deploy/**'
+      - '.github/workflows/ansible.yml'
+
+jobs:
+  validate:
+    name: Validate Ansible configuration
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .deploy
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Ansible and linters
+        run: pip install ansible-core ansible-lint
+
+      - name: Install collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Uses ci/inventory.yml, never the real host, so no vault password is
+      # needed and CI can never reach production.
+      - name: Check playbook syntax
+        run: |
+          for playbook in setup.yml deploy.yml migrate-data.yml; do
+            echo "::group::$playbook"
+            ansible-playbook -i ci/inventory.yml "$playbook" --syntax-check
+            echo "::endgroup::"
+          done
+
+      - name: Lint Ansible
+        run: ansible-lint
+
+      # Every template must render with the CI variables; catches a typo in a
+      # Jinja expression that syntax-check alone would not.
+      - name: Render templates
+        run: ansible-playbook -i ci/inventory.yml ci/render.yml

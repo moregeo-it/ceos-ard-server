@@ -1,0 +1,62 @@
+---
+# Renders every template with the CI variables, catching Jinja typos that
+# --syntax-check cannot see. Writes to a scratch directory, touches nothing
+# else, and never connects to a real host.
+- name: Render templates
+  hosts: ci.invalid
+  gather_facts: false
+  vars:
+    render_dir: /tmp/ceos-ard-render
+    role_templates: "{{ playbook_dir }}/../roles/ceos_ard_server/templates"
+
+  tasks:
+    - name: Load the role defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/ceos_ard_server/defaults/main.yml"
+
+    - name: Create the scratch directory
+      ansible.builtin.file:
+        path: "{{ render_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Render the host-wide templates
+      ansible.builtin.template:
+        src: "{{ role_templates }}/{{ item }}"
+        dest: "{{ render_dir }}/{{ item | regex_replace('[.]j2$', '') }}"
+        mode: "0600"
+      loop:
+        - env.j2
+        - app.service.j2
+        - backup.sh.j2
+        - backup.service.j2
+        - backup.timer.j2
+        - Caddyfile.j2
+      vars:
+        tls_enabled: true
+
+    - name: Render the per-job templates
+      ansible.builtin.template:
+        src: "{{ role_templates }}/{{ tpl }}"
+        dest: "{{ render_dir }}/{{ item.name }}-{{ tpl | regex_replace('[.]j2$', '') }}"
+        mode: "0600"
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        tpl: job.service.j2
+
+    - name: Show what was rendered
+      # env.j2 renders to 'env' here; on the host the template task names it .env
+      ansible.builtin.command: cat {{ render_dir }}/env
+      register: rendered_env
+      changed_when: false
+
+    - name: The database URL must match the relocation state
+      ansible.builtin.assert:
+        that:
+          - "'DATABASE_URL=sqlite:///./ceos_ard_server.db' in rendered_env.stdout"
+          - "'WORKSPACES_ROOT=' in rendered_env.stdout"
+        fail_msg: >-
+          .env rendered with unexpected data paths. With app_data_relocated
+          false the database URL must stay relative to the checkout.

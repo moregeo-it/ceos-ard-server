@@ -1,0 +1,33 @@
+---
+# Dummy values mirroring host_vars/<host>/vars.yml, so the playbooks parse with
+# every variable defined. Keep the key set in sync with the real host_vars.
+app_version: 0000000000000000000000000000000000000000
+app_data_relocated: false
+app_server_url: https://api.example.invalid
+app_client_url: https://editor.example.invalid
+app_cors_origins: https://editor.example.invalid
+app_environment: production
+app_ceos_ard_org: ceos-org
+app_ceos_ard_repo: ceos-ard
+app_alert_email_to: ci@example.invalid
+app_alert_email_from: ci@example.invalid
+app_smtp_host: smtp.example.invalid
+app_smtp_port: 465
+app_smtp_mode: ssl
+app_smtp_user: ci@example.invalid
+caddy_acme_email: ci@example.invalid
+
+app_timers:
+  - name: pr-status
+    script: scripts/check_pr_status.py
+    calendar: "*-*-* 00:00:00"
+    description: Check pull request status
+
+vault_secret_key: ci
+vault_github_client_id: ci
+vault_github_client_secret: ci
+vault_github_service_token: ci
+vault_github_service_token_expires_at: "2099-12-31"
+vault_google_client_id: ci
+vault_google_client_secret: ci
+vault_smtp_password: ci

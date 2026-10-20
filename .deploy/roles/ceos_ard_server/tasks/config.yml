@@ -1,0 +1,23 @@
+---
+- name: Require every secret to be present
+  ansible.builtin.assert:
+    that:
+      - vault_secret_key | default('') | length > 0
+      - vault_github_client_id | default('') | length > 0
+      - vault_github_client_secret | default('') | length > 0
+      - vault_github_service_token | default('') | length > 0
+      - vault_github_service_token_expires_at | default('') | length > 0
+    fail_msg: >-
+      Secrets missing. Copy vault.yml.example to vault.yml, fill it from the
+      server's current .env, and encrypt it with ansible-vault.
+
+- name: Write the environment file
+  become: true
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0600"
+    backup: true
+  notify: Restart app

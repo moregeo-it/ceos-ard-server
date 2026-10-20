@@ -1,0 +1,185 @@
+---
+# ONE-TIME: moves the database and workspaces out of the git checkout, so the
+# code directory becomes safely replaceable.
+#
+# Before running:
+#   1. set app_data_relocated: true in host_vars/<host>/vars.yml
+#   2. have an off-box backup already (this playbook makes one too)
+#   3. the service should be stopped; this playbook stops it anyway
+#
+#   ansible-playbook migrate-data.yml --check --diff   # dry run first
+- name: Move application data out of the checkout
+  hosts: ceos_ard_servers
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require app_data_relocated to be set
+      ansible.builtin.assert:
+        that: app_data_relocated | bool
+        fail_msg: >-
+          Set app_data_relocated: true in host_vars first. It is what makes the
+          .env template, the backup script and the systemd units agree on the
+          new location.
+
+  tasks:
+    - name: Stop the maintenance timers
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}-{{ item.name }}.timer"
+        state: stopped
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+      failed_when: false
+
+    - name: Stop the service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}"
+        state: stopped
+
+    - name: Locate the current data
+      become: true
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: source
+      loop:
+        - "{{ app_dir }}/ceos_ard_server.db"
+        - "{{ app_dir }}/workspaces"
+
+    - name: Refuse to run if the data is not where it is expected
+      ansible.builtin.assert:
+        that: source.results | map(attribute='stat.exists') | select | list | length == 2
+        fail_msg: "Expected {{ app_dir }}/ceos_ard_server.db and {{ app_dir }}/workspaces to exist. Already migrated?"
+
+    - name: Refuse to overwrite an existing target database
+      become: true
+      ansible.builtin.stat:
+        path: "{{ app_data_dir }}/ceos_ard_server.db"
+      register: target_db
+      failed_when: target_db.stat.exists
+
+    # --- Record the before state, to compare against afterwards -------------
+    - name: Count workspace directories before
+      become: true
+      ansible.builtin.shell:
+        cmd: set -o pipefail && ls -1 {{ app_dir }}/workspaces | wc -l
+        executable: /bin/bash
+      register: ws_before
+      changed_when: false
+
+    - name: Count database rows before
+      become: true
+      ansible.builtin.shell: >-
+        sqlite3 {{ app_dir }}/ceos_ard_server.db
+        "select (select count(*) from users) || '/' || (select count(*) from git_workspaces);"
+      register: rows_before
+      changed_when: false
+
+    # --- Back up ------------------------------------------------------------
+    - name: Checkpoint the write-ahead log
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: sqlite3 {{ app_dir }}/ceos_ard_server.db "PRAGMA wal_checkpoint(TRUNCATE);"
+      changed_when: true
+
+    - name: Take a safety copy of the database
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: >-
+        sqlite3 {{ app_dir }}/ceos_ard_server.db
+        ".backup '{{ app_backup_dir }}/pre-migration-db.sqlite'"
+      args:
+        creates: "{{ app_backup_dir }}/pre-migration-db.sqlite"
+
+    # tar, not the archive module: it streams, where archive would need the
+    # whole 781 MB staged in memory on a 3.8 GiB host.
+    - name: Take a safety copy of the workspaces  # noqa: command-instead-of-module
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command:
+        cmd: tar czf {{ app_backup_dir }}/pre-migration-workspaces.tar.gz -C {{ app_dir }} workspaces
+        creates: "{{ app_backup_dir }}/pre-migration-workspaces.tar.gz"
+
+    # --- Move ---------------------------------------------------------------
+    # Copy, verify, then remove: a move that fails halfway leaves nothing behind.
+    # rsync, not synchronize: this is a local copy, and synchronize insists on
+    # building an SSH command even when source and destination are the host.
+    - name: Copy the workspaces to the data directory  # noqa: command-instead-of-module
+      become: true
+      ansible.builtin.command:
+        cmd: rsync -a --delete {{ app_dir }}/workspaces/ {{ app_data_dir }}/workspaces/
+      changed_when: true
+
+    - name: Copy the database to the data directory
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: >-
+        sqlite3 {{ app_dir }}/ceos_ard_server.db
+        ".backup '{{ app_data_dir }}/ceos_ard_server.db'"
+      changed_when: true
+
+    # --- Verify -------------------------------------------------------------
+    - name: Count workspace directories after
+      become: true
+      ansible.builtin.shell:
+        cmd: set -o pipefail && ls -1 {{ app_data_dir }}/workspaces | wc -l
+        executable: /bin/bash
+      register: ws_after
+      changed_when: false
+
+    - name: Count database rows after
+      become: true
+      ansible.builtin.shell: >-
+        sqlite3 {{ app_data_dir }}/ceos_ard_server.db
+        "select (select count(*) from users) || '/' || (select count(*) from git_workspaces);"
+      register: rows_after
+      changed_when: false
+
+    - name: Check database integrity
+      become: true
+      ansible.builtin.command: sqlite3 {{ app_data_dir }}/ceos_ard_server.db "PRAGMA integrity_check;"
+      register: integrity
+      changed_when: false
+
+    - name: Verify nothing was lost
+      ansible.builtin.assert:
+        that:
+          - ws_before.stdout | trim == ws_after.stdout | trim
+          - rows_before.stdout | trim == rows_after.stdout | trim
+          - integrity.stdout | trim == 'ok'
+        success_msg: >-
+          {{ ws_after.stdout | trim }} workspaces, {{ rows_after.stdout | trim }}
+          users/workspace rows, integrity ok.
+        fail_msg: >-
+          Mismatch. The originals are untouched in {{ app_dir }}; nothing has been
+          removed. Investigate before retrying.
+
+    # --- Point the app at the new location ----------------------------------
+    - name: Rewrite .env for the new paths
+      ansible.builtin.import_role:
+        name: ceos_ard_server
+        tasks_from: config.yml
+
+    - name: Start the service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}"
+        state: started
+
+    - name: Restart the maintenance timers
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}-{{ item.name }}.timer"
+        state: started
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+  post_tasks:
+    - name: What is left to do by hand
+      ansible.builtin.debug:
+        msg:
+          - "Verified and live from {{ app_data_dir }}."
+          - "The originals are STILL in {{ app_dir }} (workspaces/, ceos_ard_server.db)."
+          - "Confirm the app works, then remove them manually. Nothing here deletes data."

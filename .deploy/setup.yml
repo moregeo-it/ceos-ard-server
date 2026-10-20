@@ -1,0 +1,11 @@
+---
+# Converges everything AROUND the code: service, timers, Caddy, TLS, data
+# directories, backups, swap. It never touches the git checkout, so running it
+# cannot change which version is deployed.
+#
+# First run:  ansible-playbook setup.yml --check --diff
+- name: Configure the CEOS-ARD server host
+  hosts: ceos_ard_servers
+  gather_facts: true
+  roles:
+    - ceos_ard_server

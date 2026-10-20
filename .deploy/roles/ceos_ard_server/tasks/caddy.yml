@@ -1,0 +1,91 @@
+---
+# Caddy terminates TLS and issues/renews certificates itself; there is no
+# certbot and no /etc/letsencrypt on this host.
+#
+# Debian freezes its Caddy at the version a release shipped with, so the
+# packages come from Caddy's own repository instead. caddy_package_state:
+# latest keeps the host current; pin it to a version here if you ever want a
+# deploy to be bit-for-bit reproducible.
+- name: Ensure the apt keyring directory exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Caddy repository key
+  become: true
+  ansible.builtin.get_url:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    dest: /etc/apt/keyrings/caddy-stable.asc
+    mode: "0644"
+
+- name: Add the Caddy repository
+  become: true
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/caddy-stable.asc]
+      https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+    filename: caddy-stable
+    state: present
+
+- name: Install Caddy
+  become: true
+  ansible.builtin.apt:
+    name: caddy
+    state: "{{ caddy_package_state }}"
+    update_cache: true
+
+- name: Create the log directory
+  become: true
+  ansible.builtin.file:
+    path: /var/log/caddy
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: "0750"
+
+- name: Write the Caddyfile
+  become: true
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: caddy
+    mode: "0640"
+    backup: true
+    validate: caddy validate --adapter caddyfile --config %s
+  notify: Reload caddy
+
+- name: Enable Caddy
+  become: true
+  ansible.builtin.systemd_service:
+    name: caddy
+    enabled: true
+    state: started
+
+- name: Allow SSH through the firewall
+  become: true
+  community.general.ufw:
+    rule: allow
+    name: OpenSSH
+  when: manage_firewall
+
+- name: Allow HTTP and HTTPS through the firewall
+  become: true
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["80", "443"]
+  when: manage_firewall
+
+- name: Enable the firewall
+  become: true
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  when: manage_firewall
