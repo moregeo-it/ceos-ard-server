@@ -8,6 +8,9 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 - **OAuth Integration**: Support for GitHub and Google OAuth providers
 - **Session Cookie**: The JWT lives in an HttpOnly cookie, never in the browser's storage or in URLs
+- **Session Renewal**: GitHub sessions are renewed with GitHub's expiring tokens, without a new login
+- **Logout**: Revokes the provider token and ends every session of the user, in all browsers
+- **Idle Sessions**: The tokens of users idle for a week are revoked
 - **User Management**: Automatic user creation and profile management
 - **GitHub-Only Workspaces**: All workspace features exclusively available to GitHub users
 
@@ -15,10 +18,19 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 - **Git-based Workspaces**: Create isolated workspaces with repository forking
 - **CRUD Operations**: Full workspace lifecycle management (create, read, update, delete)
+- **Sync with GitHub**: Changes on the fork's branch are merged into the workspace; a conflicting merge is
+  aborted and reported, never left half-done
 - **Workspace Archival**: Archive workspaces with automatic cleanup after 1 month
 - **Status Tracking**: Monitor workspace and Pull Request status
-- **Multi-user Support**: User-specific workspace isolation
+- **Owner-only Changes**: Only the owner changes a workspace; collaborators get read-only access
 - **GitHub Authentication Required**: All workspace endpoints require GitHub OAuth
+
+### Sharing & Realtime
+
+- **Collaborators**: Invite GitHub users by username, read-only
+- **Share Links**: Anyone with the link and a GitHub login joins as a read-only collaborator; links can expire
+- **Live Updates**: Viewers get every save, commit, sync and status change over a WebSocket as it happens
+- **Viewer Access**: Collaborators read and search the files, see the preview, and download PDF and Word
 
 ### File Operations
 
@@ -50,31 +62,31 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 ## 🛠️ Technology Stack
 
-- **Backend Framework**: FastAPI 0.116+
-- **Database**: SQLite (file-based, zero-config)
+- **Backend Framework**: FastAPI 0.138+ on Uvicorn (WebSockets via `websockets`)
+- **Database**: SQLite in WAL mode (file-based, zero-config)
 - **ORM**: SQLAlchemy 2.0+
+- **Migrations**: Alembic
 - **Authentication**: Authlib + OAuth2
-- **Session Management**: Starlette SessionMiddleware
+- **Session Management**: JWT in an HttpOnly cookie; Starlette SessionMiddleware for the OAuth state
 - **Package Management**: Pixi (conda-forge)
 - **Document Processing**: Pandoc + Pandoc-crossref
-- **Git Operations**: GitPython
+- **Git Operations**: pygit2
 - **Browser Automation**: Playwright (for preview generation)
-- **Code Quality**: Ruff (linting & formatting)
-- **Testing**: Pytest
+- **Code Quality**: Ruff (linting & formatting), pre-commit
 
 ## 📋 Prerequisites
 
-- **Python 3.11+**
-- **Pixi** (for dependency management)
+- **Pixi** (for dependency management; it also installs Python)
 - **Git** (for repository operations)
-- **GitHub/Google OAuth Apps** (for authentication)
+- **sqlite3** command-line tool (for backups)
+- **GitHub OAuth App** (for authentication; a Google OAuth App is optional)
 
 ## 🔧 Installation
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/ceos-org/ceos-ard-server.git
+git clone https://github.com/moregeo-it/ceos-ard-server.git
 cd ceos-ard-server
 ```
 
@@ -118,7 +130,7 @@ For local development over plain HTTP in **Safari**, set `SESSION_COOKIE_SECURE=
 `Secure` cookies on `http://localhost`. Chrome and Firefox accept them there, so the default works.
 Only for `ENVIRONMENT=development`; the server refuses to start with it otherwise.
 
-### 5. OAuth Setup
+### 4. OAuth Setup
 
 #### GitHub OAuth App (Required)
 
@@ -128,8 +140,13 @@ Only for `ENVIRONMENT=development`; the server refuses to start with it otherwis
   - **Homepage URL**: `http://localhost:8000`
   - **Authorization callback URL**: `http://localhost:8000/auth/callback/github`
 3. Copy the Client ID and Client Secret to your `.env` file
+4. Turn on expiring tokens: in the app's settings, open **Optional features** and click **Opt-in** next to the token
+  expiration feature.
 
-The server requests the `offline_access` scope, so GitHub issues an 8-hour access token with a refresh token and the server renews the session without a new login; no app setting is needed. A token from a login before this scope cannot be renewed, so that session ends after 8 hours; the next login fixes it.
+In production, both URLs use `SERVER_URL`, e.g. `https://api.ceos-ard.moregeo.it/auth/callback/github`.
+
+With expiring tokens, GitHub issues an 8-hour access token with a refresh token, and the server renews the session without
+a new login. The server also requests the `offline_access` scope, which asks for the same on every login.
 
 **Note**: GitHub authentication is mandatory for workspace features. All workspace operations require GitHub OAuth.
 
@@ -145,7 +162,7 @@ The server requests the `offline_access` scope, so GitHub issues an 8-hour acces
 
 #### GitHub Service Token (Required for Automated Tasks)
 
-For automated maintenance scripts (PR status checker and workspace cleanup), you need a GitHub service token:
+The PR status checker needs a GitHub service token:
 
 1. **Create a GitHub bot/service account** (recommended) or use your personal account:
   - Create a new GitHub account (e.g., `ceos-ard-bot`)
@@ -222,16 +239,6 @@ docs pages of its own.
 pixi run pre-commit
 ```
 
-### Testing
-
-```bash
-# Run tests
-pixi run test
-
-# Run tests with verbose output
-pixi run pytest test/ -v
-```
-
 ### Pre-commit Hooks
 
 ```bash
@@ -247,11 +254,13 @@ The application uses SQLite as the database backend:
 - **Creation**: `pixi run migrate` creates the database and its tables
 - **No Installation Required**: SQLite is built into Python
 - **Git Ignored**: Database files are automatically ignored by git
+- **WAL Mode**: The server and the maintenance scripts write concurrently; this leaves `-wal`/`-shm` files next to
+  the database. Back it up with `sqlite3 ceos_ard_server.db ".backup <dest>"`, never with `cp`
 - **Schema changes**: every change is an [Alembic](https://alembic.sqlalchemy.org) revision in `migrations/versions`, and the server refuses to start until the database is at the newest one. After pulling, run `pixi run migrate`. To change the schema, edit the model, run `pixi run alembic revision --autogenerate --rev-id 0004 -m "<short name>"` with the next number, review the generated file and commit it.
 
 ### Maintenance Tasks
 
-The server includes two automated maintenance scripts designed to run as cron jobs:
+The server includes four automated maintenance scripts designed to run as cron jobs:
 
 #### 1. Pull Request Status Checker
 
@@ -368,25 +377,37 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 **How it works:**
 - Cron just needs to `cd` to project directory and run the script.
+- Install the crontab for the user the server runs as (e.g. `server`), not root: the scripts create the
+  database's `-wal`/`-shm` files and the `workspaces/.locks` files, and the server can't use them if root owns them.
 - Ensure `.env` file exists in project root with `GITHUB_SERVICE_TOKEN` and `GITHUB_SERVICE_TOKEN_EXPIRES_AT` set.
 - Token checker sends email alerts if configured (see above).
 
 ### Database Models
 
-#### User Model
+#### User (`users`)
 
-- Stores user authentication information
-- Supports multiple identity providers (GitHub, Google)
-- Tracks creation and update timestamps
+- A GitHub or Google identity, created on the first login
+- The provider's access token, refresh token and token expiry, kept server-side
+- `last_seen_at`: the last authenticated request, to the hour; used by the idle session cleanup
+- `session_version`: increased on logout; a JWT carrying another version is refused
 
-#### Workspace Model
+#### Workspace (`git_workspaces`)
 
-- Manages git-based workspaces
-- Links to forked repositories and branches
-- Tracks Pull Request status and metadata
-- Stores PFS associations (JSON format)
-- Supports archival with automatic deletion after 1 month
-- Computes deletion date dynamically from archived_at timestamp
+- A clone of the owner's fork, on the branch `workspace/<id>`
+- The PFS selection (JSON list), which the preview builds
+- Pull Request number and status
+- `ACTIVE` or `ARCHIVED`; an archived workspace is deleted a month after `archived_at`
+
+#### Collaborator (`workspace_collaborators`)
+
+- Read access to another user's workspace, bound to the invitee's GitHub account id; the username is for display
+- `PENDING` until the invitee first logs in, `ACCEPTED` right away if they already have an account
+- Created by an invitation or by redeeming a share link (`share_id`)
+
+#### Share Link (`workspace_shares`)
+
+- A link `{CLIENT_URL}/share/<token>` with an access mode and an optional expiry
+- Redeeming it with a GitHub login adds the user as a collaborator
 
 ## 🔐 Security Features
 
@@ -400,9 +421,11 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
   script in them can't run on the API origin with the session cookie
 - **OAuth State**: Signed `__Host-oauth_state` cookie with `itsdangerous` between login and callback; the prefix keeps
   sibling hosts of the same site from planting their own state
-- **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only
+- **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only; the realtime WebSocket
+  checks its `Origin` header against the same list
+- **Logout**: Revokes the provider token and refuses every JWT issued before it (`users.session_version`)
 - **Input Sanitization**: Protection against malicious input
-- **User Isolation**: Workspaces are isolated per user
+- **Workspace Access**: The owner and the collaborators they invited, read-only; every change is the owner's
 - **Provider-based Authorization**: Workspace access restricted to GitHub users only
 - **Token Refresh**: Provider tokens are renewed with their refresh token (Google, and GitHub with expiring tokens); a GitHub token without one requires a new login after 8 hours
 
@@ -410,7 +433,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 ### GitHub Users (Workspace Access)
 
-Users authenticated with GitHub have full workspace access:
+Users authenticated with GitHub have full access to their own workspaces:
 
 - ✅ Create workspaces (fork repositories)
 - ✅ Delete workspaces
@@ -418,7 +441,18 @@ Users authenticated with GitHub have full workspace access:
 - ✅ Propose changes (create pull requests)
 - ✅ View and manage files
 - ✅ Generate previews
+- ✅ Share workspaces read-only, by invitation or share link
 - ✅ Access all workspace-related endpoints
+
+### Collaborators (Read-only)
+
+GitHub users invited to a workspace, or who redeemed its share link:
+
+- ✅ Read and search the files
+- ✅ See the preview, and download PDF and Word
+- ✅ Get live updates while the owner works
+- ❌ No changes: files, PFS, commits, sync, proposals and sharing stay with the owner
+- ❌ Access ends as soon as the owner removes them, also on open connections
 
 ### Google Users (No Workspace Access)
 
@@ -438,14 +472,6 @@ Users authenticated with Google **cannot access workspace features**:
 - To use workspace features, users must authenticate with GitHub
 
 ## 🚧 Deployment
-
-### Updating an Existing Deployment
-
-1. Back up the database the WAL-safe way: `sqlite3 ceos_ard_server.db ".backup <dest>"`
-2. Migrate it: `pixi run migrate`
-3. Start the new server
-
-**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`.
 
 ### Environment Variables for Production
 
@@ -505,7 +531,7 @@ Type=simple
 User=server
 WorkingDirectory=/home/server/ceos-ard-server
 Environment="PATH=/home/server/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/server/.pixi/bin/pixi run uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
+ExecStart=/home/server/.pixi/bin/pixi run uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --ws-max-size 4096
 Restart=always
 RestartSec=3
 StandardOutput=journal
@@ -550,113 +576,57 @@ To deploy new changes to an already-running server:
 
 ```bash
 cd /home/server/ceos-ard-server
+sudo systemctl stop ceos-ard-server
+mkdir -p ~/backups
+sqlite3 ceos_ard_server.db ".backup $HOME/backups/ceos_ard_server-$(date +%F).db"
 git pull
 pixi install          # only strictly needed if pixi.toml/pixi.lock changed.
-sudo systemctl restart ceos-ard-server
+pixi run migrate      # brings the database to the newest schema; does nothing if it already is
+sudo systemctl start ceos-ard-server
 ```
 
-`systemctl restart` stops the old process and starts a new one from the updated code in `WorkingDirectory` — no manual kill needed.
+The server is stopped first, so nothing writes to the database while it is backed up and migrated.
 
-After restarting, confirm it came back up cleanly:
+**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`.
+
+After starting, confirm it came back up cleanly:
 
 ```bash
 sudo systemctl status ceos-ard-server
 journalctl -u ceos-ard-server -n 30
 ```
 
-### Configuring a Reverse Proxy (Nginx)
+At startup the log shows `All prerequisite checks passed.` Otherwise it shows `CHECKS FAILED` with the reason, e.g. a
+database that isn't migrated, and systemd keeps restarting the server until the cause is fixed.
 
-The systemd service binds `uvicorn` to `127.0.0.1:8000` — it's not reachable from outside the server. A reverse proxy sits in front of it to handle incoming traffic on ports 80/443, terminate TLS, and forward requests internally.
+### Configuring a Reverse Proxy (Caddy)
 
-#### 1. Install Nginx
+The service listens on `127.0.0.1:8000` only. [Caddy](https://caddyserver.com/docs/install) sits in front of it, handles
+HTTPS (it issues and renews the certificate itself) and forwards all requests, the realtime WebSocket included, with no
+extra configuration.
 
-```bash
-sudo apt update
-sudo apt install nginx
-```
+`/etc/caddy/Caddyfile`:
 
-#### 2. Create the site config
+```caddyfile
+api.yourdomain.com {
+    reverse_proxy localhost:8000
+    encode gzip
 
-Create `/etc/nginx/sites-available/ceos-ard-server`:
-
-```nginx
-server {
-    listen 80;
-    server_name api.yourdomain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    log {
+        output file /var/log/caddy/access.log
     }
 }
 ```
 
-Replace `api.yourdomain.com` with your actual domain — it should match `SERVER_URL` in your `.env`.
-
-#### 3. Enable the site
-
-```bash
-sudo ln -s /etc/nginx/sites-available/ceos-ard-server /etc/nginx/sites-enabled/
-sudo nginx -t                  # test the config before reloading
-sudo systemctl reload nginx
-```
-
-#### 4. Add HTTPS with Let's Encrypt
-
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d api.yourdomain.com
-```
-
-Certbot will edit the Nginx config to redirect HTTP → HTTPS and set up automatic certificate renewal. Verify renewal works with:
-
-```bash
-sudo certbot renew --dry-run
-```
-
-#### 5. Managing Nginx
-
-| Action | Command |
-|--------|---------|
-| Test config for syntax errors | `sudo nginx -t` |
-| Reload config (no downtime) | `sudo systemctl reload nginx` |
-| Restart Nginx | `sudo systemctl restart nginx` |
-| View error logs | `sudo tail -f /var/log/nginx/error.log` |
-| View access logs | `sudo tail -f /var/log/nginx/access.log` |
-
-**Note:** After changing `SERVER_URL`/`CLIENT_URL` in `.env` or the OAuth callback URLs in your GitHub/Google OAuth app settings, restart the server (`sudo systemctl restart ceos-ard-server`) — Nginx doesn't need a restart for `.env` changes, only for changes to its own config file.
-
-### Docker Deployment (Example)
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY . .
-
-# Install pixi and dependencies
-RUN curl -fsSL https://pixi.sh/install.sh | bash
-RUN pixi install
-
-EXPOSE 8000
-CMD ["pixi", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--ws-max-size", "4096"]
-```
-
-> **Single worker only.** Keep the server to one worker process (no `--workers`, no multi-worker
-> gunicorn, a single replica). The realtime `EventBroker` is in-memory and per-process, so extra
-> workers or replicas silently drop cross-worker realtime events. Horizontal scaling requires a shared
-> pub/sub (e.g. Redis) behind the broker.
+The domain must match `SERVER_URL` and point at the server, with ports 80 and 443 open. Apply changes with
+`sudo systemctl reload caddy`; a reload closes open WebSocket connections, which the editor reopens by itself.
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/your-feature`
 3. Make your changes
-4. Run tests and linting: `pixi run test && pixi run lint`
+4. Run the linting and checks: `pixi run pre-commit`
 5. Commit your changes: `git commit -am 'Add your feature'`
 6. Push to the branch: `git push origin feature/your-feature`
 7. Submit a Pull Request
@@ -669,7 +639,7 @@ This project is licensed under the terms specified in the LICENSE file.
 
 For issues and questions:
 
-1. Check the [Issues](https://github.com/ceos-org/ceos-ard-server/issues) page
+1. Check the [Issues](https://github.com/moregeo-it/ceos-ard-server/issues) page
 2. Create a new issue with detailed information
 3. Include logs and error messages when reporting bugs
 
