@@ -309,14 +309,16 @@ class WorkspaceService:
         # One transaction under the workspace lock, fork repair and retry included: releasing the
         # lock between them would expose the half-repaired state. The retry runs the whole sync
         # again, because the repair only restores the fork and branch.
-        result = await run_exclusive(workspace.id, lambda: self.with_remote_recovery(db, workspace, user, sync))
+        async def transaction():
+            result = await self.with_remote_recovery(db, workspace, user, sync)
+            # Files changed on disk beyond what the single-file events describe, so subscribers
+            # (read-only collaborators) must reload the tree.
+            if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
+                self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
+            return result
+
+        result = await run_exclusive(workspace.id, transaction)
         result.repaired = attempts > 1
-
-        # Files changed on disk beyond what the single-file events describe, so subscribers
-        # (read-only collaborators) must reload the tree. Published after the lock is released.
-        if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
-            self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
-
         return result
 
     def _update_fork_reference(self, db: Session, user_id: str, owner: str, name: str, clone_url: str = None) -> None:
@@ -570,17 +572,17 @@ class WorkspaceService:
                 db.commit()
 
                 logger.info(f"Successfully deleted workspace {workspace_id} (title: {workspace.title})")
-                return "Workspace deleted successfully"
 
             except Exception as e:
                 db.rollback()
                 logger.error(f"Error deleting workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
-        result = await run_exclusive(workspace_id, transaction)
+            # Tell subscribers the workspace is gone (the realtime gateway closes their connections)
+            self.broker.emit(workspace_id, EventType.WORKSPACE_DELETED, actor_user_id=user_id)
+            return "Workspace deleted successfully"
 
-        # Tell subscribers the workspace is gone (the realtime gateway closes their connections)
-        self.broker.emit(workspace_id, EventType.WORKSPACE_DELETED, actor_user_id=user_id)
+        result = await run_exclusive(workspace_id, transaction)
 
         # Best-effort: the workspace is gone, so its cross-process lock file is dead weight
         workspace_lock_file(workspace_id).unlink(missing_ok=True)
@@ -717,8 +719,6 @@ class WorkspaceService:
                 except pygit2.GitError as e:
                     logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
-
-                return folder_details
             except HTTPException:
                 await asyncio.to_thread(shutil.rmtree, pfs_path, ignore_errors=True)
                 raise
@@ -727,12 +727,10 @@ class WorkspaceService:
                 logger.error(f"Error creating PFS {pfs_id} for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
 
-        folder_details = await run_exclusive(workspace_id, transaction)
+            self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details)
+            return folder_details
 
-        # Published after the lock is released
-        self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details)
-
-        return folder_details
+        return await run_exclusive(workspace_id, transaction)
 
     async def get_proposal(self, db: Session, access_token: str, workspace_id: str, user_id: str) -> Proposal | None:
         # The proposal (PR) is exclusively surfaced in the Propose view, which is owner-only.
@@ -847,8 +845,9 @@ class WorkspaceService:
                 workspace.pull_request_number = str(pr_response["number"])
                 archived = self._apply_pull_request_state(workspace, pr_response)
                 db.commit()
+                self._publish_status_change(workspace_id, user.id, reactivated=reactivated, archived=archived)
 
-                return self._to_proposal(pr_response), reactivated, archived
+                return self._to_proposal(pr_response)
 
             except HTTPException:
                 raise
@@ -856,10 +855,7 @@ class WorkspaceService:
                 logger.error(f"Error proposing changes for workspace {workspace_id}: {e}")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to propose changes: {str(e)}") from e
 
-        proposal, reactivated, archived = await run_exclusive(workspace_id, transaction)
-        # After the lock, like every other event
-        self._publish_status_change(workspace_id, user.id, reactivated=reactivated, archived=archived)
-        return proposal
+        return await run_exclusive(workspace_id, transaction)
 
     @staticmethod
     def _is_unreopenable(error: GitHubAPIError) -> bool:
