@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import shutil
 from pathlib import Path
@@ -9,7 +10,7 @@ from fastapi import HTTPException, status
 from app.config import settings
 from app.models.user import User
 from app.schemas.workspace import SyncResult, SyncStatus
-from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, sanitize_git_error
+from app.utils.git_utils import LeasedPushCredentials, UserPassCredentials, get_file_status, get_repo, sanitize_git_error
 from app.utils.locks import workspace_locks
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
@@ -237,6 +238,9 @@ class GitService:
         """
         Push changes with user-specific credentials.
 
+        Unless creating the branch on the fork (set_upstream), never brings back commits that were
+        dropped there: refused if HEAD still holds them, or if the branch moved since the last fetch.
+
         Args:
             repo: pygit2 Repository instance
             branch_name: Branch to push to
@@ -244,10 +248,10 @@ class GitService:
         """
         try:
             origin = self.get_origin(repo)
-            callbacks = UserPassCredentials(user.username, user.access_token)
             ref = f"refs/heads/{branch_name}"
 
             if set_upstream:
+                callbacks = UserPassCredentials(user.username, user.access_token)
                 # Push with upstream tracking
                 await asyncio.to_thread(origin.push, [f"{ref}:{ref}"], callbacks=callbacks)
                 # Fetch to update remote refs
@@ -257,6 +261,13 @@ class GitService:
                 if branch:
                     branch.upstream = repo.branches.remote.get(f"origin/{branch_name}")
             else:
+                remote_ref = repo.references.get(f"refs/remotes/origin/{branch_name}")
+                if remote_ref is not None and self._unpushed_commits(repo, remote_ref)[1]:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="The branch of this workspace was rewritten on GitHub. Reopen the workspace to update it, then try again.",
+                    )
+                callbacks = LeasedPushCredentials(user.username, user.access_token, remote_ref.target if remote_ref else None)
                 await asyncio.to_thread(origin.push, [ref], callbacks=callbacks)
 
             logger.info(f"Pushed changes to remote branch {branch_name}")
@@ -288,18 +299,56 @@ class GitService:
             logger.warning(f"Could not compare the commit with origin/{branch_name}: {e}")
             return False
 
+    def _unpushed_commits(self, repo: pygit2.Repository, remote_ref: pygit2.Reference) -> tuple[list[pygit2.Commit], bool]:
+        """
+        The local commits the fork branch never had, oldest first, and whether HEAD also holds
+        commits it had but dropped: the branch was rewritten on GitHub (a force-push, or a rebase
+        via "Update branch"). What it had is in the reflog of origin/<branch>, which every fetch
+        and push extends.
+        """
+
+        def walk(hidden):
+            walker = repo.walk(repo.head.target, pygit2.GIT_SORT_TOPOLOGICAL | pygit2.GIT_SORT_REVERSE)
+            for oid in hidden:
+                walker.hide(oid)
+            return list(walker)
+
+        seen = {oid for entry in remote_ref.log() for oid in (entry.oid_old, entry.oid_new) if oid in repo}
+        not_on_origin = walk([remote_ref.target])
+        never_on_origin = walk([remote_ref.target, *seen])
+        return never_on_origin, len(never_on_origin) < len(not_on_origin)
+
+    def _replay(self, repo: pygit2.Repository, commits: list[pygit2.Commit], onto: pygit2.Oid, user: User) -> tuple[pygit2.Oid, list[str]]:
+        """
+        Cherry-pick the commits onto `onto` without touching the working tree. Returns the new
+        tip, or the files the first conflicting commit conflicts on.
+        """
+        signature = pygit2.Signature(user.full_name or user.username, user.email)
+        tip = repo.get(onto)
+        for commit in commits:
+            if len(commit.parents) > 1:
+                continue  # merges only ever brought in the fork's branch, which `onto` contains or replaced
+            index = repo.merge_trees(commit.parents[0].tree, tip.tree, commit.tree)
+            if index.conflicts is not None:
+                return tip.id, sorted({entry.path for conflict in index.conflicts for entry in conflict if entry is not None})
+            tree_id = index.write_tree(repo)
+            if tree_id == tip.tree_id:
+                continue  # already on GitHub
+            tip = repo.get(repo.create_commit(None, commit.author, signature, commit.message, tree_id, [tip.id]))
+        return tip.id, []
+
     async def sync_with_origin(
         self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str, restore_branch: bool = False
     ) -> SyncResult:
         """
-        Fetch the fork remote and merge remote branch changes into the local branch when safe.
+        Fetch the fork remote and bring its branch changes into the local branch when safe.
 
-        Fast-forwards when possible, creates a merge commit when histories diverged but merge
-        cleanly, and aborts (restoring the repository) when the merge would conflict. The
-        working tree is never left in a mid-merge state.
+        Replays the local commits the fork never had on top of its branch: a fast-forward when
+        there are none, no merge commit otherwise, and a branch rewritten on GitHub stays as it
+        is. Leaves the repository untouched when a replayed commit would conflict.
 
         The caller must hold the workspace lock (run_exclusive): it is what makes the dirty
-        check and the reset/merge atomic against concurrent file-editing requests, which all
+        check and the reset atomic against concurrent file-editing requests, which all
         mutate under the same lock. Lock-free readers may observe intermediate states at the
         awaits below; every such state is a consistent tree.
 
@@ -361,66 +410,40 @@ class GitService:
         if repo.status():
             return SyncResult(status=SyncStatus.DIRTY, ahead_commits=ahead, behind_commits=behind)
 
-        if behind == 0:
+        local_commits, rewritten = self._unpushed_commits(repo, remote_ref)
+
+        if behind == 0 and not rewritten:
             if ahead > 0:
                 # Best-effort push of local commits the fork is missing
-                try:
-                    await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
-                except Exception as e:
-                    error_msg = sanitize_git_error(e, user.username, user.access_token)
-                    logger.warning(f"Could not push local commits for workspace {workspace_id}: {error_msg}")
+                with contextlib.suppress(HTTPException):
+                    await self.push(repo=repo, branch_name=branch_name, user=user)
             return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
 
-        analysis, _ = repo.merge_analysis(remote_oid)
-
-        if analysis & pygit2.GIT_MERGE_ANALYSIS_UP_TO_DATE:
-            return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
-
-        if analysis & pygit2.GIT_MERGE_ANALYSIS_FASTFORWARD:
-            # Tree is clean (checked above), so a hard reset is a safe fast-forward
-            repo.reset(remote_oid, pygit2.GIT_RESET_HARD)
-            return SyncResult(status=SyncStatus.UPDATED, behind_commits=behind, pulled_commits=behind)
-
-        if not analysis & pygit2.GIT_MERGE_ANALYSIS_NORMAL:
-            logger.warning(f"Unexpected merge analysis {analysis} for workspace {workspace_id}")
-            return SyncResult(status=SyncStatus.UP_TO_DATE, ahead_commits=ahead)
-
+        # Only commits the fork never had are replayed, so nobody else has them yet. A merge
+        # would add a merge commit, and bring back commits dropped in a rewrite.
         try:
-            repo.merge(remote_oid)
-
-            if repo.index.conflicts is not None:
-                # Collect paths before resetting — the reset clears the conflict entries
-                conflicting_files = sorted({entry.path for conflict in repo.index.conflicts for entry in conflict if entry is not None})
-                repo.reset(local_oid, pygit2.GIT_RESET_HARD)
-                repo.state_cleanup()
+            tip, conflicting_files = self._replay(repo, local_commits, remote_oid, user)
+            if conflicting_files:
                 return SyncResult(status=SyncStatus.CONFLICT, ahead_commits=ahead, behind_commits=behind, conflicting_files=conflicting_files)
-
-            signature = pygit2.Signature(user.full_name or user.username, user.email)
-            tree_id = repo.index.write_tree()
-            repo.create_commit(
-                "HEAD",
-                signature,
-                signature,
-                f"Merge remote changes from origin/{branch_name}",
-                tree_id,
-                [local_oid, remote_oid],
-            )
-            repo.state_cleanup()
+            # Tree is clean (checked above), so a hard reset is safe
+            repo.reset(tip, pygit2.GIT_RESET_HARD)
         except Exception as e:
             try:
                 repo.reset(local_oid, pygit2.GIT_RESET_HARD)
-                repo.state_cleanup()
             except Exception as cleanup_error:
                 logger.error(f"Failed to restore workspace {workspace_id} after merge error: {cleanup_error}")
             logger.error(f"Error merging remote changes for workspace {workspace_id}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to merge remote changes") from e
 
-        # Best-effort push of the merge commit; if it fails, the next push or sync delivers it
-        try:
-            await asyncio.to_thread(origin.push, [f"refs/heads/{branch_name}"], callbacks=callbacks)
-        except Exception as e:
-            error_msg = sanitize_git_error(e, user.username, user.access_token)
-            logger.warning(f"Could not push merge commit for workspace {workspace_id}: {error_msg}")
+        if rewritten:
+            logger.info(f"Took {branch_name} as rewritten on GitHub, with {len(local_commits)} local commit(s) on top, for workspace {workspace_id}")
+
+        if tip == remote_oid:
+            return SyncResult(status=SyncStatus.UPDATED, behind_commits=behind, pulled_commits=behind)
+
+        # Best-effort push of the replayed commits; if it fails, the next push or sync delivers them
+        with contextlib.suppress(HTTPException):
+            await self.push(repo=repo, branch_name=branch_name, user=user)
 
         return SyncResult(status=SyncStatus.MERGED, behind_commits=behind, pulled_commits=behind)
 
@@ -465,12 +488,13 @@ class GitService:
             logger.info(f"Restored branch {branch_name} on the fork for workspace {workspace_id}")
             return True
 
-        ahead, _ = repo.ahead_behind(repo.head.target, remote_ref.target)
-        if ahead == 0:
+        # Not "ahead": commits dropped on GitHub are ahead too, and must not be pushed back
+        local_commits, _ = self._unpushed_commits(repo, remote_ref)
+        if not local_commits:
             return False
 
         await self.push(repo=repo, branch_name=branch_name, user=user)
-        logger.info(f"Pushed {ahead} commit(s) to {branch_name} for workspace {workspace_id}")
+        logger.info(f"Pushed {len(local_commits)} commit(s) to {branch_name} for workspace {workspace_id}")
         return True
 
     def get_commits(
