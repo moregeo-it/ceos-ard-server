@@ -30,8 +30,8 @@ class ViewerRole(str, Enum):
 
 class SyncStatus(str, Enum):
     UP_TO_DATE = "up_to_date"
-    UPDATED = "updated"  # fast-forwarded to remote
-    MERGED = "merged"  # merge commit created (and best-effort pushed)
+    UPDATED = "updated"  # moved to the remote (a fast-forward, or reset to a branch rewritten on GitHub)
+    MERGED = "merged"  # local commits replayed on top of the remote, no merge commit (best-effort pushed)
     CONFLICT = "conflict"  # merge aborted, repository fully restored
     DIRTY = "dirty"  # uncommitted local changes, merge skipped
     REMOTE_MISSING = "remote_missing"  # branch no longer exists on the fork
@@ -112,7 +112,7 @@ class Commit(BaseModel):
 
 
 class CommitResult(Commit):
-    # True when remote changes from the fork were merged into the workspace as part of the commit
+    # True when remote changes from the fork were brought into the workspace as part of the commit
     merged_remote: bool = False
 
 

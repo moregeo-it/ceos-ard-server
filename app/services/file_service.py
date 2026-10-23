@@ -609,11 +609,11 @@ class FileService:
                     lambda: self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user),
                 )
             except HTTPException as push_error:
-                # A rejected push usually means the branch on GitHub moved ahead:
-                # merge the remote changes and push again
+                # The branch on GitHub moved, was rewritten or deleted: sync and push again.
+                # Restoring it is safe, as the checks above exclude deliberate deletions.
                 try:
                     sync_result = await self.git_service.sync_with_origin(
-                        repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id
+                        repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, restore_branch=True
                     )
                 except Exception as sync_error:
                     # Any failure here must revert the commit and restore the staged changes
@@ -621,13 +621,19 @@ class FileService:
                     self._revert_commit(repo, workspace_id, commit.id, reason="the sync recovering from the rejected push failed")
                     raise push_error from None
 
+                head = repo.head.target
+                if head != commit.id and not repo.descendant_of(head, commit.id):
+                    # The sync replayed the commit on top of GitHub's branch, or dropped it because
+                    # GitHub already had its changes
+                    commit = repo.head.peel()
+
                 if sync_result.status == SyncStatus.MERGED:
                     remote_sync = SyncStatus.MERGED
                     try:
                         await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
                     except HTTPException:
-                        # No revert: a soft reset across the merge commit would stage the remote
-                        # changes as the user's. The next push or sync delivers the local commits.
+                        # No revert: the commit already sits on GitHub's changes, and the next
+                        # push or sync delivers it
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Your changes were merged with the changes from GitHub but could not be sent yet. "

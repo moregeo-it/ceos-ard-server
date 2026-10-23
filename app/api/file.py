@@ -196,8 +196,8 @@ async def get_changed_files(
     status_code=status.HTTP_200_OK,
     summary="Create a commit of the changes",
     description="Creates a new git commit for all current workspace changes and pushes it to GitHub. "
-    "When the branch on GitHub moved ahead, the remote changes are merged into the workspace automatically; "
-    "if they conflict with the committed changes, a 409 with the conflicting files is returned instead.",
+    "When the branch on GitHub moved ahead or was rewritten there, the commit is replayed on top of it automatically; "
+    "if it conflicts with the remote changes, a 409 with the conflicting files is returned instead.",
 )
 async def commit_changes(
     workspace_id: str,

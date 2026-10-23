@@ -1092,10 +1092,10 @@ paths:
         owner's GitHub credentials can push to the workspace's fork.
         Collaborators' staged changes are committed and pushed by the owner.
 
-        When the branch on GitHub moved ahead, the remote changes are merged into the workspace
-        automatically; if they conflict with the committed changes, a 409 with the conflicting
-        files is returned instead and the changes remain staged. A merge also publishes a
-        `workspace.synced` event after the `file.committed` event.
+        When the branch on GitHub moved ahead or was rewritten there, the commit is replayed on top
+        of it automatically, without a merge commit; if it conflicts with the remote changes, a 409
+        with the conflicting files is returned instead and the changes remain staged. A replay also
+        publishes a `workspace.synced` event after the `file.committed` event.
       operationId: commitChanges
       tags:
         - Files
@@ -1637,11 +1637,13 @@ paths:
     post:
       summary: Sync workspace with remote changes
       description: >-
-        Fetches the fork remote and merges remote branch changes into the local workspace when safe.
+        Fetches the fork remote and brings its branch changes into the local workspace when safe.
 
-        Fast-forwards when possible, creates a merge commit when histories diverged but merge cleanly,
-        and aborts without touching the working tree when the merge would conflict or when uncommitted
-        local changes exist. Conflict and dirty outcomes are reported in the response body, not as HTTP errors.
+        Replays the local commits the fork never had on top of its branch: a fast-forward when there are
+        none, no merge commit otherwise. A branch rewritten on GitHub (a force-push, or a rebase via
+        "Update branch") stays as it is, so commits dropped there stay dropped. Aborts without touching the
+        working tree when a replayed commit would conflict or when uncommitted local changes exist.
+        Conflict and dirty outcomes are reported in the response body, not as HTTP errors.
 
         Owner only: the sync uses the caller's GitHub credentials and rewrites the working tree.
         When files changed (`updated` or `merged`), a `workspace.synced` event is published to the
@@ -2492,7 +2494,7 @@ components:
             merged_remote:
               type: boolean
               default: false
-              description: True when remote changes from the fork were merged into the workspace as part of the commit
+              description: True when remote changes from the fork were brought into the workspace as part of the commit
 
     SyncResult:
       type: object
@@ -2513,8 +2515,9 @@ components:
             Outcome of the sync.
 
             - "up_to_date": no remote changes to pull
-            - "updated": local branch fast-forwarded to the remote branch
-            - "merged": remote changes merged into the local branch with a merge commit
+            - "updated": local branch fast-forwarded to the remote branch, or reset to it when it
+              was rewritten on GitHub
+            - "merged": local commits replayed on top of the remote branch, without a merge commit
             - "conflict": remote changes conflict with local changes; repository left untouched
             - "dirty": uncommitted local changes present; merge skipped
             - "remote_missing": the workspace branch no longer exists on the fork
@@ -2689,7 +2692,7 @@ components:
         - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
-        - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic merge on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
+        - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic sync on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
         - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
         - `preview.generated`: the owner generated the preview via `POST .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
         - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
@@ -3020,7 +3023,7 @@ components:
     WorkspaceEventWorkspaceSynced:
       description: |
         The owner synced the workspace with its GitHub branch (`POST .../sync`, or the automatic
-        merge when a commit's push was rejected) and the working tree was fast-forwarded or merged.
+        sync when a commit's push was rejected) and the working tree changed.
         Files may have been added, changed, deleted or renamed at any depth, so subscribers reload
         the file tree and their open files instead of applying single-file changes. When triggered
         by a commit it follows the `file.committed` event.
@@ -3037,7 +3040,7 @@ components:
               enum:
                 - updated
                 - merged
-              description: Whether the branch was fast-forwarded (`updated`) or a merge commit was created (`merged`).
+              description: Whether the branch was fast-forwarded or reset to GitHub's (`updated`), or local commits were replayed on top of it (`merged`).
 
     CommitChange:
       type: object

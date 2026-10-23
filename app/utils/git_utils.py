@@ -184,3 +184,19 @@ class UserPassCredentials(pygit2.RemoteCallbacks):
         if allowed_types & pygit2.GIT_CREDENTIAL_USERPASS_PLAINTEXT:
             return pygit2.UserPass(self._username, self._password)
         return None
+
+
+class LeasedPushCredentials(UserPassCredentials):
+    """
+    Refuses the push if the branch on the fork is no longer at `expected` (None: absent), like
+    `git push --force-with-lease`. A fast-forward could otherwise bring back commits dropped there.
+    """
+
+    def __init__(self, username: str, password: str, expected: pygit2.Oid | None):
+        super().__init__(username, password)
+        self._expected = expected if expected is not None else pygit2.Oid(hex="0" * 40)
+
+    def push_negotiation(self, updates):
+        for update in updates:
+            if update.src not in (self._expected, update.dst):
+                raise pygit2.GitError("the branch on GitHub changed since it was last fetched")
