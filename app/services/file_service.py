@@ -20,7 +20,14 @@ from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.locks import run_exclusive
 from app.utils.pfs_utils import PlainStringSafeLoader
-from app.utils.validation import IGNORE_ROOT_PATHS, ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
+from app.utils.validation import (
+    IGNORE_ROOT_PATHS,
+    ignore_file_path,
+    normalize_workspace_path,
+    validate_new_file_name,
+    validate_pathname,
+    validate_workspace_path,
+)
 from app.utils.yaml_cache import load_yaml_cached
 
 logger = logging.getLogger(__name__)
@@ -224,6 +231,10 @@ class FileService:
 
         async def transaction():
             repo = get_repo(workspace.abs_path)
+            # A missing file is being added (uploaded), so its name and format must be allowed
+            created = not target_path.exists()
+            if created:
+                validate_new_file_name(target_path.name)
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
                 # the file stayed open with unsaved changes).
@@ -245,7 +256,8 @@ class FileService:
                 ) from e
             except Exception as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
-            self.broker.emit(workspace_id, EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result)
+            event = EventType.FILE_CREATED if created else EventType.FILE_SAVED
+            self.broker.emit(workspace_id, event, actor_user_id=user_id, path=result["path"], file=result)
             return result
 
         return await run_exclusive(workspace_id, transaction)
