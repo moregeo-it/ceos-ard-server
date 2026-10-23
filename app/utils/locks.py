@@ -56,8 +56,8 @@ class KeyedLocks:
             finally:
                 lock.release()
         finally:
-            # Outer finally so this runs even when the acquire itself is cancelled (a client
-            # disconnecting while queued): otherwise the increment above is never undone and
+            # Outer finally so this runs even when the acquire itself is cancelled (a request
+            # cancelled while queued): otherwise the increment above is never undone and
             # the entry can never be evicted. Indexing without a guard is safe — this caller
             # is still counted, so nobody else can have evicted the entry.
             _, users = self._locks[key]
@@ -126,13 +126,9 @@ def acquire_workspace_file_lock(workspace_id: str, timeout: float | None = None)
 
 async def run_exclusive(workspace_id: str, fn: Callable[[], Awaitable[T]]) -> T:
     """
-    Run one workspace-mutating transaction under the per-workspace locks.
+    Run one workspace-mutating transaction under the workspace lock and the cron scripts' flock.
 
-    workspace_locks serializes transactions in-process, across all their awaits. The flock
-    excludes the cron cleanup script, a separate process. asyncio.shield lets the transaction
-    finish when the request is cancelled (Starlette cancels handlers on client disconnect,
-    and thread work like a push or rmtree cannot be cancelled) — without it, the lock would
-    be released while a worker thread is still mutating the repository.
+    Shielded, so it finishes even if the request is cancelled: publish its events at the end of fn.
     """
     inner = asyncio.ensure_future(_run_locked(workspace_id, fn))
     try:
@@ -157,6 +153,6 @@ def _log_abandoned_outcome(workspace_id: str, task: asyncio.Task) -> None:
     if task.cancelled():
         logger.warning(f"Abandoned transaction for workspace {workspace_id} was cancelled before finishing")
     elif exception := task.exception():
-        logger.warning(f"Transaction for workspace {workspace_id}, abandoned by a disconnected client, failed: {exception}")
+        logger.warning(f"Transaction for workspace {workspace_id}, abandoned by its cancelled request, failed: {exception}")
     else:
-        logger.info(f"Transaction for workspace {workspace_id}, abandoned by a disconnected client, completed")
+        logger.info(f"Transaction for workspace {workspace_id}, abandoned by its cancelled request, completed")

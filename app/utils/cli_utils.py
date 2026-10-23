@@ -32,7 +32,7 @@ async def run(*args, timeout=60) -> subprocess.CompletedProcess:
     Run a command in the pixi environment as a native async subprocess.
 
     Occupies no worker thread while it waits; the child is killed on timeout or cancellation
-    (client disconnect) instead of running on unattended.
+    instead of running on unattended.
     """
     async with _run_semaphore:
         process = await asyncio.create_subprocess_exec(

@@ -200,17 +200,15 @@ class FileService:
                 )
 
             if request_data.type == "file":
-                return create_file(workspace.abs_path, request_data.name, target_path)
+                result = create_file(workspace.abs_path, request_data.name, target_path)
             elif request_data.type == "folder":
-                return create_folder(workspace.abs_path, request_data.name, target_path)
+                result = create_folder(workspace.abs_path, request_data.name, target_path)
             else:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid type")
+            self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result)
+            return result
 
-        result = await run_exclusive(workspace_id, transaction)
-
-        # Published after the lock is released
-        self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user_id, path=result["path"], file=result)
-        return result
+        return await run_exclusive(workspace_id, transaction)
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
@@ -235,7 +233,7 @@ class FileService:
                 relative_path = str(target_path.relative_to(workspace.abs_path)).replace("\\", "/")
                 repo.index.add(relative_path)
                 repo.index.write()
-                return {
+                result = {
                     "name": target_path.name,
                     "is_directory": False,
                     "status": get_file_status(repo, target_path),
@@ -247,11 +245,10 @@ class FileService:
                 ) from e
             except Exception as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
+            self.broker.emit(workspace_id, EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result)
+            return result
 
-        result = await run_exclusive(workspace_id, transaction)
-
-        self.broker.emit(workspace_id, EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result)
-        return result
+        return await run_exclusive(workspace_id, transaction)
 
     async def delete(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         if not file_path:
@@ -328,7 +325,7 @@ class FileService:
             else:
                 file_status = get_file_status(repo, target_path)
 
-            return {
+            result = {
                 # Tracked means the file is and was under version control, so the delete can be reverted if needed.
                 "tracked": is_committed,
                 "file_details": {
@@ -338,42 +335,46 @@ class FileService:
                     "path": normalize_workspace_path(target_path, workspace.abs_path),
                 },
             }
+            self.broker.emit(
+                workspace_id,
+                EventType.FILE_DELETED,
+                actor_user_id=user_id,
+                path=result["file_details"]["path"],
+                file=result["file_details"],
+                tracked=result["tracked"],
+            )
+            return result
 
-        result = await run_exclusive(workspace_id, transaction)
-
-        self.broker.emit(
-            workspace_id,
-            EventType.FILE_DELETED,
-            actor_user_id=user_id,
-            path=result["file_details"]["path"],
-            file=result["file_details"],
-            tracked=result["tracked"],
-        )
-        return result
+        return await run_exclusive(workspace_id, transaction)
 
     async def update_file(self, db: Session, workspace_id: str, file_path: str, operation_request: FilePatchRequest, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         if operation_request.operation == "rename":
-            result = await run_exclusive(
-                workspace_id, lambda: self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
-            )
-            self.broker.emit(workspace_id, EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path)
-            return result
+
+            async def transaction():
+                result = await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+                self.broker.emit(workspace_id, EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path)
+                return result
+
         elif operation_request.operation == "revert":
-            result = await run_exclusive(workspace_id, lambda: self._revert_file_changes(workspace.abs_path, file_path))
-            # old_path is only meaningful when the revert undid a staged rename.
-            reverted_rename = result.get("path") != file_path
-            self.broker.emit(
-                workspace_id,
-                EventType.FILE_REVERTED,
-                actor_user_id=user_id,
-                path=file_path,
-                file=result,
-                old_path=file_path if reverted_rename else None,
-            )
-            return result
+
+            async def transaction():
+                result = await self._revert_file_changes(workspace.abs_path, file_path)
+                # old_path is only meaningful when the revert undid a staged rename.
+                reverted_rename = result.get("path") != file_path
+                self.broker.emit(
+                    workspace_id,
+                    EventType.FILE_REVERTED,
+                    actor_user_id=user_id,
+                    path=file_path,
+                    file=result,
+                    old_path=file_path if reverted_rename else None,
+                )
+                return result
+
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
+        return await run_exclusive(workspace_id, transaction)
 
     async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str):
         new_name = validate_pathname(new_name)
@@ -653,16 +654,13 @@ class FileService:
                     self._revert_commit(repo, workspace_id, commit.id, reason="the push was rejected and the commit never reached GitHub")
                     raise push_error from None
 
-            return commit, remote_sync, changes
+            # Not reached by a reverted commit (rejected push, conflict): for subscribers it never happened
+            self.broker.emit(workspace_id, EventType.FILE_COMMITTED, actor_user_id=user.id, commit=format_commit(commit), changes=changes)
+            if remote_sync:
+                self.broker.emit(workspace_id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=remote_sync.value)
+            return commit, remote_sync
 
-        commit, remote_sync, changes = await run_exclusive(workspace_id, transaction)
-
-        # Only after the transaction: a reverted commit (rejected push, conflict) never happened
-        # from the subscribers' point of view. Published outside the lock.
-        self.broker.emit(workspace_id, EventType.FILE_COMMITTED, actor_user_id=user.id, commit=format_commit(commit), changes=changes)
-        if remote_sync:
-            self.broker.emit(workspace_id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=remote_sync.value)
-
+        commit, remote_sync = await run_exclusive(workspace_id, transaction)
         return commit, remote_sync is not None
 
     async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
