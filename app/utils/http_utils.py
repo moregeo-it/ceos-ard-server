@@ -4,7 +4,7 @@ import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 
 from app.schemas.error import create_error_detail
 
@@ -23,6 +23,23 @@ def internal_errors(operation: str, logger: logging.Logger) -> Generator[None]:
     except Exception as e:
         logger.error(f"Failed to {operation}: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=create_error_detail(operation, e)) from e
+
+
+async def read_body(request: Request, limit_mb: int) -> bytes:
+    """The request body, refused with a 413 as soon as it exceeds `limit_mb`, before reading it all."""
+    limit = limit_mb * 1024 * 1024
+    too_large = HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=f"The file is larger than {limit_mb} MB")
+
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise too_large
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > limit:
+            raise too_large
+    return bytes(body)
 
 
 def compute_file_etag(stat_result: os.stat_result) -> str:

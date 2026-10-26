@@ -674,7 +674,7 @@ paths:
 
     post:
       summary: Create new empty file or folder
-      description: Creates a new empty file or folder in the workspace
+      description: Creates a new empty file or folder in the workspace. A file's name must have one of the formats yaml, md, pdf, jpg, jpeg, png or bib.
       operationId: createFileOrFolder
       tags:
         - Files
@@ -776,7 +776,12 @@ paths:
     put:
       summary: Upload file content
       description: |-
-        Uploads the content of a specific file.
+        Uploads the content of a specific file, up to `MAX_FILE_SIZE_MB` (1 MB by default).
+
+        A missing file is created (an upload), with its parent folders: their names must then follow the
+        naming rules, and the file must have one of the formats yaml, md, pdf, jpg, jpeg, png or bib. Only
+        the workspace owner's request body is read. A created file
+        publishes `file.created`, an existing one `file.saved`.
 
         Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
         File should be stored as is without parsing, e.g. comments in YAML files should be preserved.
@@ -806,13 +811,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/FileItem'
         '400':
-          description: Invalid request data
+          description: Invalid request data, or a new file with an invalid name or format
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
           description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than `MAX_FILE_SIZE_MB`
           content:
             application/json:
               schema:
@@ -880,7 +891,8 @@ paths:
     patch:
       summary: Update file metadata or operations
       description: |-
-        Performs file operations such as rename or revert.
+        Performs file operations such as rename or revert. A file can only be renamed to one of the
+        formats yaml, md, pdf, jpg, jpeg, png or bib.
 
         The endoint shall only handle files that are made available through
         `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
@@ -2684,8 +2696,8 @@ components:
       description: |
         Kind of `WorkspaceEvent`.
 
-        - `file.saved`: file overwritten via `PUT .../files/{filePath}`.
-        - `file.created`: file/folder created via `POST .../files` or a new PFS via `POST .../pfs`.
+        - `file.saved`: existing file overwritten via `PUT .../files/{filePath}`.
+        - `file.created`: file/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or a new PFS via `POST .../pfs`.
         - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
@@ -2789,7 +2801,7 @@ components:
             - type: "null"
 
     WorkspaceEventFileSaved:
-      description: File overwritten via `PUT .../files/{filePath}`. `file` equals the REST response body; `path` equals `file.path`.
+      description: Existing file overwritten via `PUT .../files/{filePath}`. `file` equals the REST response body; `path` equals `file.path`.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
@@ -2805,7 +2817,7 @@ components:
               $ref: '#/components/schemas/FileItem'
 
     WorkspaceEventFileCreated:
-      description: File/folder created via `POST .../files`, or a new PFS folder via `POST .../pfs`. `file` equals the REST response body; `path` equals `file.path`.
+      description: File/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or a new PFS folder via `POST .../pfs`. `file` equals the REST response body; `path` equals `file.path`.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
