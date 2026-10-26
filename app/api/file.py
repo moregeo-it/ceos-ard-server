@@ -105,7 +105,7 @@ async def store_file_content(
             db=db,
             workspace_id=workspace_id,
             file_path=file_path,
-            content=await read_body(request, settings.MAX_FILE_SIZE_MB),
+            read_content=lambda: read_body(request, settings.MAX_FILE_SIZE_MB),
             user_id=current_user["user"].id,
         )
 

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import shutil
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pygit2
@@ -25,6 +26,7 @@ from app.utils.validation import (
     ignore_file_path,
     normalize_workspace_path,
     validate_new_file_name,
+    validate_new_name,
     validate_pathname,
     validate_workspace_path,
 )
@@ -196,7 +198,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        name = validate_pathname(request_data.name)
+        name = validate_new_file_name(request_data.name) if request_data.type == "file" else validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
         target_path = folder / name
 
@@ -225,9 +227,13 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
-    async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
+    async def store_file_content(self, db: Session, workspace_id: str, file_path: str, read_content: Callable[[], Awaitable[bytes]], user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+
+        # The body is read only for the owner, and without holding the read transaction
+        db.commit()
+        content = await read_content()
 
         async def transaction():
             repo = get_repo(workspace.abs_path)
@@ -236,6 +242,11 @@ class FileService:
             if created:
                 validate_new_file_name(Path(file_path).name)  # as sent, before the path check trims it
                 validate_new_file_name(target_path.name)  # as written, after resolving symlinks
+                # And the folders it creates
+                folder = target_path.parent
+                while not folder.exists():
+                    validate_new_name(folder.name)
+                    folder = folder.parent
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
                 # the file stayed open with unsaved changes).
@@ -390,8 +401,8 @@ class FileService:
         return await run_exclusive(workspace_id, transaction)
 
     async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str):
-        new_name = validate_pathname(new_name)
         source_path = validate_workspace_path(file_path, workspace_path, exists=True)
+        new_name = validate_new_file_name(new_name) if source_path.is_file() else validate_pathname(new_name)
         repo = get_repo(workspace_path)
 
         target_path = source_path.parent / new_name

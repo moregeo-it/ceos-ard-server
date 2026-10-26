@@ -5,8 +5,8 @@ from fastapi import HTTPException, status
 
 IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github"}
 
-# Formats a file may be added in (uploaded) through a save
-UPLOAD_EXTENSIONS = (".yaml", ".md", ".pdf", ".jpg", ".jpeg", ".png", ".bib")
+# Formats a file may be created, uploaded or renamed to
+FILE_EXTENSIONS = (".yaml", ".md", ".pdf", ".jpg", ".jpeg", ".png", ".bib")
 
 
 def validate_pathname(filename: str) -> str:
@@ -51,14 +51,19 @@ def validate_pathname(filename: str) -> str:
     return filename
 
 
-def validate_new_file_name(filename: str) -> str:
-    """The name rules, plus a format from UPLOAD_EXTENSIONS."""
-    if validate_pathname(filename) != filename:
-        # The file would be written with the spaces that validate_pathname strips
+def validate_new_name(name: str) -> str:
+    """The name rules for a name used as given, which validate_pathname would trim."""
+    if validate_pathname(name) != name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot start or end with a space")
-    if not filename.lower().endswith(UPLOAD_EXTENSIONS):
-        formats = ", ".join(extension[1:] for extension in UPLOAD_EXTENSIONS)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only these formats can be added: {formats}")
+    return name
+
+
+def validate_new_file_name(filename: str) -> str:
+    """validate_new_name, plus a format from FILE_EXTENSIONS."""
+    validate_new_name(filename)
+    if not filename.lower().endswith(FILE_EXTENSIONS):
+        formats = ", ".join(extension[1:] for extension in FILE_EXTENSIONS)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only these formats are allowed: {formats}")
     return filename
 
 
