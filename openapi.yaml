@@ -776,7 +776,7 @@ paths:
     put:
       summary: Upload file content
       description: |-
-        Uploads the content of a specific file, up to `MAX_FILE_SIZE_MB` (10 MB by default).
+        Uploads the content of a specific file, up to `MAX_FILE_SIZE_MB` (1 MB by default).
 
         A missing file is created (an upload), with its parent folders: its name must then follow the
         naming rules and have one of the formats yaml, md, pdf, jpg, jpeg, png or bib. A created file

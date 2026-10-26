@@ -234,7 +234,8 @@ class FileService:
             # A missing file is being added (uploaded), so its name and format must be allowed
             created = not target_path.exists()
             if created:
-                validate_new_file_name(target_path.name)
+                validate_new_file_name(Path(file_path).name)  # as sent, before the path check trims it
+                validate_new_file_name(target_path.name)  # as written, after resolving symlinks
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
                 # the file stayed open with unsaved changes).

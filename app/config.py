@@ -60,7 +60,7 @@ class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     BUILD_CONCURRENCY: int = int(os.getenv("BUILD_CONCURRENCY", "2"))
     # Largest file that can be saved or uploaded
-    MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
+    MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "1"))
 
     SHARING_MODES_ENABLED: list[str] = os.getenv("SHARING_MODES_ENABLED", "readonly").split(",")
 
