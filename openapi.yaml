@@ -1646,6 +1646,9 @@ paths:
         Owner only: the sync uses the caller's GitHub credentials and rewrites the working tree.
         When files changed (`updated` or `merged`), a `workspace.synced` event is published to the
         workspace's realtime subscribers.
+
+        The response also compares the branch with ceos-org/ceos-ard (`upstream`), without changing
+        anything: how far behind it is, and which files a merge would conflict on.
       operationId: syncWorkspaceRepository
       tags:
         - Workspaces
@@ -2546,6 +2549,31 @@ components:
             sync could run. The workspace branch is pushed back from the local history, so no
             work is lost, but any open pull request was permanently closed by GitHub and must
             be submitted again as a new one.
+        upstream:
+          oneOf:
+            - $ref: '#/components/schemas/UpstreamStatus'
+            - type: "null"
+          default: null
+          description: |
+            The branch compared with ceos-org/ceos-ard as last fetched. Null when it can't be
+            compared, or the proposal is merged or closed.
+
+    UpstreamStatus:
+      type: object
+      required:
+        - behind_commits
+        - conflicting_files
+      properties:
+        behind_commits:
+          type: integer
+          description: Number of commits on ceos-org/ceos-ard the branch doesn't have
+        conflicting_files:
+          type: array
+          items:
+            type: string
+          description: |
+            Paths of the files merging those commits would conflict on, as the pull request
+            shows. Empty when the branch can be updated without conflicts.
 
     Workspace:
       type: object
