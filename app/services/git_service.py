@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 from app.models.user import User
-from app.schemas.workspace import SyncResult, SyncStatus
+from app.schemas.workspace import SyncResult, SyncStatus, UpstreamStatus
 from app.utils.git_utils import UserPassCredentials, get_file_status, get_repo, sanitize_git_error
 from app.utils.locks import workspace_locks
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
@@ -521,3 +521,24 @@ class GitService:
             logger.error(f"Error getting commits ahead of upstream: {e}")
 
         return commits
+
+    def upstream_status(self, repo: pygit2.Repository) -> UpstreamStatus | None:
+        """
+        The branch compared with ceos-org/ceos-ard as last fetched: the commits it doesn't have,
+        and the files merging them would conflict on. Computed in memory; None when unknown.
+        """
+        upstream_ref = repo.references.get(f"refs/remotes/upstream/{settings.CEOS_ARD_BRANCH}")
+        if upstream_ref is None or repo.head_is_unborn:
+            return None
+        try:
+            _, behind = repo.ahead_behind(repo.head.target, upstream_ref.target)
+            if behind == 0:
+                return UpstreamStatus()
+            conflicts = repo.merge_commits(repo.head.target, upstream_ref.target).conflicts or []
+            return UpstreamStatus(
+                behind_commits=behind,
+                conflicting_files=sorted({entry.path for conflict in conflicts for entry in conflict if entry is not None}),
+            )
+        except pygit2.GitError as e:
+            logger.warning(f"Could not compare the branch with upstream: {e}")
+            return None

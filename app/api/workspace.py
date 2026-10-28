@@ -191,7 +191,8 @@ async def get_workspace_commits(
     status_code=status.HTTP_200_OK,
     summary="Sync workspace with remote changes",
     description="Fetches the fork remote and merges remote branch changes into the local workspace when safe. "
-    "Conflict and dirty outcomes are reported in the response body, not as HTTP errors.",
+    "Conflict and dirty outcomes are reported in the response body, not as HTTP errors. "
+    "The response also compares the branch with ceos-org/ceos-ard (`upstream`).",
 )
 async def sync_workspace_repository(
     workspace_id: str,

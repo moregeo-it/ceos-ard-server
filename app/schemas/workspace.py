@@ -38,6 +38,11 @@ class SyncStatus(str, Enum):
     REMOTE_RESTORED = "remote_restored"  # branch was missing on the fork and was pushed back
 
 
+class UpstreamStatus(BaseModel):
+    behind_commits: int = 0  # commits on ceos-org/ceos-ard the branch doesn't have
+    conflicting_files: list[str] = []  # files merging them would conflict on, as the pull request shows
+
+
 class SyncResult(BaseModel):
     status: SyncStatus
     ahead_commits: int = 0
@@ -46,6 +51,8 @@ class SyncResult(BaseModel):
     conflicting_files: list[str] = []
     # True when the fork itself was missing on GitHub and had to be recreated before the sync
     repaired: bool = False
+    # The branch compared with ceos-org/ceos-ard; None when unknown, or the proposal is merged or closed
+    upstream: UpstreamStatus | None = None
 
 
 class WorkspaceCreate(BaseModel):
