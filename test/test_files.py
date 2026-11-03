@@ -47,7 +47,10 @@ def test_search_skips_other_file_types(client, workspace):
 @pytest.mark.parametrize(
     ("path", "usage"),
     [
-        ("/requirements/general/metadata-machine-readable.yaml", ["NRB", "SR"]),
+        (
+            "/requirements/general/metadata-machine-readable.yaml",
+            [{"label": "NRB", "path": "/pfs/NRB/document.yaml"}, {"label": "SR", "path": "/pfs/SR/document.yaml"}],
+        ),
         ("/requirements/general/unused.yaml", []),
         ("/glossary/accuracy.yaml", None),
         ("/README.md", None),
@@ -58,7 +61,7 @@ def test_context_lists_the_pfs_using_a_requirement(client, workspace, path, usag
     assert response.status_code == 200, response.text
     context = response.json()
     assert context["path"] == path
-    assert (sorted(context["usage"]) if context["usage"] is not None else None) == usage
+    assert (sorted(context["usage"], key=lambda item: item["label"]) if context["usage"] is not None else None) == usage
 
 
 def test_create_rename_and_delete_files(client, workspace):
@@ -76,9 +79,13 @@ def test_create_rename_and_delete_files(client, workspace):
     assert "renamed.yaml" not in names(client.get(base, params={"path": "/requirements/general"}))
 
 
-def test_files_in_pfs_folders_can_be_renamed_and_deleted(client, workspace):
-    # The editor hides these operations for PFS, the server doesn't refuse them
+def test_existing_pfs_can_not_be_renamed_or_deleted(client, workspace):
+    base = f"/workspaces/{workspace['id']}/files"
     response = client.patch(file_url(workspace, "files", "/pfs/SR"), json={"operation": "rename", "target": "SR2"})
-    assert response.status_code == 200, response.text
-    response = client.delete(file_url(workspace, "files", "/pfs/SR2"))
-    assert response.status_code in (200, 204), response.text
+    assert response.status_code == 403, response.text
+    response = client.delete(file_url(workspace, "files", "/pfs/SR"))
+    assert response.status_code == 403, response.text
+    response = client.delete(file_url(workspace, "files", "/pfs/SR/document.yaml"))
+    assert response.status_code == 403, response.text
+    response = client.post(base, json={"path": "/pfs", "name": "notes.md", "type": "file"})
+    assert response.status_code == 403, response.text

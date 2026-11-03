@@ -40,6 +40,31 @@ tags:
     description: Workspace sharing, collaborator management, and invitations
 
 paths:
+  /types:
+    get:
+      summary: List workspace types
+      description: |-
+        The workspace types users can create workspaces for, as configured with `WORKSPACE_TYPES`.
+        A type defines the upstream repository and how the editor works with its files.
+      operationId: listWorkspaceTypes
+      tags:
+        - Workspaces
+      responses:
+        '200':
+          description: Available workspace types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceType'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /pfs:
     get:
       summary: List available PFS types
@@ -365,19 +390,22 @@ paths:
               type: object
               required:
                 - title
-                - pfs
               properties:
                 title:
                   type: string
                   description: Workspace title
                   minLength: 1
                   maxLength: 100
+                type:
+                  type: string
+                  description: Workspace type, see `GET /types`. The first configured type if omitted.
                 description:
                   type: string
                   description: Workspace description
                 pfs:
                   $ref: '#/components/schemas/pfs'
                   minItems: 1
+                  description: Required for workspace types with PFS, ignored for others
       responses:
         '201':
           description: Workspace created successfully
@@ -1208,7 +1236,8 @@ paths:
       description: |-
         Retrieves the context for a specific file, if available.
 
-        This is currently a list of PFS that use the specified file.
+        This is currently a list of files that use the specified file, e.g. the PFS that include a
+        requirement.
 
         The endoint shall only return files that are made available through
         `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
@@ -1233,16 +1262,25 @@ paths:
                     properties:
                       usage:
                         description: |-
-                          List of PFS IDs that use the specified file.
+                          List of files that use the specified file.
 
-                          Returns an empty array if the file is not used by any PFS.
+                          Returns an empty array if the file is not used.
                           Returns `null` if the information is not available / unknown.
                         type:
                           - array
                           - 'null'
                         items:
-                          type: string
-                          description: PFS ID that uses the specified file
+                          type: object
+                          required:
+                            - label
+                            - path
+                          properties:
+                            label:
+                              type: string
+                              description: Name of the file that uses the specified file, e.g. a PFS ID
+                            path:
+                              type: string
+                              description: Path of the file that uses the specified file
         '404':
           description: Workspace or file not found, or no diff available
           content:
@@ -1626,7 +1664,7 @@ paths:
         When files changed (`updated` or `merged`), a `workspace.synced` event is published to the
         workspace's realtime subscribers.
 
-        The response also compares the branch with ceos-org/ceos-ard (`upstream`), without changing
+        The response also compares the branch with the upstream repository (`upstream`), without changing
         anything: how far behind it is, and which files a merge would conflict on.
       operationId: syncWorkspaceRepository
       tags:
@@ -2534,7 +2572,7 @@ components:
             - type: "null"
           default: null
           description: |
-            The branch compared with ceos-org/ceos-ard as last fetched. Null when it can't be
+            The branch compared with the upstream repository as last fetched. Null when it can't be
             compared, or the proposal is merged or closed.
 
     UpstreamStatus:
@@ -2545,7 +2583,7 @@ components:
       properties:
         behind_commits:
           type: integer
-          description: Number of commits on ceos-org/ceos-ard the branch doesn't have
+          description: Number of commits on the upstream repository the branch doesn't have
         conflicting_files:
           type: array
           items:
@@ -2553,6 +2591,117 @@ components:
           description: |
             Paths of the files merging those commits would conflict on, as the pull request
             shows. Empty when the branch can be updated without conflicts.
+
+    WorkspaceType:
+      type: object
+      required:
+        - id
+        - title
+        - upstream
+        - pfs
+      properties:
+        id:
+          type: string
+          example: ceos-ard
+        title:
+          type: string
+          example: CEOS-ARD
+        description:
+          type: string
+        color:
+          type: string
+          description: Color that distinguishes the workspaces of this type in the editor
+          example: '#3e5265'
+        upstream:
+          type: object
+          description: The repository new workspaces fork and propose changes to
+          properties:
+            owner:
+              type: string
+            repo:
+              type: string
+            branch:
+              type: string
+            url:
+              type: string
+              format: uri
+        pfs:
+          type: boolean
+          description: Whether workspaces select PFS for the document preview
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Texts the editor shows for this type, e.g. `usage`
+        editors:
+          type: array
+          description: Form editors for files, the first rule whose glob matches the path applies
+          items:
+            type: object
+            properties:
+              match:
+                type: string
+                description: Glob of the workspace paths, without leading slash
+                example: glossary/*.yaml
+              schema:
+                type: object
+                description: JSON Schema of the form data
+              ui_schema:
+                type: object
+                description: JSON Forms UI schema
+        actions:
+          type: array
+          description: Actions offered in the file menu of a folder
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              folder:
+                type: string
+                description: The folder whose menu offers the action
+              dialog:
+                type: string
+                description: The dialog of the editor that handles the action, e.g. `CreatePfsDialog`
+        file_menu:
+          type: array
+          description: |-
+            Which operations the file menu offers. The last rule matching a path decides, and the server
+            refuses create, rename and delete where they aren't offered.
+          items:
+            type: object
+            required:
+              - match
+              - ops
+            properties:
+              match:
+                type: string
+                description: Glob of the workspace paths, without leading slash
+                example: pfs/*
+              kind:
+                type: string
+                enum:
+                  - file
+                  - folder
+              ops:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - create
+                    - rename
+                    - delete
+                    - revert
+                    - diff
+                    - download
+                    - open_source
+              ops_if_new:
+                type: array
+                description: Additional operations for files and folders that aren't committed yet
+                items:
+                  type: string
 
     Workspace:
       type: object
@@ -2582,6 +2731,18 @@ components:
         title:
           type: string
           description: Workspace title
+        type:
+          type: string
+          description: Workspace type, see `GET /types`
+        upstream_owner:
+          type: string
+          description: Owner of the repository the workspace proposes changes to
+        upstream_repo:
+          type: string
+          description: Name of the repository the workspace proposes changes to
+        upstream_branch:
+          type: string
+          description: Branch the workspace proposes changes to
         description:
           type:
             - string
