@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import types
+import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -42,6 +43,7 @@ pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home"
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from openapi_validation import validate_response  # noqa: E402
 
 from app import dependencies  # noqa: E402
 from app.db.database import SessionLocal, engine  # noqa: E402
@@ -72,6 +74,11 @@ REPOSITORY = {
     "sections/introduction/what-are-ceos-ard-products.md": "## What are CEOS-ARD products?\n",
     "sections/requirement-categories/general.yaml": "id: meta\ntitle: General Metadata\ndescription: General requirements.\n",
 }
+
+
+def file_url(workspace: dict, endpoint: str, path: str) -> str:
+    """A file endpoint with the path as one segment, as the editor sends it (encodeURIComponent)."""
+    return f"/workspaces/{workspace['id']}/{endpoint}/{urllib.parse.quote(path, safe='')}"
 
 
 def git(*args, cwd=None):
@@ -164,6 +171,8 @@ def _unexpected(name):
 def client(user, github):
     token = JWTService.create_access_token(user)["access_token"]
     with TestClient(app, headers={"Authorization": f"Bearer {token}"}) as client:
+        # Every response is checked against openapi.yaml
+        client.event_hooks = {"request": [], "response": [validate_response]}
         yield client
 
 

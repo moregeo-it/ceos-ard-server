@@ -253,6 +253,7 @@ pixi run -e dev test
 ```
 
 The tests use local git repositories in place of GitHub and need no credentials.
+Every response the tests receive is checked against [`openapi.yaml`](openapi.yaml).
 
 ## 🐳 Database
 

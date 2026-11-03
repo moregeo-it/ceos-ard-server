@@ -1,4 +1,5 @@
 import pytest
+from conftest import file_url
 
 
 def names(response):
@@ -53,7 +54,7 @@ def test_search_skips_other_file_types(client, workspace):
     ],
 )
 def test_context_lists_the_pfs_using_a_requirement(client, workspace, path, usage):
-    response = client.get(f"/workspaces/{workspace['id']}/context{path}")
+    response = client.get(file_url(workspace, "context", path))
     assert response.status_code == 200, response.text
     context = response.json()
     assert context["path"] == path
@@ -66,19 +67,18 @@ def test_create_rename_and_delete_files(client, workspace):
     assert response.status_code == 201, response.text
     assert response.json()["path"] == "/requirements/general/new.yaml"
 
-    response = client.patch(f"{base}/requirements/general/new.yaml", json={"operation": "rename", "target": "renamed.yaml"})
+    response = client.patch(file_url(workspace, "files", "/requirements/general/new.yaml"), json={"operation": "rename", "target": "renamed.yaml"})
     assert response.status_code == 200, response.text
     assert response.json()["path"] == "/requirements/general/renamed.yaml"
 
-    response = client.delete(f"{base}/requirements/general/renamed.yaml")
+    response = client.delete(file_url(workspace, "files", "/requirements/general/renamed.yaml"))
     assert response.status_code in (200, 204), response.text
     assert "renamed.yaml" not in names(client.get(base, params={"path": "/requirements/general"}))
 
 
 def test_files_in_pfs_folders_can_be_renamed_and_deleted(client, workspace):
     # The editor hides these operations for PFS, the server doesn't refuse them
-    base = f"/workspaces/{workspace['id']}/files"
-    response = client.patch(f"{base}/pfs/SR", json={"operation": "rename", "target": "SR2"})
+    response = client.patch(file_url(workspace, "files", "/pfs/SR"), json={"operation": "rename", "target": "SR2"})
     assert response.status_code == 200, response.text
-    response = client.delete(f"{base}/pfs/SR2")
+    response = client.delete(file_url(workspace, "files", "/pfs/SR2"))
     assert response.status_code in (200, 204), response.text

@@ -1,4 +1,5 @@
 import yaml
+from conftest import file_url
 
 
 def test_list_pfs_of_the_workspace(client, workspace):
@@ -15,7 +16,7 @@ def test_create_pfs(client, workspace):
     files = client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/pfs/ST"}).json()
     assert [(item["name"], item["status"]) for item in files] == [("document.yaml", "added")]
 
-    document = yaml.safe_load(client.get(f"/workspaces/{workspace['id']}/files/pfs/ST/document.yaml").text)
+    document = yaml.safe_load(client.get(file_url(workspace, "files", "/pfs/ST/document.yaml")).text)
     assert document["title"] == "Surface Temperature"
     assert document["type"] == "Optical"
     assert document["authors"] == ["Jane Doe"]

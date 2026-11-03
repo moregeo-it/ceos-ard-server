@@ -1,4 +1,4 @@
-from conftest import FORK, commit_upstream, git
+from conftest import FORK, commit_upstream, file_url, git
 
 
 def test_create_workspace_forks_ceos_ard(client, github, workspace):
@@ -32,7 +32,7 @@ def test_sync_reports_upstream_behind(client, workspace):
 
 def test_sync_reports_upstream_conflicts(client, workspace):
     path = "sections/introduction/what-are-ceos-ard-products.md"
-    response = client.put(f"/workspaces/{workspace['id']}/files/{path}", content="## Mine\n")
+    response = client.put(file_url(workspace, "files", f"/{path}"), content="## Mine\n")
     assert response.status_code == 200, response.text
     response = client.put(f"/workspaces/{workspace['id']}/diffs", json={"message": "Change introduction"})
     assert response.status_code == 200, response.text
@@ -44,7 +44,7 @@ def test_sync_reports_upstream_conflicts(client, workspace):
 
 
 def test_commit_pushes_to_the_fork(client, workspace):
-    response = client.put(f"/workspaces/{workspace['id']}/files/README.md", content="# Changed\n")
+    response = client.put(file_url(workspace, "files", "/README.md"), content="# Changed\n")
     assert response.status_code == 200, response.text
 
     response = client.put(f"/workspaces/{workspace['id']}/diffs", json={"message": "Change README"})
