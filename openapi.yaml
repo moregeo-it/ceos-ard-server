@@ -653,12 +653,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  files:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/FileItem'
+                type: array
+                items:
+                  $ref: '#/components/schemas/FileItem'
         '404':
           description: Workspace not found
           content:
@@ -756,10 +753,7 @@ paths:
         '200':
           description: File content
           content:
-            '*/*':
-              schema:
-                type: string
-                format: binary
+            '*/*': {}
         '404':
           description: File not found
           content:
@@ -794,10 +788,7 @@ paths:
       requestBody:
         required: true
         content:
-          '*/*':
-            schema:
-              type: string
-              format: binary
+          '*/*': {}
       responses:
         '200':
           description: File updated successfully
@@ -974,51 +965,48 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  results:
-                    type: array
-                    items:
-                      type: object
-                      required:
-                        - name
-                        - path
-                        - type
+                type: array
+                items:
+                  type: object
+                  required:
+                    - name
+                    - path
+                    - type
+                  properties:
+                    name:
+                      type: string
+                      description: Name to the file containing the match
+                    path:
+                      type: string
+                      description: Absolute path to the file starting from the workspace root
+                    type:
+                      type: string
+                      description: Where the match was found
+                      enum:
+                        - filename
+                        - content
+                  oneOf:
+                    - type: object
                       properties:
-                        name:
-                          type: string
-                          description: Name to the file containing the match
-                        path:
-                          type: string
-                          description: Absolute path to the file starting from the workspace root
                         type:
+                          const: filename
+                    - type: object
+                      required:
+                        - line
+                        - column
+                        - excerpt
+                      properties:
+                        type:
+                          const: content
+                        line:
+                          type: integer
+                          description: Line number of the match
+                        column:
+                          type: integer
+                          description: Column number of the match
+                        excerpt:
                           type: string
-                          description: Where the match was found
-                          enum:
-                            - filename
-                            - content
-                      oneOf:
-                        - type: object
-                          properties:
-                            type:
-                              const: filename
-                        - type: object
-                          required:
-                            - line
-                            - column
-                            - excerpt
-                          properties:
-                            type:
-                              const: content
-                            line:
-                              type: integer
-                              description: Line number of the match
-                            column:
-                              type: integer
-                              description: Column number of the match
-                            excerpt:
-                              type: string
-                              description: Text excerpt around the match
+                          description: Text excerpt around the match
         '400':
           description: Invalid search query
           content:
@@ -1382,10 +1370,7 @@ paths:
             Cache-Control:
               $ref: '#/components/headers/CacheControl'
           content:
-            '*/*':
-              schema:
-                type: string
-                format: binary
+            '*/*': {}
         '304':
           description: Cached copy is still current; no body is returned.
           headers:
@@ -1425,14 +1410,8 @@ paths:
         '200':
           description: Preview document content downloaded successfully
           content:
-            application/pdf:
-              schema:
-                type: string
-                format: binary
-            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
-              schema:
-                type: string
-                format: binary
+            application/pdf: {}
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document: {}
         '403':
           description: Forbidden - missing `X-Client-Id`
           content:
@@ -2579,14 +2558,21 @@ components:
       type: object
       required:
         - id
-        - name
-        - description
-        - repository
-        - branch
-        - pfs
-        - created
-        - pr
+        - title
         - user_id
+        - pfs
+        - description
+        - fork_repo_owner
+        - fork_repo_name
+        - branch_name
+        - status
+        - pull_request_number
+        - pull_request_status
+        - pull_request_status_last_updated_at
+        - created_at
+        - updated_at
+        - archived_at
+        - deletion_at
         - viewer_role
       properties:
         id:
@@ -2597,21 +2583,31 @@ components:
           type: string
           description: Workspace title
         description:
-          type: string
+          type:
+            - string
+            - "null"
           description: Workspace description
-        repository:
+        fork_repo_owner:
           type: string
-          format: uri
-          description: URL of the Git repository for the workspace
-        branch:
+          description: Owner of the user's fork on GitHub that holds the workspace branch
+        fork_repo_name:
           type: string
-          description: Name of the branch in the repository
+          description: Name of the user's fork on GitHub
+        branch_name:
+          type: string
+          description: Name of the workspace branch in the fork
         pfs:
-          $ref: '#/components/schemas/pfs'
-        created:
+          oneOf:
+            - $ref: '#/components/schemas/pfs'
+            - type: "null"
+        created_at:
           type: string
           format: date-time
           description: Workspace creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last change of the workspace record
         status:
           type: string
           enum:
@@ -2646,13 +2642,13 @@ components:
             Automatically null when workspace is not archived.
           default: null
           readOnly: true
-        pr:
+        pull_request_number:
           type:
             - string
             - "null"
-          description: ID to the GitHub PR
+          description: Number of the GitHub pull request
           default: null
-        pr_status:
+        pull_request_status:
           type:
             - string
             - "null"
@@ -2663,7 +2659,14 @@ components:
             - closed
             - merged
             - null
-          description: Status of the PR
+          description: Status of the pull request
+          default: null
+        pull_request_status_last_updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the pull request status was last checked
           default: null
         user_id:
           type: string
@@ -3153,8 +3156,10 @@ components:
               id:
                 $ref: '#/components/schemas/pfsId'
               title:
-                type: string
-                description: Human-readable title
+                type:
+                  - string
+                  - "null"
+                description: Human-readable title, null if unknown
             example:
               id: NRB
               title: SAR Normalised Radar Backscatter
