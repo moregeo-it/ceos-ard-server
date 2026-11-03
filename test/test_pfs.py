@@ -28,3 +28,13 @@ def test_create_pfs(client, workspace):
 def test_create_pfs_refuses_existing_ids(client, workspace):
     response = client.post(f"/workspaces/{workspace['id']}/pfs", json={"id": "NRB", "title": "Again"})
     assert response.status_code == 400, response.text
+
+
+def test_renaming_a_pfs_requires_a_valid_id(client, workspace):
+    response = client.post(f"/workspaces/{workspace['id']}/pfs", json={"id": "ST", "title": "Surface Temperature"})
+    assert response.status_code == 201, response.text
+
+    response = client.patch(file_url(workspace, "files", "/pfs/ST"), json={"operation": "rename", "target": "bad-id"})
+    assert response.status_code == 400, response.text
+    response = client.patch(file_url(workspace, "files", "/pfs/ST"), json={"operation": "rename", "target": "LST"})
+    assert response.status_code == 200, response.text

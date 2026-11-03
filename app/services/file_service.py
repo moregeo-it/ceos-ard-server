@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
-from app.schemas.workspace import FilePatchRequest, SyncStatus
+from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
@@ -380,6 +380,10 @@ class FileService:
         new_name = validate_pathname(new_name)
         source_path = validate_workspace_path(file_path, workspace_path, exists=True)
         repo = get_repo(workspace_path)
+
+        # A PFS folder name is its id, which the preview and the CLI only accept in this form
+        if source_path.is_dir() and source_path.parent == workspace_path / "pfs" and not re.fullmatch(PFS_ID_PATTERN, new_name):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB")
 
         target_path = source_path.parent / new_name
         if target_path.exists():
