@@ -2695,7 +2695,9 @@ components:
                 description: The folder whose menu offers the action
               dialog:
                 type: string
-                description: The dialog of the editor that handles the action, e.g. `CreatePfsDialog`
+                description: The dialog of the editor that handles the action
+                enum:
+                  - CreatePfsDialog
         file_menu:
           type: array
           description: |-

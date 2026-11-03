@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.workspace_types.base import EditorRule, FileMenuRule, match_glob
+from app.workspace_types.base import Action, EditorRule, FileMenuRule, match_glob
 
 
 @pytest.mark.parametrize(
@@ -50,6 +50,11 @@ def test_list_types(client):
 def test_file_menu_rules_are_checked(rule):
     with pytest.raises(ValidationError):
         FileMenuRule.model_validate(rule)
+
+
+def test_actions_only_use_dialogs_of_the_editor():
+    with pytest.raises(ValidationError):
+        Action.model_validate({"id": "a", "title": "A", "folder": "/pfs", "dialog": "CreateFileDialog"})
 
 
 def test_editor_rules_are_checked():

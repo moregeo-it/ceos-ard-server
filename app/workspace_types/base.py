@@ -41,7 +41,8 @@ class Action(Rule):
     id: str
     title: str
     folder: str = Field(description="The folder whose file menu offers the action")
-    dialog: str = Field(description="The editor dialog that runs the action, e.g. `CreatePfsDialog`")
+    # Only the dialogs the editor runs as actions (FileContextMenu.vue)
+    dialog: Literal["CreatePfsDialog"] = Field(description="The editor dialog that runs the action")
 
 
 class Labels(Rule):
