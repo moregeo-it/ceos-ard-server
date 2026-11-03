@@ -844,7 +844,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Forbidden - readonly collaborators cannot upload file content
+          description: |-
+            Forbidden - readonly collaborators cannot upload file content, or the file is new and the
+            file menu of the workspace type doesn't offer creating files in its folder
           content:
             application/json:
               schema:

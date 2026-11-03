@@ -241,6 +241,10 @@ class FileService:
 
         async def transaction():
             repo = get_repo(workspace.abs_path)
+            # Saving restores a deleted file, but only creates a new one where the file menu offers it
+            relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+            if not target_path.exists() and (repo.head_is_unborn or relative_path not in repo.head.peel().tree):
+                self._require_operation(workspace, target_path.parent, "create", "folder")
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
                 # the file stayed open with unsaved changes).

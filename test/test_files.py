@@ -89,3 +89,26 @@ def test_existing_pfs_can_not_be_renamed_or_deleted(client, workspace):
     assert response.status_code == 403, response.text
     response = client.post(base, json={"path": "/pfs", "name": "notes.md", "type": "file"})
     assert response.status_code == 403, response.text
+
+
+@pytest.mark.parametrize("path", ["/pfs/notes.md", "/pfs/XYZ/document.yaml"])
+def test_saving_does_not_create_files_where_the_menu_does_not_offer_it(client, workspace, path):
+    response = client.put(file_url(workspace, "files", path), content="title: New\n")
+    assert response.status_code == 403, response.text
+    assert names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/pfs"})) == ["NRB", "SR"]
+
+
+def test_saving_creates_files_where_the_menu_offers_it(client, workspace):
+    response = client.put(file_url(workspace, "files", "/requirements/general/new.yaml"), content="title: New\n")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "added"
+
+
+def test_saving_restores_deleted_files(client, workspace):
+    # E.g. a file that stayed open in the editor while its folder was deleted
+    response = client.delete(file_url(workspace, "files", "/requirements/general"))
+    assert response.status_code in (200, 204), response.text
+
+    response = client.put(file_url(workspace, "files", "/requirements/general/unused.yaml"), content="title: Unused\n")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "modified"
