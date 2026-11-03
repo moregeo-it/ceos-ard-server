@@ -315,6 +315,9 @@ class WorkspaceService:
             # (read-only collaborators) must reload the tree.
             if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
                 self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
+            # Like restoring the branch, only for live work: a merged or closed proposal takes no updates
+            if restore_branch:
+                result.upstream = self.git_service.upstream_status(repo)
             return result
 
         result = await run_exclusive(workspace.id, transaction)
