@@ -178,6 +178,6 @@ def client(user, github):
 
 @pytest.fixture
 def workspace(client):
-    response = client.post("/workspaces/", json={"title": "NRB review", "pfs": ["NRB"]})
+    response = client.post("/workspaces", json={"title": "NRB review", "pfs": ["NRB"]})
     assert response.status_code == 201, response.text
     return response.json()

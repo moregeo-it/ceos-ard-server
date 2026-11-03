@@ -25,9 +25,8 @@ class SpecRequest:
 
     @property
     def path(self) -> str:
-        # Encoded, so a file path is one segment like in openapi.yaml; FastAPI serves the
-        # collection routes with a trailing slash and redirects to it
-        return self._request.url.raw_path.split(b"?")[0].decode().rstrip("/") or "/"
+        # Encoded, so a file path is one segment like in openapi.yaml
+        return self._request.url.raw_path.split(b"?")[0].decode()
 
     @property
     def method(self) -> str:
@@ -64,8 +63,8 @@ class SpecResponse:
 
 
 def validate_response(response: httpx.Response) -> None:
-    """Raises if the response doesn't match openapi.yaml; redirects are FastAPI's and not part of the API."""
-    if response.is_redirect:
-        return
+    """Raises if the response doesn't match openapi.yaml."""
+    # E.g. FastAPI redirecting /workspaces to /workspaces/: the route doesn't serve the documented path
+    assert not response.is_redirect, f"{response.request.method} {response.request.url.path} redirects to {response.headers.get('location')}"
     response.read()
     SPEC.validate_response(SpecRequest(response.request), SpecResponse(response))

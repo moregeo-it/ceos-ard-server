@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
 
-@router.post("/", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, description="Create a new workspace with cloned repository")
+@router.post("", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, description="Create a new workspace with cloned repository")
 async def create_workspace(
     workspace_data: WorkspaceCreate,
     db: Session = Depends(get_db),
@@ -46,7 +46,7 @@ async def create_workspace(
 
 
 @router.get(
-    "/",
+    "",
     summary="List all workspaces",
     status_code=status.HTTP_200_OK,
     response_model=list[WorkspaceResponse],

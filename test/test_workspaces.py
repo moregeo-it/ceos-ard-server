@@ -11,7 +11,7 @@ def test_create_workspace_forks_ceos_ard(client, github, workspace):
 
 
 def test_create_workspace_requires_pfs(client):
-    response = client.post("/workspaces/", json={"title": "No PFS", "pfs": []})
+    response = client.post("/workspaces", json={"title": "No PFS", "pfs": []})
     assert response.status_code == 422
 
 
