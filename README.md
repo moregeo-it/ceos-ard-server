@@ -246,6 +246,14 @@ pixi run pre-commit
 pixi run pre-commit-install
 ```
 
+### Tests
+
+```bash
+pixi run -e dev test
+```
+
+The tests use local git repositories in place of GitHub and need no credentials.
+
 ## 🐳 Database
 
 The application uses SQLite as the database backend:
