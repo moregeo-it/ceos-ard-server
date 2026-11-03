@@ -13,7 +13,11 @@ select = [
     "UP",  # pyupgrade
 ]
 
-ignore = ["B008"]
+ignore = [
+    "B008",
+    # StrEnum would change what str() and f-strings return for the enums, e.g. in messages
+    "UP042",
+]
 
 exclude = [
     ".git",
