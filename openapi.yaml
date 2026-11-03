@@ -44,7 +44,8 @@ paths:
     get:
       summary: List workspace types
       description: |-
-        The workspace types users can create workspaces for, as configured with `WORKSPACE_TYPES`.
+        Every workspace type the server knows. `available` marks the types offered for new workspaces,
+        as configured with `WORKSPACE_TYPES`; the others are listed for their existing workspaces.
         A type defines the upstream repository and how the editor works with its files.
       operationId: listWorkspaceTypes
       tags:
@@ -2594,11 +2595,19 @@ components:
 
     WorkspaceType:
       type: object
+      additionalProperties: false
       required:
         - id
         - title
+        - description
+        - available
+        - color
         - upstream
         - pfs
+        - labels
+        - editors
+        - actions
+        - file_menu
       properties:
         id:
           type: string
@@ -2608,6 +2617,9 @@ components:
           example: CEOS-ARD
         description:
           type: string
+        available:
+          type: boolean
+          description: Whether new workspaces of this type can be created
         color:
           type: string
           description: Color that distinguishes the workspaces of this type in the editor
@@ -2615,6 +2627,12 @@ components:
         upstream:
           type: object
           description: The repository new workspaces fork and propose changes to
+          additionalProperties: false
+          required:
+            - owner
+            - repo
+            - branch
+            - url
           properties:
             owner:
               type: string
@@ -2630,14 +2648,21 @@ components:
           description: Whether workspaces select PFS for the document preview
         labels:
           type: object
-          additionalProperties:
-            type: string
-          description: Texts the editor shows for this type, e.g. `usage`
+          additionalProperties: false
+          description: Texts the editor shows for this type instead of its defaults
+          properties:
+            usage:
+              type: string
+              description: Replaces "Used in", the files that use the open file
         editors:
           type: array
           description: Form editors for files, the first rule whose glob matches the path applies
           items:
             type: object
+            additionalProperties: false
+            required:
+              - match
+              - schema
             properties:
               match:
                 type: string
@@ -2654,6 +2679,12 @@ components:
           description: Actions offered in the file menu of a folder
           items:
             type: object
+            additionalProperties: false
+            required:
+              - id
+              - title
+              - folder
+              - dialog
             properties:
               id:
                 type: string
@@ -2672,6 +2703,7 @@ components:
             refuses create, rename and delete where they aren't offered.
           items:
             type: object
+            additionalProperties: false
             required:
               - match
               - ops
@@ -2682,6 +2714,7 @@ components:
                 example: pfs/*
               kind:
                 type: string
+                description: Only files or only folders; both if omitted
                 enum:
                   - file
                   - folder
@@ -2702,6 +2735,14 @@ components:
                 description: Additional operations for files and folders that aren't committed yet
                 items:
                   type: string
+                  enum:
+                    - create
+                    - rename
+                    - delete
+                    - revert
+                    - diff
+                    - download
+                    - open_source
 
     Workspace:
       type: object

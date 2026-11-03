@@ -1,6 +1,7 @@
 import pytest
+from pydantic import ValidationError
 
-from app.workspace_types.base import match_glob
+from app.workspace_types.base import EditorRule, FileMenuRule, match_glob
 
 
 @pytest.mark.parametrize(
@@ -29,10 +30,31 @@ def test_list_types(client):
     assert [item["id"] for item in types] == ["ceos-ard"]
     ceos_ard = types[0]
     assert ceos_ard["title"] == "CEOS-ARD"
+    assert ceos_ard["available"] is True
     assert ceos_ard["pfs"] is True
     assert ceos_ard["upstream"] == {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main", "url": "https://github.com/ceos-org/ceos-ard"}
     assert [action["id"] for action in ceos_ard["actions"]] == ["create-pfs"]
     assert [editor["match"] for editor in ceos_ard["editors"]] == ["glossary/*.yaml"]
+    assert "schema" in ceos_ard["editors"][0]
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"match": "pfs", "kind": "fodler", "ops": []},
+        {"match": "pfs", "ops": ["remove"]},
+        {"match": "/pfs", "ops": []},
+        {"match": "pfs", "op": ["delete"]},
+    ],
+)
+def test_file_menu_rules_are_checked(rule):
+    with pytest.raises(ValidationError):
+        FileMenuRule.model_validate(rule)
+
+
+def test_editor_rules_are_checked():
+    with pytest.raises(ValidationError):
+        EditorRule.model_validate({"match": "glossary/*.yaml", "shema": {}})
 
 
 def test_workspaces_store_their_type_and_upstream(workspace):

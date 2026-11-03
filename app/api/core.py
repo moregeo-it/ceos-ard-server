@@ -6,10 +6,11 @@ from fastapi.responses import HTMLResponse
 from app.config import settings
 from app.dependencies import get_github_service
 from app.schemas.workspace import PFSTypesResponse
+from app.schemas.workspace_type import WorkspaceTypeResponse
 from app.services.auth_service import get_current_user
 from app.services.github_service import GitHubService
 from app.utils.http_utils import internal_errors
-from app.workspace_types import available_types, get_type
+from app.workspace_types import all_types, available_types, get_type
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +79,11 @@ async def list_pfs_folders(
 @router.get(
     "/types",
     summary="List workspace types",
-    description="The workspace types users can create workspaces for, with what the editor needs to know about them",
+    description="Every workspace type the server knows, with what the editor needs to know about them",
     status_code=status.HTTP_200_OK,
+    response_model=list[WorkspaceTypeResponse],
+    response_model_exclude_none=True,
 )
 async def list_workspace_types(current_user=Depends(get_current_user)) -> list[dict]:
-    return [workspace_type.to_public() for workspace_type in available_types()]
+    available = available_types()
+    return [workspace_type.to_public(workspace_type in available) for workspace_type in all_types()]

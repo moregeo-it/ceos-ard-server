@@ -5,7 +5,7 @@ from pathlib import Path
 from app.config import settings
 from app.utils.pfs_utils import PlainStringSafeLoader
 from app.utils.yaml_cache import load_yaml_cached
-from app.workspace_types.base import DEFAULT_HIDDEN_PATHS, PathRules, Upstream, WorkspaceType
+from app.workspace_types.base import DEFAULT_HIDDEN_PATHS, Action, EditorRule, FileMenuRule, PathRules, Upstream, WorkspaceType
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +80,12 @@ def create() -> CeosArdType:
         upstream=Upstream(settings.CEOS_ARD_ORG, settings.CEOS_ARD_REPO, settings.CEOS_ARD_BRANCH),
         paths=PathRules(hidden=DEFAULT_HIDDEN_PATHS | {"build", "templates"}),
         pfs=True,
-        editors=[{"match": "glossary/*.yaml", "schema": GLOSSARY_SCHEMA, "ui_schema": GLOSSARY_UI_SCHEMA}],
+        editors=[EditorRule(match="glossary/*.yaml", json_schema=GLOSSARY_SCHEMA, ui_schema=GLOSSARY_UI_SCHEMA)],
         # PFS are created with their own dialog; only new ones can be renamed or deleted
-        actions=[{"id": "create-pfs", "title": "Add New PFS", "folder": "/pfs", "dialog": "CreatePfsDialog"}],
+        actions=[Action(id="create-pfs", title="Add New PFS", folder="/pfs", dialog="CreatePfsDialog")],
         file_menu=[
-            {"match": "pfs", "kind": "folder", "ops": []},
-            {"match": "pfs/*", "kind": "folder", "ops": [], "ops_if_new": ["rename", "delete"]},
-            {"match": "pfs/**", "kind": "file", "ops": ["open_source", "download", "diff", "revert"]},
+            FileMenuRule(match="pfs", kind="folder", ops=[]),
+            FileMenuRule(match="pfs/*", kind="folder", ops=[], ops_if_new=["rename", "delete"]),
+            FileMenuRule(match="pfs/**", kind="file", ops=["open_source", "download", "diff", "revert"]),
         ],
     )

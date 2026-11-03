@@ -1,15 +1,57 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_HIDDEN_PATHS = frozenset({".git", ".github"})
 
-# The operations of the file menu. The last rule matching a path decides which are offered there;
-# "ops_if_new" are added for files and folders that are new in the workspace.
+FileOperation = Literal["create", "rename", "delete", "revert", "diff", "download", "open_source"]
+
+
+class Rule(BaseModel):
+    # A typo in a type's configuration fails at startup instead of silently never matching
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+
+class GlobRule(Rule):
+    match: str = Field(description="Glob of workspace paths without leading slash: `*` matches within a folder, `**` across folders")
+
+    @field_validator("match")
+    @classmethod
+    def no_leading_slash(cls, value: str) -> str:
+        if value.startswith("/"):
+            raise ValueError("Globs match paths without leading slash")
+        return value
+
+
+class FileMenuRule(GlobRule):
+    kind: Literal["file", "folder"] | None = Field(None, description="Only files or only folders; both if omitted")
+    ops: list[FileOperation] = Field(description="The operations offered")
+    ops_if_new: list[FileOperation] = Field([], description="Added for files and folders that aren't committed yet")
+
+
+class EditorRule(GlobRule):
+    json_schema: dict[str, Any] = Field(alias="schema", description="JSON Schema of the form data")
+    ui_schema: dict[str, Any] | None = Field(None, description="JSON Forms UI schema")
+
+
+class Action(Rule):
+    id: str
+    title: str
+    folder: str = Field(description="The folder whose file menu offers the action")
+    dialog: str = Field(description="The editor dialog that runs the action, e.g. `CreatePfsDialog`")
+
+
+class Labels(Rule):
+    usage: str | None = Field(None, description='Replaces "Used in", the files that use the open file')
+
+
+# The file menu of every type starts with these rules; the last rule matching a path decides
 DEFAULT_FILE_MENU = [
-    {"match": "**", "kind": "folder", "ops": ["create", "rename", "delete"]},
-    {"match": "**", "kind": "file", "ops": ["open_source", "download", "diff", "revert", "rename", "delete"]},
+    FileMenuRule(match="**", kind="folder", ops=["create", "rename", "delete"]),
+    FileMenuRule(match="**", kind="file", ops=["open_source", "download", "diff", "revert", "rename", "delete"]),
 ]
 
 
@@ -63,29 +105,32 @@ class WorkspaceType:
     # Whether workspaces select PFS for the document preview
     pfs: bool = False
     searchable_extensions: frozenset[str] = frozenset({".txt", ".md", ".json", ".yaml", ".yml", ".xml"})
-    labels: dict[str, str] = field(default_factory=dict)
-    editors: list[dict[str, Any]] = field(default_factory=list)
-    actions: list[dict[str, Any]] = field(default_factory=list)
-    file_menu: list[dict[str, Any]] = field(default_factory=list)
+    labels: Labels = field(default_factory=Labels)
+    # The first rule whose glob matches a file decides its form editor
+    editors: list[EditorRule] = field(default_factory=list)
+    actions: list[Action] = field(default_factory=list)
+    # Added to DEFAULT_FILE_MENU; the last rule matching a path decides
+    file_menu: list[FileMenuRule] = field(default_factory=list)
 
     def allowed_operations(self, path: str, kind: str, is_new: bool) -> set[str]:
         rule = None
         for candidate in DEFAULT_FILE_MENU + self.file_menu:
-            if candidate.get("kind", kind) == kind and match_glob(path, candidate["match"]):
+            if candidate.kind in (None, kind) and match_glob(path, candidate.match):
                 rule = candidate
-        operations = set(rule["ops"])
+        operations = set(rule.ops)
         if is_new:
-            operations |= set(rule.get("ops_if_new", []))
+            operations |= set(rule.ops_if_new)
         return operations
 
     def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return None
 
-    def to_public(self) -> dict[str, Any]:
+    def to_public(self, available: bool) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
             "description": self.description,
+            "available": available,
             "color": self.color,
             "upstream": {"owner": self.upstream.owner, "repo": self.upstream.repo, "branch": self.upstream.branch, "url": self.upstream.url},
             "pfs": self.pfs,
