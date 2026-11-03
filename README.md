@@ -230,6 +230,53 @@ The API will be available at:
 The API contract is [`openapi.yaml`](openapi.yaml); open it in any OpenAPI viewer. The server serves no
 docs pages of its own.
 
+## 🧩 Workspace Types
+
+A workspace type defines which repository workspaces are created from and how the editor works with its
+files. The server is the only place they are defined; the editor reads them from `GET /types`.
+
+- `WORKSPACE_TYPES` lists the types offered for new workspaces, separated by commas; the first one is the
+  default. Workspaces of a type that isn't listed anymore keep working.
+- Each type has its own settings for the upstream repository, e.g. `CEOS_ARD_ORG`, `CEOS_ARD_REPO` and
+  `CEOS_ARD_BRANCH` for `ceos-ard`. Every workspace stores the upstream it was created from.
+
+Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a `create()` function,
+registered in `_FACTORIES` in [`__init__.py`](app/workspace_types/__init__.py). The rules are checked when
+the server starts, so a typo stops it instead of being ignored.
+
+| Setting | Meaning |
+|---|---|
+| `upstream` | The repository new workspaces fork and propose changes to |
+| `paths` | Root folders the file tree doesn't show and the API refuses, e.g. `build` |
+| `pfs` | Whether workspaces select PFS, for the preview built with the ceos-ard CLI |
+| `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
+| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema |
+| `actions` | Entries in the file menu of a folder that open an editor dialog, e.g. "Add New PFS" |
+| `file_menu` | Which operations the file menu offers, see below |
+| `file_usage()` | Which files use a file, for "Used in" and the delete dialog |
+
+Globs match workspace paths without a leading slash: `*` matches within a folder, `**` across folders,
+and a `**/` prefix matches any folder or none (`**/a.md` matches `a.md` and `x/a.md`, not `xa.md`).
+
+**File menu:** the rules of a type are added to two defaults that offer every operation for all files
+and folders. For a path, the **last** rule matching it and its kind (`file` or `folder`, both if omitted)
+decides; earlier rules don't add anything. `ops_if_new` adds operations while the file or folder isn't
+committed yet. The editor only shows what the rule offers, and the server refuses `create`, `rename` and
+`delete` where they aren't offered. The CEOS-ARD rules, for example:
+
+```python
+file_menu=[
+    FileMenuRule(match="pfs", kind="folder", ops=[]),  # only the "Add New PFS" action
+    FileMenuRule(match="pfs/*", kind="folder", ops=[], ops_if_new=["rename", "delete"]),  # new PFS only
+    FileMenuRule(match="pfs/**", kind="file", ops=["open_source", "download", "diff", "revert"]),
+]
+```
+
+To add a type: write the module, register it, add its upstream settings to [`app/config.py`](app/config.py)
+and [`.env.example`](.env.example), and add it to `WORKSPACE_TYPES`. The editor needs no change unless the
+type uses a dialog it doesn't have yet. For the editor's tests, export the type with
+`pixi run python scripts/export_types.py <type id>`.
+
 ## 🧪 Development
 
 ### Code Quality
