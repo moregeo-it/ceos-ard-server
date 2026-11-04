@@ -20,9 +20,7 @@ from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.locks import run_exclusive
-from app.utils.pfs_utils import PlainStringSafeLoader
 from app.utils.validation import (
-    IGNORE_ROOT_PATHS,
     ignore_file_path,
     normalize_workspace_path,
     validate_new_file_name,
@@ -30,7 +28,7 @@ from app.utils.validation import (
     validate_pathname,
     validate_workspace_path,
 )
-from app.utils.yaml_cache import load_yaml_cached
+from app.workspace_types import PathRules
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,6 @@ class FileService:
         self.git_service = git_service or GitService()
         self.broker = broker or event_broker
         self.workspace_service = workspace_service or WorkspaceService(git_service=self.git_service, broker=self.broker)
-        self.searchable_file_extensions = {".txt", ".md", ".json", ".yaml", ".yml", ".xml"}
 
     def _get_all_file_statuses(self, repo: pygit2.Repository, target_path: Path, workspace_path: Path):
         """Get all file statuses using pygit2 API.
@@ -113,6 +110,16 @@ class FileService:
 
         return status_map
 
+    def _require_operation(self, workspace, target_path: Path, operation: str, kind: str) -> None:
+        """Refuse what the file menu rules of the workspace type don't offer for the path."""
+        relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+        repo = get_repo(workspace.abs_path)
+        # New means not committed yet, e.g. a PFS created in this workspace
+        is_new = repo.head_is_unborn or relative_path not in repo.head.peel().tree
+        if operation not in workspace.workspace_type.allowed_operations(relative_path, kind, is_new):
+            target = f"files in '/{relative_path}'" if operation == "create" else f"'/{relative_path}'"
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"You can't {operation} {target} in this workspace")
+
     def get_file_dict(self, file: Path, workspace_path: Path, status: str | None = None, is_directory: bool | None = None) -> dict:
         return {
             "status": status,
@@ -125,7 +132,7 @@ class FileService:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         # Don't require on-disk existence: a deleted-but-tracked folder is gone from disk, but its
         # former (now-deleted) contents can still be listed from git (see the deleted branch below).
-        target_path = validate_workspace_path(path, workspace.abs_path)
+        target_path = validate_workspace_path(path, workspace.abs_path, rules=workspace.workspace_type.paths)
 
         repo = get_repo(workspace.abs_path)
         try:
@@ -135,7 +142,7 @@ class FileService:
 
             # Get all files that still exist on disk (deleted entries are added from the status map below)
             if target_path.is_dir():
-                files = self.walk_files(target_path, workspace.abs_path, repo, recurse, status_map)
+                files = self.walk_files(target_path, workspace.abs_path, repo, recurse, status_map, workspace.workspace_type.paths)
             elif status_map.get(str(target_path)) == "deleted:folder":
                 # Deleted tracked folder: nothing on disk to walk; its deleted descendants are appended below.
                 files = []
@@ -149,6 +156,8 @@ class FileService:
                 if state == "deleted:folder":
                     state = "deleted"
                     is_directory = True
+                if ignore_file_path(file, file.relative_to(workspace.abs_path), workspace.workspace_type.paths):
+                    continue
                 if state == "deleted" and (recurse or file.parent == target_path):
                     files.append(self.get_file_dict(file, workspace.abs_path, status=state, is_directory=is_directory))
 
@@ -162,7 +171,13 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get workspace files: {str(e)}") from e
 
     def walk_files(
-        self, target_path: Path, workspace_path: Path, repo: pygit2.Repository, recurse: bool = False, status: dict | None = None
+        self,
+        target_path: Path,
+        workspace_path: Path,
+        repo: pygit2.Repository,
+        recurse: bool = False,
+        status: dict | None = None,
+        rules: PathRules | None = None,
     ) -> list[dict]:
         if status is None:
             status = {}
@@ -175,7 +190,7 @@ class FileService:
             return all_files
 
         for file in entries:
-            if ignore_file_path(file, file.relative_to(workspace_path), IGNORE_ROOT_PATHS):
+            if ignore_file_path(file, file.relative_to(workspace_path), rules or PathRules()):
                 continue
 
             filepath = str(file.resolve())
@@ -183,7 +198,7 @@ class FileService:
             all_files.append(self.get_file_dict(file, workspace_path, status=file_status))
 
             if file.is_dir() and recurse:
-                all_files.extend(self.walk_files(file, workspace_path, repo, recurse, status))
+                all_files.extend(self.walk_files(file, workspace_path, repo, recurse, status, rules))
 
         return all_files
 
@@ -199,7 +214,8 @@ class FileService:
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         name = validate_new_file_name(request_data.name) if request_data.type == "file" else validate_pathname(request_data.name)
-        folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True)
+        folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True, rules=workspace.workspace_type.paths)
+        self._require_operation(workspace, folder, "create", "folder")
         target_path = folder / name
 
         async def transaction():
@@ -221,7 +237,7 @@ class FileService:
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file")
+        file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file", rules=workspace.workspace_type.paths)
         try:
             return {"content": file_path.read_bytes(), "media_type": get_file_media_type(file_path)}
         except Exception as e:
@@ -236,11 +252,15 @@ class FileService:
 
         async def transaction():
             # Under the lock, so a sync during the upload can't swap in a symlink
-            target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+            target_path = validate_workspace_path(file_path, workspace.abs_path, type="file", rules=workspace.workspace_type.paths)
             repo = get_repo(workspace.abs_path)
             # A missing file is being added (uploaded), so its name and format must be allowed
             created = not target_path.exists()
             if created:
+                # Saving restores a deleted file, but only creates a new one where the file menu offers it
+                relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+                if repo.head_is_unborn or relative_path not in repo.head.peel().tree:
+                    self._require_operation(workspace, target_path.parent, "create", "folder")
                 validate_new_file_name(Path(file_path).name)  # as sent, before the path check trims it
                 validate_new_file_name(target_path.name)  # as written, after resolving symlinks
                 # And the folders it creates
@@ -282,7 +302,8 @@ class FileService:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
 
         async def transaction():
-            target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True)
+            target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, rules=workspace.workspace_type.paths)
+            self._require_operation(workspace, target_path, "delete", "folder" if target_path.is_dir() else "file")
             relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
             repo = get_repo(workspace.abs_path)
 
@@ -377,14 +398,18 @@ class FileService:
         if operation_request.operation == "rename":
 
             async def transaction():
-                result = await self._update_file_name(workspace.abs_path, file_path, new_name=operation_request.target)
+                source_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, rules=workspace.workspace_type.paths)
+                self._require_operation(workspace, source_path, "rename", "folder" if source_path.is_dir() else "file")
+                result = await self._update_file_name(
+                    workspace.abs_path, file_path, new_name=operation_request.target, rules=workspace.workspace_type.paths
+                )
                 self.broker.emit(workspace_id, EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path)
                 return result
 
         elif operation_request.operation == "revert":
 
             async def transaction():
-                result = await self._revert_file_changes(workspace.abs_path, file_path)
+                result = await self._revert_file_changes(workspace.abs_path, file_path, rules=workspace.workspace_type.paths)
                 # old_path is only meaningful when the revert undid a staged rename.
                 reverted_rename = result.get("path") != file_path
                 self.broker.emit(
@@ -401,8 +426,8 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
         return await run_exclusive(workspace_id, transaction)
 
-    async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str):
-        source_path = validate_workspace_path(file_path, workspace_path, exists=True)
+    async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str, rules: PathRules):
+        source_path = validate_workspace_path(file_path, workspace_path, exists=True, rules=rules)
         new_name = validate_new_file_name(new_name) if source_path.is_file() else validate_pathname(new_name)
         repo = get_repo(workspace_path)
 
@@ -464,9 +489,9 @@ class FileService:
             "path": normalize_workspace_path(target_path, workspace_path),
         }
 
-    async def _revert_file_changes(self, workspace_path: Path, file_path: str):
+    async def _revert_file_changes(self, workspace_path: Path, file_path: str, rules: PathRules):
         try:
-            return await self.git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path)
+            return await self.git_service.revert_file_changes(workspace_path=workspace_path, file_path=file_path, rules=rules)
         except HTTPException:
             raise
         except Exception as e:
@@ -485,13 +510,15 @@ class FileService:
 
             # In a thread: reads every searchable file. Deliberately lock-free — a racing save
             # yields at worst a stale hit, and the per-file error handling covers deletions.
-            return await asyncio.to_thread(self._search_file_contents, files, workspace.abs_path, search_query.lower())
+            return await asyncio.to_thread(
+                self._search_file_contents, files, workspace.abs_path, search_query.lower(), workspace.workspace_type.searchable_extensions
+            )
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search files: {str(e)}") from e
 
-    def _search_file_contents(self, files: list[dict], workspace_path: Path, pattern: str) -> list[dict]:
+    def _search_file_contents(self, files: list[dict], workspace_path: Path, pattern: str, extensions: frozenset[str]) -> list[dict]:
         search_results = []
         # Traverse the directory tree
         for file in files:
@@ -504,7 +531,7 @@ class FileService:
             if file["status"] == "deleted":
                 continue
             # Ignore non-searchable file extensions
-            if filepath.suffix not in self.searchable_file_extensions:
+            if filepath.suffix not in extensions:
                 continue
 
             # Check if search query matches filename
@@ -542,7 +569,7 @@ class FileService:
 
     async def get_file_diff(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
+        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file", rules=workspace.workspace_type.paths)
         relative_path_str = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
 
         repo = get_repo(workspace.abs_path)
@@ -643,7 +670,12 @@ class FileService:
                 # Restoring it is safe, as the checks above exclude deliberate deletions.
                 try:
                     sync_result = await self.git_service.sync_with_origin(
-                        repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, restore_branch=True
+                        repo=repo,
+                        user=user,
+                        branch_name=workspace.branch_name,
+                        workspace_id=workspace.id,
+                        upstream_branch=workspace.upstream_branch,
+                        restore_branch=True,
                     )
                 except Exception as sync_error:
                     # Any failure here must revert the commit and restore the staged changes
@@ -698,69 +730,14 @@ class FileService:
         commit, remote_sync = await run_exclusive(workspace_id, transaction)
         return commit, remote_sync is not None
 
-    async def _get_file_usage(self, workspace_path: Path, file_path: str) -> list[str]:
-        """
-        Get the list of PFS documents that use a specific requirement file.
-
-        Args:
-            workspace_path: The absolute path to the workspace
-            file_path: The relative file path (e.g., '/requirements/metadata/traceability-sar.yaml')
-
-        Returns:
-            List of PFS folder names that use this requirement
-        """
-        match = re.match(r"^[\\/]?requirements[\\/](.+)\.ya?ml$", file_path)
-        if not match:
-            # TODO: implement for glossary, sections, references as well
-            return None
-
-        requirement_name = match.group(1)
-
-        # Find all PFS folders
-        pfs_dir = workspace_path / "pfs"
-        if not pfs_dir.exists() or not pfs_dir.is_dir():
-            return None
-
-        pfs_documents = []
-        # Check each PFS folder's document.yaml file
-        for pfs_folder in pfs_dir.iterdir():
-            if not pfs_folder.is_dir():
-                continue
-
-            requirements_file = pfs_folder / "document.yaml"
-            if not requirements_file.exists():
-                continue
-
-            try:
-                # Cached (read-only use): parsed on the loop on every /context request
-                document = load_yaml_cached(requirements_file, PlainStringSafeLoader)
-                categories = document.get("requirements", [])
-            except Exception as e:
-                logger.warning(f"Could not read or parse requirements file for {pfs_folder.name}: {e}")
-                continue
-
-            # Check if this is a properly structured YAML array with categories
-            if not isinstance(categories, list):
-                continue
-
-            for category in categories:
-                if isinstance(category, dict) and "requirements" in category:
-                    requirements = category.get("requirements", [])
-                    if isinstance(requirements, list) and any(
-                        req == requirement_name or (isinstance(req, dict) and req.get("ref") == requirement_name) for req in requirements
-                    ):
-                        pfs_documents.append(pfs_folder.name)
-                        break
-
-        return pfs_documents
-
     async def get_file_context(self, db: Session, file_path: str, workspace_id: str, user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        target_path = validate_workspace_path(file_path, workspace.abs_path)
+        target_path = validate_workspace_path(file_path, workspace.abs_path, rules=workspace.workspace_type.paths)
         rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
         repo = get_repo(workspace.abs_path)
 
-        usage = await self._get_file_usage(workspace.abs_path, rel_file_path)
+        # On the loop: the YAML cache it reads isn't thread-safe
+        usage = workspace.workspace_type.file_usage(workspace.abs_path, rel_file_path)
         file_status = get_file_status(repo, target_path)
 
         return {

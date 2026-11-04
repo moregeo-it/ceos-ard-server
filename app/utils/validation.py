@@ -3,7 +3,9 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
-IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github"}
+from app.workspace_types.base import DEFAULT_HIDDEN_PATHS, PathRules
+
+DEFAULT_PATH_RULES = PathRules()
 
 # Formats a file may be created, uploaded or renamed to
 FILE_EXTENSIONS = (".yaml", ".md", ".pdf", ".jpg", ".jpeg", ".png", ".bib")
@@ -68,7 +70,12 @@ def validate_new_file_name(filename: str) -> str:
 
 
 def validate_workspace_path(
-    path: str | Path, workspace_path: Path, exists: bool | None = None, type: str | None = None, is_preview: bool = False
+    path: str | Path,
+    workspace_path: Path,
+    exists: bool | None = None,
+    type: str | None = None,
+    is_preview: bool = False,
+    rules: PathRules = DEFAULT_PATH_RULES,
 ) -> Path:
     if type not in (None, "file", "folder"):
         raise HTTPException(
@@ -116,12 +123,9 @@ def validate_workspace_path(
         )
 
     if is_preview:
-        ignored_paths = IGNORE_ROOT_PATHS.copy()
-        ignored_paths.discard("build")
-    else:
-        ignored_paths = IGNORE_ROOT_PATHS
+        rules = PathRules(hidden=DEFAULT_HIDDEN_PATHS)
 
-    if ignore_file_path(abs_path, abs_path.relative_to(workspace_path), ignored_paths):
+    if ignore_file_path(abs_path, abs_path.relative_to(workspace_path), rules):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path '{path}' is not accessible",
@@ -165,15 +169,13 @@ def normalize_workspace_path(path: str | Path, workspace_path: Path, absolute: b
     return path
 
 
-def ignore_file_path(file: Path, relative_path: Path, ignored_paths: set[str]) -> bool:
-    # Determine the root entry of the path to correctly apply ignore rules
+def ignore_file_path(file: Path, relative_path: Path, rules: PathRules) -> bool:
+    # The workspace root itself is always accessible
     if relative_path == Path("."):
-        root_entry = file.name
-    else:
-        root_entry = relative_path.parts[0]
+        return False
 
-    # Ignore files and directories under configured root paths (e.g. build, templates, etc.)
-    if root_entry in ignored_paths:
+    # Ignore files and directories under the root paths the workspace type hides (e.g. build, templates)
+    if rules.is_hidden(relative_path.parts[0]):
         return True
 
     # Ignore hidden files

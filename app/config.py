@@ -53,6 +53,9 @@ class Settings:
     CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
     CEOS_ARD_BRANCH: str = os.getenv("CEOS_ARD_BRANCH", "main")
 
+    # Workspace types users can choose from, separated by commas; the first one is the default
+    WORKSPACE_TYPES: list[str] = [item.strip() for item in os.getenv("WORKSPACE_TYPES", "ceos-ard").split(",") if item.strip()]
+
     SECRET_KEY: str = os.getenv("SECRET_KEY")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ceos_ard_server.db")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")

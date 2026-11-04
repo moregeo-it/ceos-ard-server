@@ -39,7 +39,7 @@ class SyncStatus(str, Enum):
 
 
 class UpstreamStatus(BaseModel):
-    behind_commits: int = 0  # commits on ceos-org/ceos-ard the branch doesn't have
+    behind_commits: int = 0  # commits on the upstream repository the branch doesn't have
     conflicting_files: list[str] = []  # files merging them would conflict on, as the pull request shows
 
 
@@ -51,13 +51,14 @@ class SyncResult(BaseModel):
     conflicting_files: list[str] = []
     # True when the fork itself was missing on GitHub and had to be recreated before the sync
     repaired: bool = False
-    # The branch compared with ceos-org/ceos-ard; None when unknown, or the proposal is merged or closed
+    # The branch compared with the upstream repository; None when unknown, or the proposal is merged or closed
     upstream: UpstreamStatus | None = None
 
 
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
-    pfs: list[PfsId] = Field(..., min_length=1, description="PFS to preview, at least one")
+    type: str | None = Field(None, description="Workspace type, the configured default if omitted")
+    pfs: list[PfsId] | None = Field(None, min_length=1, description="PFS to preview, at least one for workspace types with PFS")
     description: str | None = Field(None, max_length=1000, description="Workspace description")
 
 
@@ -81,6 +82,10 @@ class WorkspaceResponse(BaseModel):
 
     id: str
     title: str
+    type: str
+    upstream_owner: str
+    upstream_repo: str
+    upstream_branch: str
     user_id: str
     pfs: list[str] | None
     description: str | None
@@ -191,8 +196,13 @@ class FileResponse(BaseModel):
     path: str
 
 
+class FileUsage(BaseModel):
+    label: str
+    path: str
+
+
 class FileContextResponse(FileResponse):
-    usage: list[str] | None
+    usage: list[FileUsage] | None
 
 
 class FileSearchResponse(BaseModel):

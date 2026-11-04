@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, joinedload
 from strictyaml import YAMLValidationError, as_document
 from yaml import load as yaml_load
 
-from app.config import settings
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator
@@ -28,6 +27,7 @@ from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
 from app.utils.validation import validate_pathname
 from app.utils.yaml_cache import load_yaml_cached
+from app.workspace_types import Upstream, available_types, default_type, get_type
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +59,28 @@ class WorkspaceService:
         if not workspace_data.title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
 
+        workspace_type = get_type(workspace_data.type) if workspace_data.type else default_type()
+        if workspace_type not in available_types():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} can't be created")
+        if workspace_type.pfs and not workspace_data.pfs:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one PFS is required")
+        upstream = workspace_type.upstream
+
         # Bound before the try: the handler below inspects it, and if fork() raises it would
         # otherwise be unbound and mask the real failure with an UnboundLocalError.
         workspace = None
 
         try:
-            fork_repo = await self.github_service.fork(user=user, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO)
+            fork_repo = await self.github_service.fork(user=user, upstream_owner=upstream.owner, upstream_repo=upstream.repo)
 
             # Create workspace record in database
             workspace = GitWorkspace(
                 user_id=user.id,
-                pfs=workspace_data.pfs,
+                type=workspace_type.id,
+                upstream_owner=upstream.owner,
+                upstream_repo=upstream.repo,
+                upstream_branch=upstream.branch,
+                pfs=workspace_data.pfs if workspace_type.pfs else None,
                 title=workspace_data.title,
                 description=workspace_data.description,
                 fork_repo_owner=fork_repo["owner"]["login"],
@@ -89,9 +100,9 @@ class WorkspaceService:
                     clone_url=fork_repo["clone_url"],
                     workspace_path=workspace.abs_path,
                     branch_name=workspace.branch_name,
-                    upstream_repo=settings.CEOS_ARD_REPO,
-                    upstream_owner=settings.CEOS_ARD_ORG,
-                    upstream_branch=settings.CEOS_ARD_BRANCH,
+                    upstream_repo=upstream.repo,
+                    upstream_owner=upstream.owner,
+                    upstream_branch=upstream.branch,
                 )
 
                 if success:
@@ -246,7 +257,7 @@ class WorkspaceService:
 
             logger.warning(f"Fork {workspace.fork_repo_owner}/{workspace.fork_repo_name} is missing on GitHub; recreating it")
 
-            fork_repo = await self.github_service.fork(user=user, upstream_owner=settings.CEOS_ARD_ORG, upstream_repo=settings.CEOS_ARD_REPO)
+            fork_repo = await self.github_service.fork(user=user, upstream_owner=workspace.upstream_owner, upstream_repo=workspace.upstream_repo)
             owner = fork_repo["owner"]["login"]
             name = fork_repo["name"]
 
@@ -258,7 +269,7 @@ class WorkspaceService:
 
             # GitHub reports the fork's current name, so this also picks up the case where the
             # user had already re-forked it themselves, possibly under a different name.
-            self._update_fork_reference(db, user.id, owner, name, fork_repo.get("clone_url"))
+            self._update_fork_reference(db, workspace, owner, name, fork_repo.get("clone_url"))
 
             # Only this workspace's branch: a recreated fork has none of them, and the others
             # push their own back when they are next opened, from their own local history.
@@ -303,7 +314,12 @@ class WorkspaceService:
             nonlocal attempts
             attempts += 1
             return await self.git_service.sync_with_origin(
-                repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, restore_branch=restore_branch
+                repo=repo,
+                user=user,
+                branch_name=workspace.branch_name,
+                workspace_id=workspace.id,
+                upstream_branch=workspace.upstream_branch,
+                restore_branch=restore_branch,
             )
 
         # One transaction under the workspace lock, fork repair and retry included: releasing the
@@ -317,21 +333,30 @@ class WorkspaceService:
                 self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
             # Like restoring the branch, only for live work: a merged or closed proposal takes no updates
             if restore_branch:
-                result.upstream = self.git_service.upstream_status(repo)
+                result.upstream = self.git_service.upstream_status(repo, workspace.upstream_branch)
             return result
 
         result = await run_exclusive(workspace.id, transaction)
         result.repaired = attempts > 1
         return result
 
-    def _update_fork_reference(self, db: Session, user_id: str, owner: str, name: str, clone_url: str = None) -> None:
+    def _update_fork_reference(self, db: Session, workspace: GitWorkspace, owner: str, name: str, clone_url: str = None) -> None:
         """
-        Point every workspace of this user at a new fork location, on disk as well as in the
-        database. All of them live on the same fork, so a rename, transfer or recreation moves
-        all of them at once.
+        Point every workspace of this user and upstream repository at a new fork location, on disk
+        as well as in the database. All of them live on the same fork, so a rename, transfer or
+        recreation moves all of them at once.
         """
+        user_id = workspace.user_id
         clone_url = clone_url or f"https://github.com/{owner}/{name}.git"
-        workspaces = db.query(GitWorkspace).filter(GitWorkspace.user_id == user_id).all()
+        workspaces = (
+            db.query(GitWorkspace)
+            .filter(
+                GitWorkspace.user_id == user_id,
+                GitWorkspace.upstream_owner == workspace.upstream_owner,
+                GitWorkspace.upstream_repo == workspace.upstream_repo,
+            )
+            .all()
+        )
 
         for workspace in workspaces:
             if workspace.abs_path.exists():
@@ -365,7 +390,7 @@ class WorkspaceService:
             return
 
         logger.info(f"Fork for workspace {workspace.id} moved to {full_name}; realigning")
-        self._update_fork_reference(db, workspace.user_id, owner, name, head_repo.get("clone_url"))
+        self._update_fork_reference(db, workspace, owner, name, head_repo.get("clone_url"))
 
     def _apply_pull_request_state(self, workspace: GitWorkspace, pull_request: dict[str, Any]) -> bool:
         """
@@ -424,8 +449,8 @@ class WorkspaceService:
         try:
             pull_request = await self.github_service.get_pull_request(
                 access_token=access_token,
-                repo=settings.CEOS_ARD_REPO,
-                owner=settings.CEOS_ARD_ORG,
+                repo=workspace.upstream_repo,
+                owner=workspace.upstream_owner,
                 number=workspace.pull_request_number,
             )
         except HTTPException as e:
@@ -470,8 +495,8 @@ class WorkspaceService:
         try:
             pull_request = await self.github_service.get_pull_request(
                 access_token=access_token,
-                owner=settings.CEOS_ARD_ORG,
-                repo=settings.CEOS_ARD_REPO,
+                owner=workspace.upstream_owner,
+                repo=workspace.upstream_repo,
                 number=workspace.pull_request_number,
             )
         except HTTPException as e:
@@ -510,6 +535,8 @@ class WorkspaceService:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_reason)
 
             update_dict = update_data.model_dump(exclude_unset=True)
+            if "pfs" in update_dict and not workspace.workspace_type.pfs:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS")
 
             if not update_dict:
                 raise HTTPException(
@@ -594,7 +621,7 @@ class WorkspaceService:
     def get_workspace_commits(self, db: Session, workspace_id: str, user_id: str) -> list[pygit2.Commit]:
         # Commit history is exclusively surfaced in the Propose view, which is owner-only.
         workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        return self.git_service.get_commits(workspace.abs_path)
+        return self.git_service.get_commits(workspace.abs_path, upstream_branch=workspace.upstream_branch)
 
     async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
         if not workspace_id:
@@ -605,6 +632,8 @@ class WorkspaceService:
 
         try:
             workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+            if not workspace.workspace_type.pfs:
+                return []
 
             pfs_path = workspace.abs_path / "pfs"
 
@@ -651,6 +680,8 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
         workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
+        if not workspace.workspace_type.pfs:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS")
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)
         pfs_path = pfs_container / pfs_id
@@ -748,8 +779,8 @@ class WorkspaceService:
         try:
             pull_request = await self.github_service.get_pull_request(
                 access_token=access_token,
-                owner=settings.CEOS_ARD_ORG,
-                repo=settings.CEOS_ARD_REPO,
+                owner=workspace.upstream_owner,
+                repo=workspace.upstream_repo,
                 number=workspace.pull_request_number,
             )
             if not pull_request:
@@ -884,6 +915,7 @@ class WorkspaceService:
         head_branch_name: str,
         title: str,
         body: str,
+        upstream: Upstream,
         supersedes: dict[str, Any] = None,
     ) -> dict[str, Any]:
         """Open a pull request, optionally noting the dead one it continues."""
@@ -894,14 +926,14 @@ class WorkspaceService:
 
         return await self.github_service.create_pull_request(
             access_token=access_token,
-            owner=settings.CEOS_ARD_ORG,
-            repo=settings.CEOS_ARD_REPO,
+            owner=upstream.owner,
+            repo=upstream.repo,
             pr_data={
                 "title": title,
                 "body": body,
                 "head": f"{head_repo_owner}:{head_branch_name}",
-                "base": settings.CEOS_ARD_BRANCH,
-                # Allow CEOS-ARD maintainers to modify the PR
+                "base": upstream.branch,
+                # Allow the upstream maintainers to modify the PR
                 "maintainer_can_modify": True,
             },
         )
@@ -928,12 +960,13 @@ class WorkspaceService:
                 head_branch_name=head_branch_name,
                 title=propose_data.title,
                 body=propose_data.description,
+                upstream=workspace.upstream,
             )
 
         existing = await self.github_service.get_pull_request(
             access_token=access_token,
-            owner=settings.CEOS_ARD_ORG,
-            repo=settings.CEOS_ARD_REPO,
+            owner=workspace.upstream_owner,
+            repo=workspace.upstream_repo,
             number=workspace.pull_request_number,
         )
 
@@ -946,6 +979,7 @@ class WorkspaceService:
                 head_branch_name=head_branch_name,
                 title=propose_data.title,
                 body=propose_data.description,
+                upstream=workspace.upstream,
             )
 
         if head_repo_missing(existing):
@@ -957,6 +991,7 @@ class WorkspaceService:
                 # Prefer what the user just typed, falling back to the dead proposal's text
                 title=propose_data.title or existing["title"],
                 body=propose_data.description or existing["body"] or "",
+                upstream=workspace.upstream,
                 supersedes=existing,
             )
 
@@ -967,8 +1002,8 @@ class WorkspaceService:
         try:
             updated = await self.github_service.update_pull_request(
                 access_token=access_token,
-                owner=settings.CEOS_ARD_ORG,
-                repo=settings.CEOS_ARD_REPO,
+                owner=workspace.upstream_owner,
+                repo=workspace.upstream_repo,
                 number=workspace.pull_request_number,
                 pr_data=pr_data,
             )
@@ -984,6 +1019,7 @@ class WorkspaceService:
                 head_branch_name=head_branch_name,
                 title=propose_data.title or existing["title"],
                 body=propose_data.description or existing["body"] or "",
+                upstream=workspace.upstream,
                 supersedes=existing,
             )
 

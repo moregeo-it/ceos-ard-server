@@ -13,6 +13,7 @@ from app.schemas.workspace import SyncResult, SyncStatus, UpstreamStatus
 from app.utils.git_utils import LeasedPushCredentials, UserPassCredentials, get_file_status, get_repo, sanitize_git_error
 from app.utils.locks import workspace_locks
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
+from app.workspace_types.base import PathRules
 
 logger = logging.getLogger(__name__)
 
@@ -132,11 +133,11 @@ class GitService:
         repo.remotes.set_url("origin", url)
         logger.info(f"Set origin of {repo.workdir} to {url}")
 
-    async def revert_file_changes(self, workspace_path: Path, file_path: str):
+    async def revert_file_changes(self, workspace_path: Path, file_path: str, rules: PathRules):
         # The workspace directory is named after the workspace id (GitWorkspace.abs_path)
         _require_workspace_lock(workspace_path.name, "revert_file_changes")
 
-        target_file_path = validate_workspace_path(file_path, workspace_path)
+        target_file_path = validate_workspace_path(file_path, workspace_path, rules=rules)
         relative_file_str = normalize_workspace_path(target_file_path, workspace_path, absolute=False)
 
         repo = get_repo(workspace_path)
@@ -338,7 +339,7 @@ class GitService:
         return tip.id, []
 
     async def sync_with_origin(
-        self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str, restore_branch: bool = False
+        self, repo: pygit2.Repository, user: User, branch_name: str, workspace_id: str, upstream_branch: str, restore_branch: bool = False
     ) -> SyncResult:
         """
         Fetch the fork remote and bring its branch changes into the local branch when safe.
@@ -379,7 +380,7 @@ class GitService:
 
         # Best-effort upstream refresh; keeps the get_commits baseline current
         try:
-            await asyncio.to_thread(repo.remotes["upstream"].fetch, [settings.CEOS_ARD_BRANCH])
+            await asyncio.to_thread(repo.remotes["upstream"].fetch, [upstream_branch])
         except KeyError:
             logger.warning(f"Workspace {workspace_id} has no upstream remote; commit history will be incomplete")
         except Exception as e:
@@ -500,20 +501,18 @@ class GitService:
     def get_commits(
         self,
         workspace_path: Path,
-        upstream_branch: str = None,
+        upstream_branch: str,
     ) -> list[pygit2.Commit]:
         """
         Get all commits that have been added to the current branch compared to the upstream branch.
 
         Args:
             workspace_path: Path to the workspace/repository
-            upstream_branch: The upstream branch to compare against (defaults to settings.CEOS_ARD_BRANCH)
+            upstream_branch: The upstream branch to compare against
 
         Returns:
             List of commit dictionaries with sha, message, and timestamp
         """
-        if upstream_branch is None:
-            upstream_branch = settings.CEOS_ARD_BRANCH
 
         repo = get_repo(workspace_path)
         commits = []
@@ -546,12 +545,12 @@ class GitService:
 
         return commits
 
-    def upstream_status(self, repo: pygit2.Repository) -> UpstreamStatus | None:
+    def upstream_status(self, repo: pygit2.Repository, upstream_branch: str) -> UpstreamStatus | None:
         """
-        The branch compared with ceos-org/ceos-ard as last fetched: the commits it doesn't have,
-        and the files merging them would conflict on. Computed in memory; None when unknown.
+        The branch compared with the upstream repository as last fetched: the commits it doesn't
+        have, and the files merging them would conflict on. Computed in memory; None when unknown.
         """
-        upstream_ref = repo.references.get(f"refs/remotes/upstream/{settings.CEOS_ARD_BRANCH}")
+        upstream_ref = repo.references.get(f"refs/remotes/upstream/{upstream_branch}")
         if upstream_ref is None or repo.head_is_unborn:
             return None
         try:

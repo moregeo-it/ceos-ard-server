@@ -36,10 +36,16 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
         return build_info["output_file"]
 
+    @staticmethod
+    def _require_pfs(workspace: GitWorkspace) -> None:
+        if not workspace.workspace_type.pfs:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS to preview")
+
     async def generate_preview(self, db: Session, workspace_id: str, user_id: str):
         # Owner only: a build writes into the workspace, and this build is what everyone else sees.
         # Always the saved selection, which is what GET .../previews/current reads back.
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
+        self._require_pfs(workspace)
 
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
@@ -52,6 +58,7 @@ class PreviewService:
     async def get_current_preview(self, db: Session, workspace_id: str, user_id: str):
         """The owner's last build for the workspace's PFS list, without building."""
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        self._require_pfs(workspace)
         if not workspace.pfs:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
         prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
@@ -110,6 +117,7 @@ class PreviewService:
         Each download builds into its own folder, so it needs no `build_locks`, and no other build can rewrite it while it is sent.
         """
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        self._require_pfs(workspace)
         build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:
             prefix = await self._build(workspace, pfs, include_format=format, build_dir=build_dir)

@@ -38,3 +38,13 @@ def test_renaming_a_pfs_requires_a_valid_id(client, workspace):
     assert response.status_code == 400, response.text
     response = client.patch(file_url(workspace, "files", "/pfs/ST"), json={"operation": "rename", "target": "LST"})
     assert response.status_code == 200, response.text
+
+
+def test_new_pfs_can_be_renamed_and_deleted(client, workspace):
+    response = client.post(f"/workspaces/{workspace['id']}/pfs", json={"id": "ST", "title": "Surface Temperature"})
+    assert response.status_code == 201, response.text
+
+    response = client.patch(file_url(workspace, "files", "/pfs/ST"), json={"operation": "rename", "target": "LST"})
+    assert response.status_code == 200, response.text
+    response = client.delete(file_url(workspace, "files", "/pfs/LST"))
+    assert response.status_code in (200, 204), response.text

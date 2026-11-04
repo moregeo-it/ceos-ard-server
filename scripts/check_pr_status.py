@@ -64,22 +64,8 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
             return
 
         logger.info("Starting PR status check...")
-        logger.info(f"Upstream repository: {settings.CEOS_ARD_ORG}/{settings.CEOS_ARD_REPO}")
         if dry_run:
             logger.info("DRY RUN MODE - No changes will be made")
-
-        # Fetch all PRs from upstream repository
-        logger.info(f"Fetching all pull requests from {settings.CEOS_ARD_ORG}/{settings.CEOS_ARD_REPO}...")
-        all_prs = await github_service.get_repository_pull_requests(
-            owner=settings.CEOS_ARD_ORG,
-            repo=settings.CEOS_ARD_REPO,
-            token=service_token,
-            state="all",  # Get open, closed, and merged PRs
-        )
-
-        # Create lookup dict: {pr_number: pr_data}
-        pr_lookup = {str(pr["number"]): pr for pr in all_prs}
-        logger.info(f"Found {len(pr_lookup)} total pull requests in repository")
 
         # Get all workspaces with PR numbers
         query = db.query(GitWorkspace).filter(GitWorkspace.pull_request_number.isnot(None))
@@ -98,10 +84,24 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
             logger.info("No workspaces with pull requests found")
             return
 
+        # Fetch all PRs of every upstream repository the workspaces propose to, once each
+        pr_lookups: dict[tuple[str, str], dict[str, dict]] = {}
+        for owner, repo in sorted({(workspace.upstream_owner, workspace.upstream_repo) for workspace in workspaces}):
+            logger.info(f"Fetching all pull requests from {owner}/{repo}...")
+            all_prs = await github_service.get_repository_pull_requests(
+                owner=owner,
+                repo=repo,
+                token=service_token,
+                state="all",  # Get open, closed, and merged PRs
+            )
+            pr_lookups[(owner, repo)] = {str(pr["number"]): pr for pr in all_prs}
+            logger.info(f"Found {len(all_prs)} total pull requests in {owner}/{repo}")
+
         # Process each workspace
         for workspace in workspaces:
             try:
                 pr_number = str(workspace.pull_request_number)
+                pr_lookup = pr_lookups[(workspace.upstream_owner, workspace.upstream_repo)]
 
                 # Check if PR exists in our fetched data
                 if pr_number not in pr_lookup:

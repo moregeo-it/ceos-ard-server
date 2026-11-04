@@ -10,6 +10,7 @@ from sqlalchemy.orm import relationship
 from app.config import settings
 from app.db.database import Base
 from app.db.types import UTCDateTime
+from app.workspace_types import Upstream, WorkspaceType, get_type
 
 
 class WorkspaceStatus(Enum):
@@ -31,6 +32,10 @@ class GitWorkspace(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String(50), nullable=False)
     description = Column(String(500), nullable=True)
+    type = Column(String(50), nullable=False, default="ceos-ard")
+    upstream_owner = Column(String(100), nullable=False)
+    upstream_repo = Column(String(100), nullable=False)
+    upstream_branch = Column(String(255), nullable=False)
     pfs = Column(JSON, nullable=True)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
     fork_repo_owner = Column(String(50), nullable=False)
@@ -54,6 +59,14 @@ class GitWorkspace(Base):
     @property
     def branch_name(self) -> str:
         return f"workspace/{self.id}"
+
+    @property
+    def workspace_type(self) -> "WorkspaceType":
+        return get_type(self.type)
+
+    @property
+    def upstream(self) -> "Upstream":
+        return Upstream(self.upstream_owner, self.upstream_repo, self.upstream_branch)
 
     def annotate_viewer(self, role: str, owner=None) -> "GitWorkspace":
         """Set the per-request response fields (not columns): the caller's role and the owner's names."""

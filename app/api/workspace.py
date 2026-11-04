@@ -192,7 +192,7 @@ async def get_workspace_commits(
     summary="Sync workspace with remote changes",
     description="Fetches the fork remote and merges remote branch changes into the local workspace when safe. "
     "Conflict and dirty outcomes are reported in the response body, not as HTTP errors. "
-    "The response also compares the branch with ceos-org/ceos-ard (`upstream`).",
+    "The response also compares the branch with the upstream repository (`upstream`).",
 )
 async def sync_workspace_repository(
     workspace_id: str,
