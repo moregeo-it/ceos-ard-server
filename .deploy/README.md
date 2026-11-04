@@ -50,5 +50,5 @@ biggest gap in this setup.
 
 - Off-box backups are not automated.
 - No alerting when a maintenance timer fails; failures only land in the journal.
-- `app_hardening_strict` is off, because Playwright's Chromium has not been
-  tested against the tighter sandbox.
+- `app_hardening_strict` is off until previews and PDF downloads are verified
+  with it.

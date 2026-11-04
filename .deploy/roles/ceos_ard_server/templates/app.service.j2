@@ -26,18 +26,21 @@ RestartSec=3
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
-# No swap on this host, so keep the long-lived server off the OOM killer's list.
+# The server splits its cgroup into main/ and builds/, and limits the builds.
+# ProtectControlGroups= would hide the cgroup from it.
+Delegate=yes
+MemoryMax={{ app_memory_max }}
+# Builds raise their own score, so the OOM killer picks them before the server.
 OOMScoreAdjust=-500
 
 PrivateTmp=yes
-ProtectControlGroups=yes
 ProtectKernelModules=yes
 {% if app_hardening_strict %}
-# Verify PDF export still works before leaving these on: Playwright's Chromium
-# is sensitive to sandboxing restrictions.
+# Verify previews and PDF downloads still work before leaving these on.
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths={{ app_dir }} {{ app_data_dir }}
+# The pixi cache: the server installs the toolchains of the builds
+ReadWritePaths={{ app_dir }} {{ app_data_dir }} {{ app_home }}/.cache
 {% else %}
 ProtectSystem=full
 {% endif %}
