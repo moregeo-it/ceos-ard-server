@@ -18,8 +18,8 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 - **Git-based Workspaces**: Create isolated workspaces with repository forking
 - **CRUD Operations**: Full workspace lifecycle management (create, read, update, delete)
-- **Sync with GitHub**: Changes on the fork's branch are merged into the workspace; a conflicting merge is
-  aborted and reported, never left half-done
+- **Sync with GitHub**: Changes on the fork's branch are brought into the workspace, with local commits
+  replayed on top (no merge commits); a conflict is reported, never left half-done
 - **Workspace Archival**: Archive workspaces with automatic cleanup after 1 month
 - **Status Tracking**: Monitor workspace and Pull Request status
 - **Owner-only Changes**: Only the owner changes a workspace; collaborators get read-only access
