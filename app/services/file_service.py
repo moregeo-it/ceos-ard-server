@@ -736,8 +736,12 @@ class FileService:
         rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
         repo = get_repo(workspace.abs_path)
 
-        # On the loop: the YAML cache it reads isn't thread-safe
-        usage = workspace.workspace_type.file_usage(workspace.abs_path, rel_file_path)
+        try:
+            usage = await workspace.workspace_type.file_usage(workspace.abs_path, rel_file_path)
+        except Exception as e:
+            # The file still opens, just without its usage
+            logger.warning(f"Usage of {rel_file_path} in workspace {workspace_id} failed: {e}")
+            usage = None
         file_status = get_file_status(repo, target_path)
 
         return {

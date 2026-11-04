@@ -2,6 +2,7 @@ import pytest
 from conftest import file_url
 
 from app.services.events_service import event_broker
+from app.workspace_types.ceos_ard import CeosArdType
 
 MB = 1024 * 1024
 
@@ -66,6 +67,16 @@ def test_context_lists_the_pfs_using_a_requirement(client, workspace, path, usag
     context = response.json()
     assert context["path"] == path
     assert (sorted(context["usage"], key=lambda item: item["label"]) if context["usage"] is not None else None) == usage
+
+
+def test_files_open_even_if_their_usage_fails(client, workspace, monkeypatch):
+    def fail(self, workspace_path, file_path):
+        raise ValueError("A PFS document that can't be parsed")
+
+    monkeypatch.setattr(CeosArdType, "_requirement_usage", fail)
+    response = client.get(file_url(workspace, "context", "/requirements/general/unused.yaml"))
+    assert response.status_code == 200, response.text
+    assert response.json()["usage"] is None
 
 
 def test_create_rename_and_delete_files(client, workspace):
