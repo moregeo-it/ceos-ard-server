@@ -1,10 +1,18 @@
 import asyncio
 import logging
 import re
+import tomllib
+from collections.abc import Iterable
 from pathlib import Path
+
+import httpx
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from app.config import settings
 from app.utils.pfs_utils import PlainStringSafeLoader
+from app.utils.toolchains import Toolchain, ToolchainError, ToolchainSpec, toolchains
 from app.utils.yaml_cache import load_yaml_cached
 from app.workspace_types.base import DEFAULT_HIDDEN_PATHS, Action, EditorRule, FileMenuRule, PathRules, Upstream, WorkspaceType
 
@@ -28,7 +36,82 @@ GLOSSARY_UI_SCHEMA = {
 }
 
 
+CLI_PACKAGE = "ceos-ard-cli"
+CLI_PYPROJECT_URL = "https://raw.githubusercontent.com/ceos-org/ceos-ard-cli/v{version}/pyproject.toml"
+REQUIREMENTS_FILE = "requirements.txt"
+
+
+def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
+    """
+    The CLI version `requirements.txt` asks for: until 1.0.0 exactly the version given with `~=` or `==`,
+    from 1.0.0 the highest installed version that satisfies it, else the version given.
+    """
+    try:
+        text = (workspace_path / REQUIREMENTS_FILE).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ToolchainError(
+            f"The workspace has no {REQUIREMENTS_FILE}, which sets the version of the CEOS-ARD CLI. Update the workspace from upstream to get it."
+        ) from None
+    invalid = ToolchainError(f"{REQUIREMENTS_FILE} may only contain one line like `{CLI_PACKAGE}~=1.2.3`")
+    lines = [line for line in (line.split("#", 1)[0].strip() for line in text.splitlines()) if line]
+    if len(lines) != 1:
+        raise invalid
+    try:
+        requirement = Requirement(lines[0])
+        specifiers = list(requirement.specifier)
+        version = Version(specifiers[0].version) if len(specifiers) == 1 else None
+    except (InvalidRequirement, InvalidVersion):
+        raise invalid from None
+    if (
+        canonicalize_name(requirement.name) != CLI_PACKAGE
+        or requirement.extras
+        or requirement.url
+        or requirement.marker
+        or version is None
+        or specifiers[0].operator not in ("~=", "==")
+        or len(version.release) != 3
+        or version.epoch
+        or version.local
+        or version.is_devrelease
+    ):
+        raise invalid
+    if version.major >= 1:
+        candidates = [Version(name.removeprefix(f"{CLI_PACKAGE}-")) for name in installed if name.startswith(f"{CLI_PACKAGE}-")]
+        candidates = [candidate for candidate in candidates if candidate in requirement.specifier]
+        if candidates:
+            version = max(candidates)
+    return str(version)
+
+
+async def cli_toolchain_spec(version: str) -> ToolchainSpec:
+    """The CLI and the conda packages its release pins, e.g. pandoc."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(CLI_PYPROJECT_URL.format(version=version))
+    if response.status_code == 404:
+        raise ToolchainError(f"CEOS-ARD CLI {version} doesn't exist")
+    response.raise_for_status()
+    pyproject = tomllib.loads(response.text)
+    pypi = {CLI_PACKAGE: f"=={version}"}
+    # Pre-releases the CLI pins must be requested explicitly, e.g. bibtexparser==2.0.0b9
+    for dependency in pyproject["project"]["dependencies"]:
+        requirement = Requirement(dependency)
+        if any(specifier.operator == "==" and Version(specifier.version).is_prerelease for specifier in requirement.specifier):
+            pypi[requirement.name] = str(requirement.specifier)
+    return ToolchainSpec(conda=dict(pyproject["tool"]["pixi"]["dependencies"]), pypi=pypi, chromium=True)
+
+
 class CeosArdType(WorkspaceType):
+    toolchain_files = frozenset({REQUIREMENTS_FILE})
+
+    def toolchain(self, workspace_path: Path) -> Toolchain:
+        version = cli_version(workspace_path, toolchains.installed())
+        return Toolchain(name=f"{CLI_PACKAGE}-{version}", spec=lambda: cli_toolchain_spec(version))
+
+    def build_command(self, workspace_path: Path, pfs: list[str], output_prefix: str, include_format: str | None) -> list[str]:
+        # The flags disable the formats
+        disabled = [f"--{format}" for format in ("pdf", "docx") if format != include_format]
+        return ["ceos-ard", "generate", *pfs, "-o", output_prefix, "-i", str(workspace_path), *disabled]
+
     async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return await asyncio.to_thread(self._requirement_usage, workspace_path, file_path)
 

@@ -12,7 +12,7 @@ def builds(monkeypatch):
     """Replaces the ceos-ard CLI with a build that writes a small document."""
     calls = []
 
-    async def build(workspace_path, workspace_id, pfs, include_format=None, build_dir=None):
+    async def build(workspace_path, workspace_id, workspace_type, pfs, include_format=None, build_dir=None):
         calls.append({"pfs": pfs, "include_format": include_format})
         prefix = Path(dependencies.build_service.output_prefix(workspace_path, pfs, build_dir))
         prefix.parent.mkdir(parents=True, exist_ok=True)

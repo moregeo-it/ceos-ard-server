@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from app.utils.cli_utils import run
+from app.utils.process import run
 
 # Starts a grandchild that writes the time into a file every 0.1 s for 30 s, then waits
 CHILD = """

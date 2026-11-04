@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
 from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
+from app.services.build_service import BuildService
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
@@ -291,6 +292,8 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
             event = EventType.FILE_CREATED if created else EventType.FILE_SAVED
             self.broker.emit(workspace_id, event, actor_user_id=user_id, path=result["path"], file=result)
+            if relative_path in workspace.workspace_type.toolchain_files:
+                BuildService.prepare(workspace.workspace_type, workspace.abs_path)
             return result
 
         return await run_exclusive(workspace_id, transaction)

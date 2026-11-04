@@ -28,8 +28,13 @@ jobs:
         run: pixi run -e dev pre-commit
 
   test:
-    name: Run tests
-    runs-on: ubuntu-latest
+    name: Run tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Production runs on Linux, development also on Windows
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout code
@@ -42,5 +47,29 @@ jobs:
           cache: true
           environments: dev
 
+      - name: Allow build sandboxes
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Checkout ceos-org/ceos-ard for the malicious builds
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v5
+        with:
+          repository: ceos-org/ceos-ard
+          ref: 899901f21befd8f7f4c041ec32d4ea12d953820f
+          path: ceos-ard
+
       - name: Run tests
+        if: runner.os == 'Linux'
+        # In a cgroup delegated to the tests, as systemd's Delegate=yes does for the server
+        run: |
+          sudo mkdir /sys/fs/cgroup/ceos-ard-tests
+          sudo chown "$USER" /sys/fs/cgroup/ceos-ard-tests /sys/fs/cgroup/ceos-ard-tests/cgroup.{procs,subtree_control,threads}
+          echo $$ | sudo tee /sys/fs/cgroup/ceos-ard-tests/cgroup.procs
+          CEOS_ARD_CHECKOUT="$PWD/ceos-ard" pixi run -e dev test
+
+      - name: Run tests
+        if: runner.os == 'Windows'
         run: pixi run -e dev test

@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import dependencies
 from app.api import auth, collab, core, file, preview, share, workspace
 from app.config import settings
+from app.db.database import SessionLocal
 from app.utils.cli_utils import load_project_info, run_checks
 from app.utils.request_context import CLIENT_ID_HEADER, reset_client_id, set_client_id, validate_client_id
 from app.utils.session_cookie import lacks_client_id
@@ -24,6 +25,8 @@ logger.info(f"Starting {title} version {version} in {settings.ENVIRONMENT} envir
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await run_checks()
+    with SessionLocal() as db:
+        dependencies.build_service.prepare_all(db)
     yield
     # Close the shared GitHub HTTP client so shutdown doesn't leak its connections
     await dependencies.github_service.aclose()

@@ -1366,6 +1366,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          description: |
+            The preview could not be built, e.g. invalid content, a `requirements.txt` that doesn't
+            name a valid CLI version, or a build that took too long or needed too much memory.
+            `detail` says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/previews/current:
     get:

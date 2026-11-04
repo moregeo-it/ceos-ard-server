@@ -13,7 +13,6 @@ Options:
 """
 
 import logging
-import os
 import shutil
 import sys
 from datetime import UTC, datetime
@@ -90,7 +89,7 @@ def cleanup_archived_workspaces(dry_run: bool = False):
                     # nothing in this process, and an unguarded rmtree could pull the
                     # repository out from under an in-flight commit/push.
                     try:
-                        lock_fd = acquire_workspace_file_lock(workspace.id, timeout=LOCK_TIMEOUT_SECONDS)
+                        lock = acquire_workspace_file_lock(workspace.id, timeout=LOCK_TIMEOUT_SECONDS)
                     except TimeoutError:
                         logger.warning(f"Workspace {workspace.id} is busy in the server; skipping until the next run")
                         error_count += 1
@@ -109,7 +108,7 @@ def cleanup_archived_workspaces(dry_run: bool = False):
                         logger.info(f"Deleted workspace {workspace.id} (title: {workspace.title}) from database")
                         deleted_count += 1
                     finally:
-                        os.close(lock_fd)
+                        lock.release()
                         workspace_lock_file(workspace.id).unlink(missing_ok=True)
 
             except Exception as e:

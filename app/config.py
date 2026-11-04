@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,6 +23,17 @@ SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000")
 PFS_DEFAULT_VERSION = "1.0.0-draft"
 PFS_DEFAULT_TYPE = "Optical"
 PFS_DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
+
+
+def _playwright_browsers_path() -> Path:
+    if path := os.getenv("PLAYWRIGHT_BROWSERS_PATH"):
+        return Path(path).resolve()
+    # Playwright's defaults
+    if sys.platform == "win32":
+        return Path(os.getenv("LOCALAPPDATA", Path.home())) / "ms-playwright"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    return Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")) / "ms-playwright"
 
 
 class Settings:
@@ -61,7 +73,19 @@ class Settings:
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI", f"{SERVER_URL}/auth/callback")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    BUILD_CONCURRENCY: int = int(os.getenv("BUILD_CONCURRENCY", "2"))
+    BUILD_CONCURRENCY: int = int(os.getenv("BUILD_CONCURRENCY", "3"))
+    BUILD_TIMEOUT: int = int(os.getenv("BUILD_TIMEOUT", "60"))
+    # Run builds in bubblewrap and a delegated cgroup (Linux only); required outside development
+    BUILD_SANDBOX: bool = os.getenv("BUILD_SANDBOX", "true").lower() != "false"
+    # Limits for all builds together and for each build, enforced by the cgroup
+    BUILD_CPU_CORES: float = float(os.getenv("BUILD_CPU_CORES", "3"))
+    BUILD_MEMORY_MAX: str = os.getenv("BUILD_MEMORY_MAX", "1536M")
+    BUILD_MEMORY_MAX_PER_BUILD: str = os.getenv("BUILD_MEMORY_MAX_PER_BUILD", "700M")
+    # One pixi environment per CLI version, installed on demand
+    TOOLCHAINS_ROOT: Path = Path(os.getenv("TOOLCHAINS_ROOT", "toolchains")).resolve()
+    TOOLCHAIN_INSTALL_TIMEOUT: int = int(os.getenv("TOOLCHAIN_INSTALL_TIMEOUT", "600"))
+    # Chromium for PDFs, shared by all toolchains
+    PLAYWRIGHT_BROWSERS_PATH: Path = _playwright_browsers_path()
     # Largest file that can be saved or uploaded
     MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "1"))
 

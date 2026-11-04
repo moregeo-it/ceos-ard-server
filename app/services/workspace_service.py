@@ -109,6 +109,7 @@ class WorkspaceService:
                     db.commit()
                     db.refresh(workspace)
                     logger.info(f"Successfully setup workspace {workspace.id}")
+                    self.build_service.prepare(workspace_type, workspace.abs_path)
                 else:
                     db.rollback()
                     raise Exception("Failed to setup workspace")
@@ -331,6 +332,7 @@ class WorkspaceService:
             # (read-only collaborators) must reload the tree.
             if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
                 self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
+                self.build_service.prepare(workspace.workspace_type, workspace.abs_path)
             # Like restoring the branch, only for live work: a merged or closed proposal takes no updates
             if restore_branch:
                 result.upstream = self.git_service.upstream_status(repo, workspace.upstream_branch)

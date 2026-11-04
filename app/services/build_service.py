@@ -5,9 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import PFS_ID_PATTERN
-from app.utils.cli_utils import run
+from app.utils.sandbox import BuildOutOfMemory, run_build
+from app.utils.toolchains import ToolchainError, toolchains
+from app.workspace_types import WorkspaceType
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +34,29 @@ class BuildService:
             name = hashlib.sha256(name.encode()).hexdigest()
         return str((build_dir or workspace_path / "build") / name)
 
+    @staticmethod
+    def prepare(workspace_type: WorkspaceType, workspace_path: Path) -> None:
+        """Start installing the workspace's toolchain in the background, so its first build doesn't wait for it."""
+        try:
+            toolchain = workspace_type.toolchain(workspace_path)
+        except ToolchainError:
+            return  # The build reports it
+        if toolchain:
+            toolchains.prepare(toolchain)
+
+    def prepare_all(self, db: Session) -> None:
+        """Start installing the toolchains of all active workspaces, e.g. after a deployment."""
+        for workspace in db.query(GitWorkspace).filter(GitWorkspace.status == WorkspaceStatus.ACTIVE):
+            self.prepare(workspace.workspace_type, workspace.abs_path)
+
     async def build(
-        self, workspace_path: Path, workspace_id: str, pfs: list[str], include_format: str | None = None, build_dir: Path | None = None
+        self,
+        workspace_path: Path,
+        workspace_id: str,
+        workspace_type: WorkspaceType,
+        pfs: list[str],
+        include_format: str | None = None,
+        build_dir: Path | None = None,
     ) -> dict[str, Any]:
         if not workspace_path or not workspace_id:
             raise ValueError("Workspace path and ID must be provided")
@@ -40,24 +66,38 @@ class BuildService:
 
         output_file = self.output_prefix(workspace_path, pfs, build_dir)
 
-        logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)}")
+        def error(message: str) -> dict[str, Any]:
+            return {"status": "error", "message": message, "output_file": output_file}
 
-        cmd_args = ["ceos-ard", "generate", *pfs, "-o", output_file, "-i", str(workspace_path), "--pdf", "--docx"]
+        try:
+            toolchain = workspace_type.toolchain(workspace_path)
+            if toolchain is None:
+                return error(f"Workspaces of type {workspace_type.id} can't be built.")
+            # Its own timeout, not the build's
+            await toolchains.ensure(toolchain)
+        except ToolchainError as e:
+            return error(str(e))
 
-        if include_format == "pdf":
-            cmd_args.remove("--pdf")
-        elif include_format == "docx":
-            cmd_args.remove("--docx")
+        logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)} and the toolchain {toolchain.name}")
+        command = workspace_type.build_command(workspace_path, pfs, output_file, include_format)
+        output_dir = Path(output_file).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            process = await run_build(
+                command,
+                path=toolchains.bin_path(toolchain.name),
+                read_only=[toolchains.path(toolchain.name), workspace_path],
+                writable=[output_dir],
+                hidden=[workspace_path / ".git"],
+                cwd=workspace_path,
+                timeout=settings.BUILD_TIMEOUT,
+            )
+        except TimeoutError:
+            return error(f"Generating the document took longer than {settings.BUILD_TIMEOUT} seconds and was stopped.")
+        except BuildOutOfMemory:
+            return error("Generating the document needed too much memory and was stopped.")
 
-        logger.debug(f"Executing build command: {' '.join(cmd_args)}")
-
-        process = await run(*cmd_args)
         if process.returncode == 0:
             return {"status": "success", "message": "Build completed successfully.", "output_file": output_file}
-        else:
-            logger.error(f"Build failed for workspace {workspace_id} with code {process.returncode}:")
-            return {
-                "status": "error",
-                "message": "Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).",
-                "output_file": output_file,
-            }
+        logger.error(f"Build failed for workspace {workspace_id} with code {process.returncode}: {process.stderr.decode(errors='replace')[-2000:]}")
+        return error("Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).")

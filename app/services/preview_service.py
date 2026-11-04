@@ -30,7 +30,12 @@ class PreviewService:
     async def _build(self, workspace: GitWorkspace, pfs: list[str] | None, include_format: str | None = None, build_dir: Path | None = None) -> str:
         """Run the build and return the output prefix; into the workspace's `build/` only under `build_locks`."""
         build_info = await self.build_service.build(
-            workspace_path=workspace.abs_path, workspace_id=workspace.id, pfs=pfs, include_format=include_format, build_dir=build_dir
+            workspace_path=workspace.abs_path,
+            workspace_id=workspace.id,
+            workspace_type=workspace.workspace_type,
+            pfs=pfs,
+            include_format=include_format,
+            build_dir=build_dir,
         )
         if build_info.get("status") != "success":
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
