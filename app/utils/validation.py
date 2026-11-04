@@ -5,6 +5,9 @@ from fastapi import HTTPException, status
 
 IGNORE_ROOT_PATHS = {"build", "templates", ".git", ".github"}
 
+# Formats a file may be created, uploaded or renamed to
+FILE_EXTENSIONS = (".yaml", ".md", ".pdf", ".jpg", ".jpeg", ".png", ".bib")
+
 
 def validate_pathname(filename: str) -> str:
     if not isinstance(filename, str) and len(filename) > 0:
@@ -32,15 +35,35 @@ def validate_pathname(filename: str) -> str:
             detail="Name must be at least 2 characters long",
         )
 
-    if not re.match(r"^\w[\w.-]*\w$", filename):
+    # Spaces only in PDF names: nothing in the content links to a PDF, while e.g. a Markdown link to an
+    # image breaks on a space
+    pattern = r"^\w[\w .-]*\w$" if filename.lower().endswith(".pdf") else r"^\w[\w.-]*\w$"
+    if not re.match(pattern, filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 "Name contains invalid characters. Only alphanumeric characters, dots, hyphens and "
-                "underscores are allowed. At the beginning and end only alphanumeric characters are allowed."
+                "underscores are allowed, and spaces in PDF names. At the beginning and end only alphanumeric "
+                "characters are allowed."
             ),
         )
 
+    return filename
+
+
+def validate_new_name(name: str) -> str:
+    """The name rules for a name used as given, which validate_pathname would trim."""
+    if validate_pathname(name) != name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot start or end with a space")
+    return name
+
+
+def validate_new_file_name(filename: str) -> str:
+    """validate_new_name, plus a format from FILE_EXTENSIONS."""
+    validate_new_name(filename)
+    if not filename.lower().endswith(FILE_EXTENSIONS):
+        formats = ", ".join(extension[1:] for extension in FILE_EXTENSIONS)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only these formats are allowed: {formats}")
     return filename
 
 

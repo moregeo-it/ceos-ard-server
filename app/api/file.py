@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.database import get_db
 from app.dependencies import get_file_service
 from app.schemas.workspace import (
@@ -20,7 +21,7 @@ from app.schemas.workspace import (
 from app.services.auth_service import require_github_user
 from app.services.file_service import FileService
 from app.utils.git_utils import format_commit
-from app.utils.http_utils import USER_CONTENT_HEADERS, internal_errors
+from app.utils.http_utils import USER_CONTENT_HEADERS, internal_errors, read_body
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ async def read_file_content(
 @router.put(
     "/{workspace_id}/files/{file_path:path}",
     summary="Store content of a file",
-    description="Store content of a file",
+    description="Store a file's content, up to MAX_FILE_SIZE_MB. A new file (upload) must have a valid name and an allowed format.",
     response_model=FileResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -104,7 +105,7 @@ async def store_file_content(
             db=db,
             workspace_id=workspace_id,
             file_path=file_path,
-            content=await request.body(),
+            read_content=lambda: read_body(request, settings.MAX_FILE_SIZE_MB),
             user_id=current_user["user"].id,
         )
 
