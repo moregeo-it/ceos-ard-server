@@ -850,7 +850,11 @@ class WorkspaceService:
                 db.commit()
                 self._publish_status_change(workspace_id, user.id, reactivated=reactivated, archived=archived)
 
-                return self._to_proposal(pr_response)
+                proposal = self._to_proposal(pr_response)
+                self.broker.emit(
+                    workspace_id, EventType.PROPOSAL_UPDATED, actor_user_id=user.id, target_user_id=user.id, proposal=proposal.model_dump()
+                )
+                return proposal
 
             except HTTPException:
                 raise

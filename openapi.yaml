@@ -2727,6 +2727,7 @@ components:
         - collaborator.updated
         - workspace.archived
         - workspace.deleted
+        - proposal.updated
       description: |
         Kind of `WorkspaceEvent`.
 
@@ -2742,6 +2743,7 @@ components:
         - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
+        - `proposal.updated`: the owner opened, edited, closed or reopened the pull request via `PUT .../proposal`; sent only to the owner (see `proposal`).
 
     WorkspaceEvent:
       description: |
@@ -2780,6 +2782,7 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
+        - $ref: '#/components/schemas/WorkspaceEventProposalUpdated'
       discriminator:
         propertyName: type
         mapping:
@@ -2796,6 +2799,7 @@ components:
           collaborator.updated: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
           workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
+          proposal.updated: '#/components/schemas/WorkspaceEventProposalUpdated'
 
     WorkspaceEventBase:
       type: object
@@ -2994,6 +2998,26 @@ components:
               description: The user id this event is delivered to (never broadcast to other subscribers).
             mode:
               $ref: '#/components/schemas/AccessMode'
+
+    WorkspaceEventProposalUpdated:
+      description: |
+        The owner opened, edited, closed or reopened the pull request via `PUT .../proposal`.
+        Delivered only to the owner (see `target_user_id`), as the proposal is owner-only, so the
+        owner's other tabs show the same proposal.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - target_user_id
+            - proposal
+          properties:
+            type:
+              const: proposal.updated
+            target_user_id:
+              type: string
+              description: The owner's user id (never broadcast to other subscribers).
+            proposal:
+              $ref: '#/components/schemas/Proposal'
 
     WorkspaceEventWorkspaceArchived:
       description: |

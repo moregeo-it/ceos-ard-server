@@ -30,6 +30,9 @@ class EventType(str, Enum):
     COLLABORATOR_UPDATED = "collaborator.updated"
     WORKSPACE_ARCHIVED = "workspace.archived"
     WORKSPACE_DELETED = "workspace.deleted"
+    # The owner opened, edited, closed or reopened the pull request; sent only to the owner, as the
+    # proposal is owner-only
+    PROPOSAL_UPDATED = "proposal.updated"
 
 
 def build_event(

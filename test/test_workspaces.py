@@ -1,5 +1,7 @@
 from conftest import FORK, commit_upstream, file_url, git
 
+from app.services.events_service import event_broker
+
 
 def test_create_workspace_forks_ceos_ard(client, github, workspace):
     assert ("fork", "ceos-org", "ceos-ard") in github.calls
@@ -50,3 +52,17 @@ def test_commit_pushes_to_the_fork(client, workspace):
     response = client.put(f"/workspaces/{workspace['id']}/diffs", json={"message": "Change README"})
     assert response.status_code == 200, response.text
     assert git("log", "-1", "--format=%s", f"workspace/{workspace['id']}", cwd=FORK) == "Change README"
+
+
+def test_propose_tells_the_owners_other_tabs(client, github, user, workspace, monkeypatch):
+    emitted = {}
+    monkeypatch.setattr(event_broker, "emit", lambda workspace_id, event_type, **fields: emitted.setdefault(event_type.value, fields))
+
+    response = client.put(f"/workspaces/{workspace['id']}/proposal", json={"title": "Update NRB", "description": "Details"})
+    assert response.status_code == 200, response.text
+    assert ("create_pull_request", "ceos-org", "ceos-ard", f"jdoe:workspace/{workspace['id']}") in github.calls
+
+    event = emitted["proposal.updated"]
+    # The proposal is owner-only, so no collaborator receives it
+    assert event["target_user_id"] == user.id
+    assert event["proposal"] == response.json()
