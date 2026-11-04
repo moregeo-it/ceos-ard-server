@@ -76,6 +76,26 @@ async def get_current_preview(
 
 
 @router.get(
+    "/{workspace_id}/render/{file_path:path}",
+    summary="Render a file",
+    description="Render a single file of the workspace as HTML, for workspace types that preview the open file",
+    status_code=status.HTTP_200_OK,
+)
+async def render_file(
+    workspace_id: str,
+    file_path: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    preview_service: PreviewService = Depends(get_preview_service),
+):
+    with internal_errors("render file", logger):
+        html = await preview_service.render_file(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return Response(
+            content=html, status_code=status.HTTP_200_OK, media_type="text/html", headers={"Cache-Control": "no-store", **USER_CONTENT_HEADERS}
+        )
+
+
+@router.get(
     "/{workspace_id}/previews/{file_path:path}",
     summary="Get preview static file asset",
     description="Get preview static file asset for a workspace",

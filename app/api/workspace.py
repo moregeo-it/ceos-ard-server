@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -237,3 +237,22 @@ async def create_workspace_pfs(
         return await workspace_service.create_workspace_pfs(
             db=db, workspace_id=workspace_id, user=current_user["user"], request_data=create_pfs_request
         )
+
+
+@router.post(
+    "/{workspace_id}/actions/{action}",
+    summary="Run an action of the workspace type",
+    description="Run an action that the workspace type offers, e.g. creating a new glossary term. Returns the created file.",
+    response_model=FileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def run_workspace_action(
+    workspace_id: str,
+    action: str,
+    data: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+):
+    with internal_errors("run action", logger):
+        return await workspace_service.run_action(db=db, workspace_id=workspace_id, user=current_user["user"], action=action, data=data)
