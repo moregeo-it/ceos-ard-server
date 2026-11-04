@@ -1,5 +1,8 @@
 import asyncio
+import contextlib
 import logging
+import os
+import signal
 import subprocess
 import sys
 import tomllib
@@ -17,6 +20,58 @@ logger = logging.getLogger(__name__)
 # unbounded burst of preview requests would otherwise run one build per request.
 _run_semaphore = asyncio.Semaphore(settings.BUILD_CONCURRENCY)
 
+# The only environment variables commands get: .env is loaded into the server's environment, and
+# its secrets must not reach builds, which run content from the workspaces
+_ENV_KEYS = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "PIXI_HOME",
+    "PIXI_CACHE_DIR",
+    "RATTLER_CACHE_DIR",
+    "PLAYWRIGHT_BROWSERS_PATH",
+    # Windows
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+)
+
+
+def _command_env() -> dict[str, str]:
+    return {key: value for key in _ENV_KEYS if (value := os.environ.get(key)) is not None}
+
+
+async def _kill_tree(pid: int) -> None:
+    """Kill the process and everything it started, e.g. pandoc and Chromium under `pixi run`."""
+    if sys.platform == "win32":
+        taskkill = await asyncio.create_subprocess_exec(
+            "taskkill", "/F", "/T", "/PID", str(pid), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        )
+        await taskkill.wait()
+        return
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
 
 def load_project_info() -> tuple[str, str]:
     # Read project metadata from pixi.toml
@@ -31,8 +86,8 @@ async def run(*args, timeout=60) -> subprocess.CompletedProcess:
     """
     Run a command in the pixi environment as a native async subprocess.
 
-    Occupies no worker thread while it waits; the child is killed on timeout or cancellation
-    instead of running on unattended.
+    Occupies no worker thread while it waits; on timeout or cancellation, the command and every
+    process it started are killed instead of running on unattended.
     """
     async with _run_semaphore:
         process = await asyncio.create_subprocess_exec(
@@ -42,12 +97,17 @@ async def run(*args, timeout=60) -> subprocess.CompletedProcess:
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_command_env(),
+            # Its own process group, so a timeout reaches its children too
+            start_new_session=sys.platform != "win32",
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
         except (TimeoutError, asyncio.CancelledError):
-            process.kill()
-            await process.communicate()
+            await _kill_tree(process.pid)
+            # A process that left the group can keep the pipes open, so don't wait for it
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.communicate(), 5)
             raise
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
