@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import shutil
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pygit2
@@ -19,7 +20,14 @@ from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.locks import run_exclusive
-from app.utils.validation import ignore_file_path, normalize_workspace_path, validate_pathname, validate_workspace_path
+from app.utils.validation import (
+    ignore_file_path,
+    normalize_workspace_path,
+    validate_new_file_name,
+    validate_new_name,
+    validate_pathname,
+    validate_workspace_path,
+)
 from app.workspace_types import PathRules
 
 logger = logging.getLogger(__name__)
@@ -205,7 +213,7 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be file or folder")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        name = validate_pathname(request_data.name)
+        name = validate_new_file_name(request_data.name) if request_data.type == "file" else validate_pathname(request_data.name)
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True, rules=workspace.workspace_type.paths)
         self._require_operation(workspace, folder, "create", "folder")
         target_path = folder / name
@@ -235,16 +243,31 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
-    async def store_file_content(self, db: Session, workspace_id: str, file_path: str, content: bytes, user_id: str):
+    async def store_file_content(self, db: Session, workspace_id: str, file_path: str, read_content: Callable[[], Awaitable[bytes]], user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file", rules=workspace.workspace_type.paths)
+
+        # The body is read only for the owner, and without holding the read transaction
+        db.commit()
+        content = await read_content()
 
         async def transaction():
+            # Under the lock, so a sync during the upload can't swap in a symlink
+            target_path = validate_workspace_path(file_path, workspace.abs_path, type="file", rules=workspace.workspace_type.paths)
             repo = get_repo(workspace.abs_path)
-            # Saving restores a deleted file, but only creates a new one where the file menu offers it
-            relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
-            if not target_path.exists() and (repo.head_is_unborn or relative_path not in repo.head.peel().tree):
-                self._require_operation(workspace, target_path.parent, "create", "folder")
+            # A missing file is being added (uploaded), so its name and format must be allowed
+            created = not target_path.exists()
+            if created:
+                # Saving restores a deleted file, but only creates a new one where the file menu offers it
+                relative_path = normalize_workspace_path(target_path, workspace.abs_path, absolute=False)
+                if repo.head_is_unborn or relative_path not in repo.head.peel().tree:
+                    self._require_operation(workspace, target_path.parent, "create", "folder")
+                validate_new_file_name(Path(file_path).name)  # as sent, before the path check trims it
+                validate_new_file_name(target_path.name)  # as written, after resolving symlinks
+                # And the folders it creates
+                folder = target_path.parent
+                while not folder.exists():
+                    validate_new_name(folder.name)
+                    folder = folder.parent
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
                 # the file stayed open with unsaved changes).
@@ -266,7 +289,8 @@ class FileService:
                 ) from e
             except Exception as e:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
-            self.broker.emit(workspace_id, EventType.FILE_SAVED, actor_user_id=user_id, path=result["path"], file=result)
+            event = EventType.FILE_CREATED if created else EventType.FILE_SAVED
+            self.broker.emit(workspace_id, event, actor_user_id=user_id, path=result["path"], file=result)
             return result
 
         return await run_exclusive(workspace_id, transaction)
@@ -403,8 +427,8 @@ class FileService:
         return await run_exclusive(workspace_id, transaction)
 
     async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str, rules: PathRules):
-        new_name = validate_pathname(new_name)
         source_path = validate_workspace_path(file_path, workspace_path, exists=True, rules=rules)
+        new_name = validate_new_file_name(new_name) if source_path.is_file() else validate_pathname(new_name)
         repo = get_repo(workspace_path)
 
         # A PFS folder name is its id, which the preview and the CLI only accept in this form
@@ -642,11 +666,16 @@ class FileService:
                     lambda: self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user),
                 )
             except HTTPException as push_error:
-                # A rejected push usually means the branch on GitHub moved ahead:
-                # merge the remote changes and push again
+                # The branch on GitHub moved, was rewritten or deleted: sync and push again.
+                # Restoring it is safe, as the checks above exclude deliberate deletions.
                 try:
                     sync_result = await self.git_service.sync_with_origin(
-                        repo=repo, user=user, branch_name=workspace.branch_name, workspace_id=workspace.id, upstream_branch=workspace.upstream_branch
+                        repo=repo,
+                        user=user,
+                        branch_name=workspace.branch_name,
+                        workspace_id=workspace.id,
+                        upstream_branch=workspace.upstream_branch,
+                        restore_branch=True,
                     )
                 except Exception as sync_error:
                     # Any failure here must revert the commit and restore the staged changes
@@ -654,13 +683,19 @@ class FileService:
                     self._revert_commit(repo, workspace_id, commit.id, reason="the sync recovering from the rejected push failed")
                     raise push_error from None
 
+                head = repo.head.target
+                if head != commit.id and not repo.descendant_of(head, commit.id):
+                    # The sync replayed the commit on top of GitHub's branch, or dropped it because
+                    # GitHub already had its changes
+                    commit = repo.head.peel()
+
                 if sync_result.status == SyncStatus.MERGED:
                     remote_sync = SyncStatus.MERGED
                     try:
                         await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
                     except HTTPException:
-                        # No revert: a soft reset across the merge commit would stage the remote
-                        # changes as the user's. The next push or sync delivers the local commits.
+                        # No revert: the commit already sits on GitHub's changes, and the next
+                        # push or sync delivers it
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Your changes were merged with the changes from GitHub but could not be sent yet. "

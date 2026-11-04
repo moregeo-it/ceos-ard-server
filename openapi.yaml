@@ -700,7 +700,7 @@ paths:
 
     post:
       summary: Create new empty file or folder
-      description: Creates a new empty file or folder in the workspace
+      description: Creates a new empty file or folder in the workspace. A file's name must have one of the formats yaml, md, pdf, jpg, jpeg, png or bib.
       operationId: createFileOrFolder
       tags:
         - Files
@@ -799,7 +799,12 @@ paths:
     put:
       summary: Upload file content
       description: |-
-        Uploads the content of a specific file.
+        Uploads the content of a specific file, up to `MAX_FILE_SIZE_MB` (1 MB by default).
+
+        A missing file is created (an upload), with its parent folders: their names must then follow the
+        naming rules, and the file must have one of the formats yaml, md, pdf, jpg, jpeg, png or bib. Only
+        the workspace owner's request body is read. A created file
+        publishes `file.created`, an existing one `file.saved`.
 
         Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
         File should be stored as is without parsing, e.g. comments in YAML files should be preserved.
@@ -826,13 +831,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/FileItem'
         '400':
-          description: Invalid request data
+          description: Invalid request data, or a new file with an invalid name or format
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
           description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than `MAX_FILE_SIZE_MB`
           content:
             application/json:
               schema:
@@ -902,7 +913,8 @@ paths:
     patch:
       summary: Update file metadata or operations
       description: |-
-        Performs file operations such as rename or revert.
+        Performs file operations such as rename or revert. A file can only be renamed to one of the
+        formats yaml, md, pdf, jpg, jpeg, png or bib.
 
         The endoint shall only handle files that are made available through
         `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
@@ -1111,10 +1123,10 @@ paths:
         owner's GitHub credentials can push to the workspace's fork.
         Collaborators' staged changes are committed and pushed by the owner.
 
-        When the branch on GitHub moved ahead, the remote changes are merged into the workspace
-        automatically; if they conflict with the committed changes, a 409 with the conflicting
-        files is returned instead and the changes remain staged. A merge also publishes a
-        `workspace.synced` event after the `file.committed` event.
+        When the branch on GitHub moved ahead or was rewritten there, the commit is replayed on top
+        of it automatically, without a merge commit; if it conflicts with the remote changes, a 409
+        with the conflicting files is returned instead and the changes remain staged. A replay also
+        publishes a `workspace.synced` event after the `file.committed` event.
       operationId: commitChanges
       tags:
         - Files
@@ -1657,11 +1669,13 @@ paths:
     post:
       summary: Sync workspace with remote changes
       description: >-
-        Fetches the fork remote and merges remote branch changes into the local workspace when safe.
+        Fetches the fork remote and brings its branch changes into the local workspace when safe.
 
-        Fast-forwards when possible, creates a merge commit when histories diverged but merge cleanly,
-        and aborts without touching the working tree when the merge would conflict or when uncommitted
-        local changes exist. Conflict and dirty outcomes are reported in the response body, not as HTTP errors.
+        Replays the local commits the fork never had on top of its branch: a fast-forward when there are
+        none, no merge commit otherwise. A branch rewritten on GitHub (a force-push, or a rebase via
+        "Update branch") stays as it is, so commits dropped there stay dropped. Aborts without touching the
+        working tree when a replayed commit would conflict or when uncommitted local changes exist.
+        Conflict and dirty outcomes are reported in the response body, not as HTTP errors.
 
         Owner only: the sync uses the caller's GitHub credentials and rewrites the working tree.
         When files changed (`updated` or `merged`), a `workspace.synced` event is published to the
@@ -2515,7 +2529,7 @@ components:
             merged_remote:
               type: boolean
               default: false
-              description: True when remote changes from the fork were merged into the workspace as part of the commit
+              description: True when remote changes from the fork were brought into the workspace as part of the commit
 
     SyncResult:
       type: object
@@ -2536,8 +2550,9 @@ components:
             Outcome of the sync.
 
             - "up_to_date": no remote changes to pull
-            - "updated": local branch fast-forwarded to the remote branch
-            - "merged": remote changes merged into the local branch with a merge commit
+            - "updated": local branch fast-forwarded to the remote branch, or reset to it when it
+              was rewritten on GitHub
+            - "merged": local commits replayed on top of the remote branch, without a merge commit
             - "conflict": remote changes conflict with local changes; repository left untouched
             - "dirty": uncommitted local changes present; merge skipped
             - "remote_missing": the workspace branch no longer exists on the fork
@@ -2921,12 +2936,12 @@ components:
       description: |
         Kind of `WorkspaceEvent`.
 
-        - `file.saved`: file overwritten via `PUT .../files/{filePath}`.
-        - `file.created`: file/folder created via `POST .../files` or a new PFS via `POST .../pfs`.
+        - `file.saved`: existing file overwritten via `PUT .../files/{filePath}`.
+        - `file.created`: file/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or a new PFS via `POST .../pfs`.
         - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
-        - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic merge on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
+        - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic sync on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
         - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
         - `preview.generated`: the owner generated the preview via `POST .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
         - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
@@ -3026,7 +3041,7 @@ components:
             - type: "null"
 
     WorkspaceEventFileSaved:
-      description: File overwritten via `PUT .../files/{filePath}`. `file` equals the REST response body; `path` equals `file.path`.
+      description: Existing file overwritten via `PUT .../files/{filePath}`. `file` equals the REST response body; `path` equals `file.path`.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
@@ -3042,7 +3057,7 @@ components:
               $ref: '#/components/schemas/FileItem'
 
     WorkspaceEventFileCreated:
-      description: File/folder created via `POST .../files`, or a new PFS folder via `POST .../pfs`. `file` equals the REST response body; `path` equals `file.path`.
+      description: File/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or a new PFS folder via `POST .../pfs`. `file` equals the REST response body; `path` equals `file.path`.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
@@ -3257,7 +3272,7 @@ components:
     WorkspaceEventWorkspaceSynced:
       description: |
         The owner synced the workspace with its GitHub branch (`POST .../sync`, or the automatic
-        merge when a commit's push was rejected) and the working tree was fast-forwarded or merged.
+        sync when a commit's push was rejected) and the working tree changed.
         Files may have been added, changed, deleted or renamed at any depth, so subscribers reload
         the file tree and their open files instead of applying single-file changes. When triggered
         by a commit it follows the `file.committed` event.
@@ -3274,7 +3289,7 @@ components:
               enum:
                 - updated
                 - merged
-              description: Whether the branch was fast-forwarded (`updated`) or a merge commit was created (`merged`).
+              description: Whether the branch was fast-forwarded or reset to GitHub's (`updated`), or local commits were replayed on top of it (`merged`).
 
     CommitChange:
       type: object
