@@ -149,6 +149,19 @@ class FakeGitHub:
         self.calls.append(("get_pfs_types", owner, repo, branch))
         return ["NRB", "SR"]
 
+    async def create_pull_request(self, access_token, owner, repo, pr_data):
+        self.calls.append(("create_pull_request", owner, repo, pr_data["head"]))
+        return {
+            "number": 7,
+            "html_url": f"https://github.com/{owner}/{repo}/pull/7",
+            "title": pr_data["title"],
+            "body": pr_data["body"],
+            "state": "open",
+            "draft": pr_data.get("draft", False),
+            "merged_at": None,
+            "head": {"repo": {"name": repo}},
+        }
+
 
 @pytest.fixture
 def github(monkeypatch):
