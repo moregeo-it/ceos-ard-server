@@ -1,6 +1,10 @@
 import pytest
 from conftest import file_url
 
+from app.services.events_service import event_broker
+
+MB = 1024 * 1024
+
 
 def names(response):
     assert response.status_code == 200, response.text
@@ -82,3 +86,41 @@ def test_files_in_pfs_folders_can_be_renamed_and_deleted(client, workspace):
     assert response.status_code == 200, response.text
     response = client.delete(file_url(workspace, "files", "/pfs/SR2"))
     assert response.status_code in (200, 204), response.text
+
+
+@pytest.fixture
+def events(monkeypatch):
+    emitted = []
+    monkeypatch.setattr(event_broker, "emit", lambda workspace_id, event_type, **fields: emitted.append((event_type.value, fields["path"])))
+    return emitted
+
+
+def test_saving_a_new_file_uploads_it(client, workspace, events):
+    response = client.put(file_url(workspace, "files", "/images/logo.png"), content=b"x" * MB)
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "added"
+    assert events == [("file.created", "/images/logo.png")]
+
+
+def test_saving_an_existing_file(client, workspace, events):
+    response = client.put(file_url(workspace, "files", "/README.md"), content="# Changed\n")
+    assert response.status_code == 200, response.text
+    assert events == [("file.saved", "/README.md")]
+
+
+@pytest.mark.parametrize("streamed", [False, True], ids=["content-length", "streamed"])
+def test_files_over_the_limit_are_refused(client, workspace, events, streamed):
+    content = b"x" * (MB + 1)
+    response = client.put(file_url(workspace, "files", "/README.md"), content=iter([content[:MB], content[MB:]]) if streamed else content)
+    assert response.status_code == 413, response.text
+    assert client.get(file_url(workspace, "files", "/README.md")).text == "# CEOS-ARD\n"
+    assert events == []
+
+
+@pytest.mark.parametrize("path", ["/images/logo.svg", "/images/logo.html", "/images/my logo.png", "/images/ logo.png", "/images/.hidden/logo.png"])
+def test_uploads_need_an_allowed_name_and_format(client, workspace, events, path):
+    listing = names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/images"}))
+    response = client.put(file_url(workspace, "files", path), content=b"x")
+    assert response.status_code == 400, response.text
+    assert names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/images"})) == listing
+    assert events == []

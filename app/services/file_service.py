@@ -229,13 +229,14 @@ class FileService:
 
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, read_content: Callable[[], Awaitable[bytes]], user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
 
         # The body is read only for the owner, and without holding the read transaction
         db.commit()
         content = await read_content()
 
         async def transaction():
+            # Under the lock, so a sync during the upload can't swap in a symlink
+            target_path = validate_workspace_path(file_path, workspace.abs_path, type="file")
             repo = get_repo(workspace.abs_path)
             # A missing file is being added (uploaded), so its name and format must be allowed
             created = not target_path.exists()
