@@ -1320,7 +1320,7 @@ paths:
         Retrieves the context for a specific file, if available.
 
         This is currently a list of files that use the specified file, e.g. the PFS that include a
-        requirement.
+        requirement or the glossary terms that link to a term.
 
         The endoint shall only return files that are made available through
         `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`

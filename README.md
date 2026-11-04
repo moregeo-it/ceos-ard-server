@@ -248,8 +248,9 @@ files. The server is the only place they are defined; the editor reads them from
 
 - `WORKSPACE_TYPES` lists the types offered for new workspaces, separated by commas; the first one is the
   default. Workspaces of a type that isn't listed anymore keep working.
-- Each type has its own settings for the upstream repository, e.g. `CEOS_ARD_ORG`, `CEOS_ARD_REPO` and
-  `CEOS_ARD_BRANCH` for `ceos-ard`. Every workspace stores the upstream it was created from.
+- Each type has its own settings for the upstream repository: `CEOS_ARD_ORG`, `CEOS_ARD_REPO` and
+  `CEOS_ARD_BRANCH` for `ceos-ard`, `EO_GLOSSARY_ORG`, `EO_GLOSSARY_REPO` and `EO_GLOSSARY_BRANCH` for
+  `eo-glossary`. Every workspace stores the upstream it was created from.
 
 Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a `create()` function,
 registered in `_FACTORIES` in [`__init__.py`](app/workspace_types/__init__.py). The rules are checked when

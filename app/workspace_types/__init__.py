@@ -1,13 +1,14 @@
 from fastapi import HTTPException, status
 
 from app.config import settings
-from app.workspace_types import ceos_ard
+from app.workspace_types import ceos_ard, eo_glossary
 from app.workspace_types.base import PathRules, Upstream, WorkspaceType
 
 __all__ = ["PathRules", "Upstream", "WorkspaceType", "all_types", "available_types", "default_type", "get_type"]
 
 _FACTORIES = {
     "ceos-ard": ceos_ard.create,
+    "eo-glossary": eo_glossary.create,
 }
 
 # Every known type stays resolvable, so existing workspaces keep working when a type is disabled
