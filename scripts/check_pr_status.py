@@ -88,12 +88,16 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
         pr_lookups: dict[tuple[str, str], dict[str, dict]] = {}
         for owner, repo in sorted({(workspace.upstream_owner, workspace.upstream_repo) for workspace in workspaces}):
             logger.info(f"Fetching all pull requests from {owner}/{repo}...")
-            all_prs = await github_service.get_repository_pull_requests(
-                owner=owner,
-                repo=repo,
-                token=service_token,
-                state="all",  # Get open, closed, and merged PRs
-            )
+            try:
+                all_prs = await github_service.get_repository_pull_requests(
+                    owner=owner,
+                    repo=repo,
+                    token=service_token,
+                    state="all",  # Get open, closed, and merged PRs
+                )
+            except Exception as e:
+                logger.error(f"Failed to fetch the pull requests from {owner}/{repo}, skipping its workspaces: {e}")
+                continue
             pr_lookups[(owner, repo)] = {str(pr["number"]): pr for pr in all_prs}
             logger.info(f"Found {len(all_prs)} total pull requests in {owner}/{repo}")
 
@@ -101,7 +105,9 @@ async def check_pr_status(dry_run: bool = False, limit: int = None):
         for workspace in workspaces:
             try:
                 pr_number = str(workspace.pull_request_number)
-                pr_lookup = pr_lookups[(workspace.upstream_owner, workspace.upstream_repo)]
+                pr_lookup = pr_lookups.get((workspace.upstream_owner, workspace.upstream_repo))
+                if pr_lookup is None:
+                    continue
 
                 # Check if PR exists in our fetched data
                 if pr_number not in pr_lookup:

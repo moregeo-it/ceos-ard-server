@@ -123,7 +123,7 @@ class WorkspaceType:
             operations |= set(rule.ops_if_new)
         return operations
 
-    def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
+    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return None
 
     def to_public(self, available: bool) -> dict[str, Any]:

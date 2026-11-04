@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -28,7 +29,10 @@ GLOSSARY_UI_SCHEMA = {
 
 
 class CeosArdType(WorkspaceType):
-    def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
+    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
+        return await asyncio.to_thread(self._requirement_usage, workspace_path, file_path)
+
+    def _requirement_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         match = re.match(r"^[\\/]?requirements[\\/](.+)\.ya?ml$", file_path)
         if not match:
             # TODO: implement for glossary, sections, references as well
