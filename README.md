@@ -258,11 +258,14 @@ the server starts, so a typo stops it instead of being ignored.
 | Setting | Meaning |
 |---|---|
 | `upstream` | The repository new workspaces fork and propose changes to |
-| `paths` | Root folders the file tree doesn't show and the API refuses, e.g. `build` |
+| `paths` | Root folders the file tree doesn't show and the API refuses, e.g. `build`, or the only ones it shows, e.g. `docs` |
 | `pfs` | Whether workspaces select PFS, for the preview built with the ceos-ard CLI |
+| `preview` | `pfs`: the owner builds a document from the selected PFS; `file`: the preview shows the open file, from `render_file()` |
+| `expanded_folders` | Folders the file tree shows opened when entering a workspace |
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
-| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema |
-| `actions` | Entries in the file menu of a folder that open an editor dialog, e.g. "Add New PFS" |
+| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`) |
+| `search_filters` | Filters of the file search, answered by `matches_search_filters()` |
+| `actions` | Entries in the file menu of a folder: with a `schema`, a generic dialog asks for the input and `run_action()` creates the file; with a `dialog`, an editor dialog does the work, e.g. "Add New PFS" |
 | `file_menu` | Which operations the file menu offers, see below |
 | `file_usage()` | Which files use a file, for "Used in" and the delete dialog |
 
@@ -285,7 +288,7 @@ file_menu=[
 
 To add a type: write the module, register it, add its upstream settings to [`app/config.py`](app/config.py)
 and [`.env.example`](.env.example), and add it to `WORKSPACE_TYPES`. The editor needs no change unless the
-type uses a dialog it doesn't have yet. For the editor's tests, export the type with
+type uses a dialog or codec it doesn't have yet. For the editor's tests, export the type with
 `pixi run python scripts/export_types.py <type id>`.
 
 ## 🧪 Development
