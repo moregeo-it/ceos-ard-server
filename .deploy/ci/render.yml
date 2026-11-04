@@ -57,6 +57,7 @@
         that:
           - "'DATABASE_URL=sqlite:///./ceos_ard_server.db' in rendered_env.stdout"
           - "'WORKSPACES_ROOT=' in rendered_env.stdout"
+          - "'TOOLCHAINS_ROOT=' in rendered_env.stdout"
         fail_msg: >-
           .env rendered with unexpected data paths. With app_data_relocated
           false the database URL must stay relative to the checkout.

@@ -17,6 +17,10 @@
   when: manage_swap
   tags: [swap]
 
+- name: Allow isolated builds
+  ansible.builtin.import_tasks: sandbox.yml
+  tags: [sandbox]
+
 - name: Create the data directories
   ansible.builtin.import_tasks: directories.yml
   tags: [directories]
