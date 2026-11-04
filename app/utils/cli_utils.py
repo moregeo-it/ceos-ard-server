@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -58,10 +59,13 @@ def _command_env() -> dict[str, str]:
     return {key: value for key in _ENV_KEYS if (value := os.environ.get(key)) is not None}
 
 
-def _kill_tree(pid: int) -> None:
+async def _kill_tree(pid: int) -> None:
     """Kill the process and everything it started, e.g. pandoc and Chromium under `pixi run`."""
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+        taskkill = await asyncio.create_subprocess_exec(
+            "taskkill", "/F", "/T", "/PID", str(pid), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        )
+        await taskkill.wait()
         return
     try:
         os.killpg(pid, signal.SIGKILL)
@@ -100,8 +104,10 @@ async def run(*args, timeout=60) -> subprocess.CompletedProcess:
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
         except (TimeoutError, asyncio.CancelledError):
-            _kill_tree(process.pid)
-            await process.communicate()
+            await _kill_tree(process.pid)
+            # A process that left the group can keep the pipes open, so don't wait for it
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.communicate(), 5)
             raise
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
