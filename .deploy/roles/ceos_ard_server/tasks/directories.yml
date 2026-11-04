@@ -17,6 +17,18 @@
     group: "{{ app_group }}"
     mode: "0750"
 
+- name: Create the directories of the build toolchains and their Chromium
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0750"
+  loop:
+    - "{{ app_toolchains_root }}"
+    - "{{ app_playwright_browsers_path }}"
+
 - name: Create the backup directory
   become: true
   ansible.builtin.file:

@@ -22,19 +22,32 @@ app_database_url: >-
   {{ ('sqlite:////' ~ app_db_path.lstrip('/')) if app_data_relocated
      else 'sqlite:///./ceos_ard_server.db' }}
 
+# Installed by the server on demand: one toolchain per CEOS-ARD CLI version,
+# and the Chromium they share for PDFs
+app_toolchains_root: "{{ app_data_dir }}/toolchains"
+app_playwright_browsers_path: "{{ app_data_dir }}/playwright-browsers"
+
 # --- Service ----------------------------------------------------------------
 # Both default to true: the service is currently down only because it was never
 # enabled when the host rebooted. Set false to converge without touching it.
 app_service_enabled: true
 app_service_started: true
 
-# Playwright's Chromium is sensitive to sandboxing, so hardening stays moderate
-# here. Tighten only after verifying PDF export still works.
+# Builds run in bubblewrap with Chromium's own sandbox off, so strict hardening
+# should work now. Enable only after verifying that previews and PDF downloads work.
 app_hardening_strict: false
+# Server and builds together; the builds' share is limited by app_build_memory_max
+app_memory_max: 3G
 
 # --- Application ------------------------------------------------------------
 app_sharing_modes_enabled: readonly   # comma-separated
-app_build_concurrency: 2
+# Builds: how many run at once, after how many seconds they are stopped, and
+# the CPU cores and memory of all builds together and of each build
+app_build_concurrency: 3
+app_build_timeout: 60
+app_build_cpu_cores: 3
+app_build_memory_max: 1536M
+app_build_memory_max_per_build: 700M
 
 # --- Backups ----------------------------------------------------------------
 app_backup_db_keep: 30          # daily database copies to retain

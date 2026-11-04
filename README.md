@@ -587,6 +587,25 @@ is not reachable from outside. Certificates are issued and renewed by Caddy itse
 configuration is templated to `.env` from `host_vars`, with secrets held in an `ansible-vault`
 file; edit those rather than the file on the server, which is overwritten on every run.
 
+### Isolated Builds
+
+Builds run in [bubblewrap](https://github.com/containers/bubblewrap), each in its own cgroup under the service's
+cgroup. This needs Linux with systemd and cgroup v2. Outside `ENVIRONMENT=development` the server refuses to start
+without them.
+
+```text
+ceos-ard-server.service   Delegate=yes, MemoryMax
+├── main/                 the server, preferred for CPU
+└── builds/               BUILD_CPU_CORES and BUILD_MEMORY_MAX for all builds, no swap
+    └── <build>/          BUILD_MEMORY_MAX_PER_BUILD, stopped as a whole after BUILD_TIMEOUT
+```
+
+`setup.yml` installs bubblewrap and Chromium's libraries, allows user namespaces for bubblewrap where the kernel
+restricts them (an AppArmor profile, or `kernel.unprivileged_userns_clone`), checks that the service user can create
+a sandbox, and sets `Delegate=yes` and `MemoryMax` in the unit. The limits are `app_build_*` in `host_vars`.
+After a deploy, `systemd-cgls -u ceos-ard-server.service` shows `main/` and `builds/`. At startup, the server
+installs the toolchains of all active workspaces in the background.
+
 > **Single worker only.** Keep the server to one worker process (no `--workers`, no multi-worker
 > gunicorn, a single replica). The realtime `EventBroker` is in-memory and per-process, so extra
 > workers or replicas silently drop cross-worker realtime events. Horizontal scaling requires a shared
