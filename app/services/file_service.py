@@ -153,6 +153,9 @@ class FileService:
             # Add deleted files and folders
             for filepath, state in status_map.items():
                 file = Path(filepath)
+                # A symlink's key is where it points to
+                if not file.is_relative_to(workspace.abs_path):
+                    continue
                 is_directory = None
                 if state == "deleted:folder":
                     state = "deleted"

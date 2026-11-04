@@ -36,6 +36,12 @@ goto loop
 :done
 echo ^<p^>CLI {version}^</p^> > "%out%.html"
 """
+# Leaves its documents as symlinks to a secret of the server, which the sandbox doesn't show it
+FAKE_CLI_LINKS_SH = """#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+ln -s "{secret}" "$out.html"
+ln -s "{secret}" "$out.pdf"
+"""
 
 
 def requirements(tmp_path: Path, text: str) -> Path:
@@ -86,6 +92,12 @@ def test_anything_else_in_requirements_txt_is_refused(tmp_path, text):
         cli_version(requirements(tmp_path, text))
 
 
+def test_requirements_txt_that_is_no_text_is_refused(tmp_path):
+    (tmp_path / "requirements.txt").write_bytes(b"ceos-ard-cli~=0.5.9\xff\xfe\n")
+    with pytest.raises(ToolchainError, match="may only contain one line"):
+        cli_version(tmp_path)
+
+
 def test_workspaces_without_requirements_txt_are_asked_to_update(tmp_path):
     with pytest.raises(ToolchainError, match="Update the workspace from upstream"):
         cli_version(tmp_path)
@@ -125,16 +137,18 @@ def test_unknown_cli_versions_are_refused(monkeypatch):
 def fake_toolchains(tmp_path, monkeypatch):
     """Installed toolchains whose CLI writes its version into the preview."""
     monkeypatch.setattr(toolchains, "root", tmp_path / "toolchains")
-    for version in ("0.5.9", "0.6.0"):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("SECRET_KEY=must-not-leak")
+    for version in ("0.5.9", "0.6.0", "0.6.1"):
         name = f"ceos-ard-cli-{version}"
         if sys.platform == "win32":
             cli = toolchains.env(name) / "Scripts" / "ceos-ard.bat"
             content = FAKE_CLI_BAT
         else:
             cli = toolchains.env(name) / "bin" / "ceos-ard"
-            content = FAKE_CLI_SH
+            content = FAKE_CLI_LINKS_SH if version == "0.6.1" else FAKE_CLI_SH
         cli.parent.mkdir(parents=True)
-        cli.write_text(content.format(version=version), newline="\n" if sys.platform != "win32" else "\r\n")
+        cli.write_text(content.format(version=version, secret=secret), newline="\n" if sys.platform != "win32" else "\r\n")
         cli.chmod(0o755)
         (toolchains.path(name) / ".ready").touch()
 
@@ -175,3 +189,30 @@ def test_a_build_reports_problems_with_the_cli_version(client, workspace, fake_t
     response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "pfs": ["NRB"]})
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The toolchain ceos-ard-cli-0.5.8 isn't installed"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_documents_left_as_symlinks_are_not_read(client, workspace, fake_toolchains):
+    save_requirements(client, workspace, "ceos-ard-cli==0.6.1\n")
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "The build produced no preview"
+
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "pfs": ["NRB"]})
+    assert response.status_code == 500, response.text
+    assert "must-not-leak" not in response.text
+    assert response.json()["detail"] == "The build produced no document"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_builds_do_not_write_through_a_symlinked_build_folder(client, workspace, fake_toolchains, tmp_path):
+    save_requirements(client, workspace, "ceos-ard-cli==0.5.9\n")
+    with SessionLocal() as db:
+        root = db.get(GitWorkspace, workspace["id"]).abs_path
+    (tmp_path / "elsewhere").mkdir()
+    (root / "build").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "The build folder of the workspace is not a folder."
+    assert list((tmp_path / "elsewhere").iterdir()) == []

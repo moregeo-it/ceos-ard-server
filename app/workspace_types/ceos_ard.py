@@ -46,13 +46,15 @@ def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
     The CLI version `requirements.txt` asks for: until 1.0.0 exactly the version given with `~=` or `==`,
     from 1.0.0 the highest installed version that satisfies it, else the version given.
     """
+    invalid = ToolchainError(f"{REQUIREMENTS_FILE} may only contain one line like `{CLI_PACKAGE}~=1.2.3`")
     try:
         text = (workspace_path / REQUIREMENTS_FILE).read_text(encoding="utf-8")
     except FileNotFoundError:
         raise ToolchainError(
             f"The workspace has no {REQUIREMENTS_FILE}, which sets the version of the CEOS-ARD CLI. Update the workspace from upstream to get it."
         ) from None
-    invalid = ToolchainError(f"{REQUIREMENTS_FILE} may only contain one line like `{CLI_PACKAGE}~=1.2.3`")
+    except (OSError, UnicodeDecodeError):
+        raise invalid from None
     lines = [line for line in (line.split("#", 1)[0].strip() for line in text.splitlines()) if line]
     if len(lines) != 1:
         raise invalid

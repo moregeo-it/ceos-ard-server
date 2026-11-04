@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import PFS_ID_PATTERN
+from app.utils.process import OutputTooLarge
 from app.utils.sandbox import BuildOutOfMemory, run_build
 from app.utils.toolchains import ToolchainError, toolchains
 from app.workspace_types import WorkspaceType
@@ -35,12 +36,21 @@ class BuildService:
         return str((build_dir or workspace_path / "build") / name)
 
     @staticmethod
+    def artifact(path: Path) -> Path | None:
+        """A file the build wrote, unless it is missing or not a regular file: a build can leave symlinks to anything."""
+        return path if not path.is_symlink() and path.is_file() else None
+
+    @staticmethod
     def prepare(workspace_type: WorkspaceType, workspace_path: Path) -> None:
         """Start installing the workspace's toolchain in the background, so its first build doesn't wait for it."""
         try:
             toolchain = workspace_type.toolchain(workspace_path)
         except ToolchainError:
             return  # The build reports it
+        except Exception as e:
+            # Workspace content, so it mustn't break e.g. the server's start
+            logger.warning(f"Can't prepare the toolchain of {workspace_path}: {e}")
+            return
         if toolchain:
             toolchains.prepare(toolchain)
 
@@ -81,6 +91,9 @@ class BuildService:
         logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)} and the toolchain {toolchain.name}")
         command = workspace_type.build_command(workspace_path, pfs, output_file, include_format)
         output_dir = Path(output_file).parent
+        # The build may write there, so not through a symlink, e.g. a committed `build` link
+        if output_dir.is_symlink() or not output_dir.resolve().is_relative_to((build_dir or workspace_path).resolve()):
+            return error("The build folder of the workspace is not a folder.")
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
             process = await run_build(
@@ -96,6 +109,8 @@ class BuildService:
             return error(f"Generating the document took longer than {settings.BUILD_TIMEOUT} seconds and was stopped.")
         except BuildOutOfMemory:
             return error("Generating the document needed too much memory and was stopped.")
+        except OutputTooLarge:
+            return error("Generating the document printed too much output and was stopped.")
 
         if process.returncode == 0:
             return {"status": "success", "message": "Build completed successfully.", "output_file": output_file}

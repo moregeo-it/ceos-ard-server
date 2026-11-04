@@ -41,6 +41,14 @@ _ENV_KEYS = (
 )
 
 
+# What a command may make the server hold in memory per stream, e.g. a build printing in a loop
+MAX_OUTPUT = 16 << 20
+
+
+class OutputTooLarge(Exception):
+    pass
+
+
 def command_env() -> dict[str, str]:
     return {key: value for key in _ENV_KEYS if (value := os.environ.get(key)) is not None}
 
@@ -59,12 +67,36 @@ async def _kill_tree(pid: int) -> None:
         pass
 
 
-async def run(*args, timeout: float = 60, env: dict[str, str] | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
+async def _read(stream: asyncio.StreamReader, limit: int) -> bytes:
+    data = bytearray()
+    while chunk := await stream.read(1 << 16):
+        data += chunk
+        if len(data) > limit:
+            raise OutputTooLarge(f"The output exceeds {limit >> 20} MB")
+    return bytes(data)
+
+
+async def _collect(process: asyncio.subprocess.Process, readers: list[asyncio.Task]) -> tuple[bytes, bytes]:
+    stdout, stderr = await asyncio.gather(*readers)
+    await process.wait()
+    return stdout, stderr
+
+
+async def _discard(process: asyncio.subprocess.Process) -> None:
+    for stream in (process.stdout, process.stderr):
+        while await stream.read(1 << 16):
+            pass
+    await process.wait()
+
+
+async def run(
+    *args, timeout: float = 60, env: dict[str, str] | None = None, cwd: Path | None = None, max_output: int = MAX_OUTPUT
+) -> subprocess.CompletedProcess:
     """
     Run a command as a native async subprocess, with `command_env()` unless `env` is given.
 
-    Occupies no worker thread while it waits; on timeout or cancellation, the command and every
-    process it started are killed instead of running on unattended.
+    Occupies no worker thread while it waits; on timeout, cancellation or more than `max_output` bytes
+    on stdout or stderr, the command and every process it started are killed instead of running on unattended.
     """
     process = await asyncio.create_subprocess_exec(
         *args,
@@ -75,12 +107,16 @@ async def run(*args, timeout: float = 60, env: dict[str, str] | None = None, cwd
         # Its own process group, so a timeout reaches its children too
         start_new_session=sys.platform != "win32",
     )
+    readers = [asyncio.ensure_future(_read(stream, max_output)) for stream in (process.stdout, process.stderr)]
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
-    except (TimeoutError, asyncio.CancelledError):
+        stdout, stderr = await asyncio.wait_for(_collect(process, readers), timeout)
+    except (TimeoutError, asyncio.CancelledError, OutputTooLarge):
+        for reader in readers:
+            reader.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
         await _kill_tree(process.pid)
-        # A process that left the group can keep the pipes open, so don't wait for it
+        # Without keeping what is left; a process that left the group can keep the pipes open, so don't wait for it
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(process.communicate(), 5)
+            await asyncio.wait_for(_discard(process), 5)
         raise
     return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)

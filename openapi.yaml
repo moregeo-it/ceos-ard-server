@@ -783,6 +783,12 @@ paths:
           description: File content
           content:
             '*/*': {}
+        '400':
+          description: The path is outside the workspace, e.g. through a symlink
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: File not found
           content:

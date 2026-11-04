@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config import settings
-from app.utils.process import command_env, run
+from app.utils.process import OutputTooLarge, command_env, run
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +146,8 @@ class Toolchains:
     async def _run(name: str, env: dict[str, str], *args: str) -> None:
         try:
             result = await run(*args, timeout=settings.TOOLCHAIN_INSTALL_TIMEOUT, env=env)
-        except TimeoutError as e:
-            raise ToolchainError(f"Installing the toolchain {name} took too long") from e
+        except (TimeoutError, OutputTooLarge) as e:
+            raise ToolchainError(f"Installing the toolchain {name} took too long or printed too much") from e
         if result.returncode != 0:
             logger.error(f"Installing the toolchain {name} failed: {result.stderr.decode(errors='replace')[-2000:]}")
             raise ToolchainError(f"Installing the toolchain {name} failed")

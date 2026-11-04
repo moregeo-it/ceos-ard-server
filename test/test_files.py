@@ -1,6 +1,10 @@
+import sys
+
 import pytest
 from conftest import file_url
 
+from app.db.database import SessionLocal
+from app.models.workspace import GitWorkspace
 from app.services.events_service import event_broker
 from app.workspace_types.ceos_ard import CeosArdType
 
@@ -28,6 +32,22 @@ def test_search_skips_hidden_folders(client, workspace):
 @pytest.mark.parametrize("path", ["/templates", "/.github", "/.git"])
 def test_hidden_folders_are_not_listed(client, workspace, path):
     response = client.get(f"/workspaces/{workspace['id']}/files", params={"path": path})
+    assert response.status_code in (400, 403, 404), response.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_symlinks_are_not_listed_or_searched(client, workspace, tmp_path):
+    secret = tmp_path / "secret.yaml"
+    secret.write_text("SECRET_KEY: must-not-leak\n")
+    with SessionLocal() as db:
+        root = db.get(GitWorkspace, workspace["id"]).abs_path
+    (root / "requirements" / "leak.yaml").symlink_to(secret)
+    (root / "outside").symlink_to(tmp_path, target_is_directory=True)
+
+    assert "leak.yaml" not in names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/requirements"}))
+    assert "outside" not in names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/"}))
+    assert names(client.get(f"/workspaces/{workspace['id']}/search", params={"query": "must-not-leak"})) == []
+    response = client.get(file_url(workspace, "files", "/requirements/leak.yaml"))
     assert response.status_code in (400, 403, 404), response.text
 
 

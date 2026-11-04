@@ -69,7 +69,7 @@ class PreviewService:
         prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
 
         async with build_locks(workspace_id):
-            if not Path(prefix + ".html").exists():
+            if not BuildService.artifact(Path(prefix + ".html")):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
             return await self._get_preview_files(workspace, file_prefix=prefix)
 
@@ -80,8 +80,10 @@ class PreviewService:
         if not build_dir.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build directory not found")
 
-        filepath = Path(file_prefix + ".html")
-        html_content = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
+        filepath = BuildService.artifact(Path(file_prefix + ".html"))
+        if not filepath:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no preview")
+        html_content = filepath.read_text(encoding="utf-8")
         # Only the owner of an active workspace can edit; everyone else opens the file read-only
         label = "Edit" if workspace.viewer_role == "owner" and workspace.status != WorkspaceStatus.ARCHIVED else "View"
 
@@ -126,8 +128,8 @@ class PreviewService:
         build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:
             prefix = await self._build(workspace, pfs, include_format=format, build_dir=build_dir)
-            document = Path(f"{prefix}.{format}")
-            if not document.exists():
+            document = BuildService.artifact(Path(f"{prefix}.{format}"))
+            if not document:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no document")
             return document
         except BaseException:
