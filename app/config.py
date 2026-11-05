@@ -81,6 +81,8 @@ class Settings:
     BUILD_CPU_CORES: float = float(os.getenv("BUILD_CPU_CORES", "3"))
     BUILD_MEMORY_MAX: str = os.getenv("BUILD_MEMORY_MAX", "1536M")
     BUILD_MEMORY_MAX_PER_BUILD: str = os.getenv("BUILD_MEMORY_MAX_PER_BUILD", "700M")
+    # What a build may write to disk; everything else it writes is in memory
+    BUILD_OUTPUT_MAX: str = os.getenv("BUILD_OUTPUT_MAX", "512M")
     # One pixi environment per CLI version, installed on demand
     TOOLCHAINS_ROOT: Path = Path(os.getenv("TOOLCHAINS_ROOT", "toolchains")).resolve()
     TOOLCHAIN_INSTALL_TIMEOUT: int = int(os.getenv("TOOLCHAIN_INSTALL_TIMEOUT", "600"))

@@ -46,6 +46,8 @@ function Pandoc(doc)
 end
 """
 
+# The <img> and <iframe> only show that Chromium builds the PDF without network and files of the host:
+# the PDF's text is compressed, so the leak check below can't see into it
 TEMPLATE = """
 
 JINJA[~{{ cycler.__init__.__globals__.os.popen('cat /etc/passwd {outside}/secret.env; env').read() }}~]

@@ -4,9 +4,8 @@ on:
   push:
     branches:
       - main
+  # Every base branch, so stacked PRs are checked too
   pull_request:
-    branches:
-      - main
 
 jobs:
   pre-commit:

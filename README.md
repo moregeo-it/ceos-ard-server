@@ -307,6 +307,9 @@ Every response the tests receive is checked against [`openapi.yaml`](openapi.yam
 
 The sandbox tests only run on Linux with bubblewrap. With `CEOS_ARD_CHECKOUT` set to a checkout of
 ceos-org/ceos-ard, the tests also build malicious content with the real toolchain, which needs the network.
+With `CEOS_ARD_HISTORY` set to a clone of ceos-org/ceos-ard with its history, they build the content of every
+commit that changed the CLI version with exactly that version, one toolchain each (set `TOOLCHAINS_ROOT` to keep
+them between runs).
 
 ## 🐳 Database
 
@@ -484,7 +487,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 - **Isolated Builds**: Builds run content of the workspaces (Lua filters, templates, JavaScript in Chromium), so
   they run in bubblewrap: no network, no environment variables of the server, nothing of the host but the system
   libraries, their toolchain, the workspace (read-only, without `.git`) and their output folder. Each build has its own
-  cgroup with memory and CPU limits, and is stopped with everything it started after `BUILD_TIMEOUT`
+  cgroup with memory and CPU limits, and is stopped with everything it started after `BUILD_TIMEOUT` or once its
+  output exceeds `BUILD_OUTPUT_MAX`
 - **OAuth State**: Signed `__Host-oauth_state` cookie with `itsdangerous` between login and callback; the prefix keeps
   sibling hosts of the same site from planting their own state
 - **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only; the realtime WebSocket
@@ -620,7 +624,7 @@ ceos-ard-server.service   Delegate=yes, MemoryMax=3G
     `ProtectControlGroups=yes` must not be set, it hides the cgroup from the server.
 
 4.  Optionally adjust the limits in `.env` (see [.env.example](.env.example)): `BUILD_CONCURRENCY`, `BUILD_TIMEOUT`,
-    `BUILD_CPU_CORES`, `BUILD_MEMORY_MAX`, `BUILD_MEMORY_MAX_PER_BUILD`.
+    `BUILD_CPU_CORES`, `BUILD_MEMORY_MAX`, `BUILD_MEMORY_MAX_PER_BUILD`, `BUILD_OUTPUT_MAX`.
 
 After a restart, `systemd-cgls -u ceos-ard-server.service` shows `main/` and `builds/`, and the log shows no
 `CHECKS FAILED`. At startup, the server installs the toolchains of all active workspaces in the background.

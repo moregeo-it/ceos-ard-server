@@ -10,6 +10,7 @@ Linux only; see `setup()` for the conditions.
 """
 
 import asyncio
+import contextlib
 import errno
 import logging
 import os
@@ -41,6 +42,39 @@ _SYSTEM_FILES = ("/etc/fonts", "/etc/ld.so.cache", "/etc/localtime")
 
 class BuildOutOfMemory(Exception):
     pass
+
+
+class BuildOutputTooLarge(Exception):
+    pass
+
+
+# Output folders are checked this often, and may hold at most this many files
+_OUTPUT_CHECK_INTERVAL = 0.2
+_OUTPUT_MAX_FILES = 10_000
+
+
+def _output_exceeds(paths: list[Path], max_size: int) -> bool:
+    """Whether the folders hold more than `max_size` bytes or _OUTPUT_MAX_FILES files; stops counting at either."""
+    size = files = 0
+    pending = list(paths)
+    while pending:
+        try:
+            entries = list(os.scandir(pending.pop()))
+        except OSError:
+            continue
+        for entry in entries:
+            files += 1
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(entry.path)
+                else:
+                    # Not entry.stat(): Windows keeps the size of a file still being written in its directory entry stale
+                    size += os.stat(entry.path, follow_symlinks=False).st_size
+            except OSError:
+                continue
+            if size > max_size or files > _OUTPUT_MAX_FILES:
+                return True
+    return False
 
 
 def parse_size(value: str) -> int:
@@ -229,7 +263,20 @@ async def run_build(
         try:
             if cgroup:
                 command = ["/bin/sh", "-c", _ENTER_CGROUP, "sh", str(cgroup), *command]
-            result = await run(*command, timeout=timeout, env=env, cwd=cwd)
+            build = asyncio.ensure_future(run(*command, timeout=timeout, env=env, cwd=cwd))
+            try:
+                # The output folders are on disk, unlike /tmp, so their size is limited by watching them
+                max_size = parse_size(settings.BUILD_OUTPUT_MAX)
+                while not build.done():
+                    await asyncio.wait([build], timeout=_OUTPUT_CHECK_INTERVAL)
+                    if not build.done() and await asyncio.to_thread(_output_exceeds, writable, max_size):
+                        raise BuildOutputTooLarge()
+            finally:
+                if not build.done():
+                    build.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await build
+            result = build.result()
             if cgroup and Cgroups.out_of_memory(cgroup):
                 raise BuildOutOfMemory()
             return result

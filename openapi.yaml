@@ -1458,6 +1458,12 @@ paths:
               $ref: '#/components/headers/ETag'
             Cache-Control:
               $ref: '#/components/headers/CacheControl'
+        '400':
+          description: The path is outside the preview, e.g. through a symlink
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: File not found
           content:

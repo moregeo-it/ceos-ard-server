@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +13,7 @@ from app.config import settings
 from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import PFS_ID_PATTERN
 from app.utils.process import OutputTooLarge
-from app.utils.sandbox import BuildOutOfMemory, run_build
+from app.utils.sandbox import BuildOutOfMemory, BuildOutputTooLarge, run_build
 from app.utils.toolchains import ToolchainError, toolchains
 from app.utils.validation import check_read_size
 from app.workspace_types import WorkspaceType
@@ -123,6 +125,10 @@ class BuildService:
             return error("Generating the document needed too much memory and was stopped.")
         except OutputTooLarge:
             return error("Generating the document printed too much output and was stopped.")
+        except BuildOutputTooLarge:
+            # Not left on the disk until the next build
+            await asyncio.to_thread(shutil.rmtree, output_dir, ignore_errors=True)
+            return error("Generating the document wrote too much and was stopped.")
 
         if process.returncode == 0:
             return {"status": "success", "message": "Build completed successfully.", "output_file": output_file}

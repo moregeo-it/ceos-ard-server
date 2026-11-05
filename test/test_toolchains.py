@@ -7,6 +7,7 @@ import httpx
 import pytest
 from conftest import file_url
 
+from app.config import settings
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
 from app.utils import validation
@@ -42,6 +43,11 @@ FAKE_CLI_LINKS_SH = """#!/bin/sh
 while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 ln -s "{secret}" "$out.html"
 ln -s "{secret}" "$out.pdf"
+"""
+# Writes a preview without end
+FAKE_CLI_FLOOD_SH = """#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+yes "<p>{version}</p>" > "$out.html"
 """
 
 
@@ -153,14 +159,14 @@ def fake_toolchains(tmp_path, monkeypatch):
     monkeypatch.setattr(toolchains, "root", tmp_path / "toolchains")
     secret = tmp_path / "secret.txt"
     secret.write_text("SECRET_KEY=must-not-leak")
-    for version in ("0.5.9", "0.6.0", "0.6.1"):
+    for version in ("0.5.9", "0.6.0", "0.6.1", "0.6.2"):
         name = f"ceos-ard-cli-{version}"
         if sys.platform == "win32":
             cli = toolchains.env(name) / "Scripts" / "ceos-ard.bat"
             content = FAKE_CLI_BAT
         else:
             cli = toolchains.env(name) / "bin" / "ceos-ard"
-            content = FAKE_CLI_LINKS_SH if version == "0.6.1" else FAKE_CLI_SH
+            content = {"0.6.1": FAKE_CLI_LINKS_SH, "0.6.2": FAKE_CLI_FLOOD_SH}.get(version, FAKE_CLI_SH)
         cli.parent.mkdir(parents=True)
         cli.write_text(content.format(version=version, secret=secret), newline="\n" if sys.platform != "win32" else "\r\n")
         cli.chmod(0o755)
@@ -244,3 +250,14 @@ def test_previews_too_large_to_hold_in_memory_are_refused(client, workspace, fak
     response = client.post(f"/workspaces/{workspace['id']}/previews")
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The build produced a preview that is too large"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="The fake CLI is a shell script")
+def test_builds_that_write_too_much_are_stopped_and_removed(client, workspace, fake_toolchains, monkeypatch):
+    monkeypatch.setattr(settings, "BUILD_OUTPUT_MAX", "5M")
+    save_requirements(client, workspace, "ceos-ard-cli==0.6.2\n")
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Generating the document wrote too much and was stopped."
+    with SessionLocal() as db:
+        assert not (db.get(GitWorkspace, workspace["id"]).abs_path / "build").exists()

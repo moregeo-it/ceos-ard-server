@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -83,3 +84,21 @@ def test_each_user_runs_one_build_at_a_time():
     peak = 0
     asyncio.run(builds(["jane", "john"]))
     assert peak == 2
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_preview_assets_are_not_read_through_symlinks(client, workspace, builds, tmp_path):
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 200, response.text
+    secret = tmp_path / "secret.png"
+    secret.write_text("SECRET_KEY=must-not-leak")
+    with SessionLocal() as db:
+        build = db.get(GitWorkspace, workspace["id"]).abs_path / "build"
+    # A build can leave symlinks in its output, the sandbox only stops it from reading their targets
+    (build / "leak.png").symlink_to(secret)
+    (build / "workspace.png").symlink_to(build.parent / "README.md")
+
+    for asset in ("leak.png", "workspace.png"):
+        response = client.get(f"/workspaces/{workspace['id']}/previews/{asset}")
+        assert response.status_code in (400, 404), response.text
+        assert "must-not-leak" not in response.text
