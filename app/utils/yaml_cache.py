@@ -12,7 +12,7 @@ from pathlib import Path
 
 from yaml import load as yaml_load
 
-from app.utils.validation import check_read_size
+from app.utils.limits import check_read_size
 
 logger = logging.getLogger(__name__)
 

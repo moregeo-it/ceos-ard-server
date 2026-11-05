@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import PFS_ID_PATTERN
+from app.utils.limits import check_read_size
 from app.utils.process import OutputTooLarge
 from app.utils.sandbox import BuildOutOfMemory, BuildOutputTooLarge, run_build
-from app.utils.toolchains import ToolchainError, toolchains
-from app.utils.validation import check_read_size
+from app.utils.toolchains import Toolchain, ToolchainError, toolchains
 from app.workspace_types import WorkspaceType
 
 logger = logging.getLogger(__name__)
@@ -39,12 +39,13 @@ class BuildService:
         return str((build_dir or workspace_path / "build") / name)
 
     @staticmethod
-    def artifact(path: Path) -> Path | None:
+    def artifact(path: Path, output_dir: Path) -> Path | None:
         """
-        A file the build wrote, unless it is missing or not a regular file: a build can leave symlinks to anything,
-        and a workspace cloned before core.symlinks=false can have its `build` folder link elsewhere.
+        A file the build wrote directly into `output_dir`, unless it is missing or not a regular file: a build can leave
+        symlinks and folders that lead anywhere, and a workspace cloned before core.symlinks=false can have its `build`
+        folder link elsewhere.
         """
-        if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
+        if path.parent != output_dir or output_dir.is_symlink() or path.is_symlink() or not path.is_file():
             return None
         return path
 
@@ -69,9 +70,26 @@ class BuildService:
             toolchains.prepare(toolchain)
 
     def prepare_all(self, db: Session) -> None:
-        """Start installing the toolchains of all active workspaces, e.g. after a deployment."""
+        """Remove the toolchains no workspace uses anymore, and start installing those of active workspaces, e.g. after a deployment."""
+        used = set()
+        for workspace in db.query(GitWorkspace):
+            try:
+                if toolchain := workspace.workspace_type.toolchain(workspace.abs_path):
+                    used.add(toolchain.name)
+            except Exception:
+                continue
+        toolchains.remove_unused(used)
         for workspace in db.query(GitWorkspace).filter(GitWorkspace.status == WorkspaceStatus.ACTIVE):
             self.prepare(workspace.workspace_type, workspace.abs_path)
+
+    @staticmethod
+    def missing_toolchain(workspace_type: WorkspaceType, workspace_path: Path) -> Toolchain | None:
+        """The toolchain a build would have to install first, if any; a build reports invalid ones."""
+        try:
+            toolchain = workspace_type.toolchain(workspace_path)
+        except ToolchainError:
+            return None
+        return toolchain if toolchain and not toolchains.is_installed(toolchain.name) else None
 
     async def build(
         self,

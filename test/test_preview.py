@@ -8,6 +8,7 @@ import pytest
 from app import dependencies
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
+from app.services.build_service import BuildService
 from app.services.preview_service import PreviewService
 
 
@@ -102,3 +103,21 @@ def test_preview_assets_are_not_read_through_symlinks(client, workspace, builds,
         response = client.get(f"/workspaces/{workspace['id']}/previews/{asset}")
         assert response.status_code in (400, 404), response.text
         assert "must-not-leak" not in response.text
+
+
+def test_downloads_only_offer_pdf_and_word(client, workspace, builds):
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "escape/../../../etc/hostname", "pfs": ["NRB"]})
+    assert response.status_code == 400, response.text
+    assert builds == []
+
+
+def test_build_results_are_only_taken_from_their_folder(tmp_path):
+    output = tmp_path / "output"
+    # A build can create a folder that a document's name then leads through
+    (output / "NRB.escape").mkdir(parents=True)
+    (tmp_path / "secret.env").write_text("SECRET_KEY=must-not-leak")
+    assert BuildService.artifact(output / "NRB.escape/../../secret.env", output) is None
+    assert BuildService.artifact(tmp_path / "secret.env", output) is None
+
+    (output / "NRB.pdf").write_bytes(b"document")
+    assert BuildService.artifact(output / "NRB.pdf", output) == output / "NRB.pdf"

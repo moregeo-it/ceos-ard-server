@@ -20,10 +20,9 @@ from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import run_exclusive
 from app.utils.validation import (
-    FileTooLarge,
-    check_read_size,
     ignore_file_path,
     normalize_workspace_path,
     validate_new_file_name,

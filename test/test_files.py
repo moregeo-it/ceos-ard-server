@@ -9,7 +9,7 @@ from app.db.database import SessionLocal
 from app.main import app
 from app.models.workspace import GitWorkspace
 from app.services.events_service import event_broker
-from app.utils import validation
+from app.utils import limits
 from app.workspace_types.ceos_ard import CeosArdType
 
 MB = 1024 * 1024
@@ -202,7 +202,7 @@ def test_saving_restores_deleted_files(client, workspace):
 
 
 def test_files_too_large_to_hold_in_memory_are_not_read(client, workspace, monkeypatch):
-    monkeypatch.setattr(validation, "MAX_READ_SIZE", 1000)
+    monkeypatch.setattr(limits, "MAX_READ_SIZE", 1000)
     with SessionLocal() as db:
         root = db.get(GitWorkspace, workspace["id"]).abs_path
     large = "description: needle\n" + "#" * 2000 + "\n"

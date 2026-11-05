@@ -39,6 +39,8 @@ GLOSSARY_UI_SCHEMA = {
 CLI_PACKAGE = "ceos-ard-cli"
 CLI_PYPROJECT_URL = "https://raw.githubusercontent.com/ceos-org/ceos-ard-cli/v{version}/pyproject.toml"
 REQUIREMENTS_FILE = "requirements.txt"
+# The first version ceos-org/ceos-ard pinned in requirements.txt
+MIN_CLI_VERSION = Version("0.4.0")
 MAX_REQUIREMENTS_SIZE = 4096
 
 
@@ -86,6 +88,8 @@ def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
         or version.is_devrelease
     ):
         raise invalid
+    if version < MIN_CLI_VERSION:
+        raise ToolchainError(f"CEOS-ARD CLI {version} is too old, at least {MIN_CLI_VERSION} is needed. Update the workspace from upstream.")
     if version.major >= 1:
         candidates = [Version(name.removeprefix(f"{CLI_PACKAGE}-")) for name in installed if name.startswith(f"{CLI_PACKAGE}-")]
         candidates = [candidate for candidate in candidates if candidate in requirement.specifier]
@@ -96,19 +100,24 @@ def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
 
 async def cli_toolchain_spec(version: str) -> ToolchainSpec:
     """The CLI and the conda packages its release pins, e.g. pandoc."""
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(CLI_PYPROJECT_URL.format(version=version))
-    if response.status_code == 404:
-        raise ToolchainError(f"CEOS-ARD CLI {version} doesn't exist")
-    response.raise_for_status()
-    pyproject = tomllib.loads(response.text)
-    pypi = {CLI_PACKAGE: f"=={version}"}
-    # Pre-releases the CLI pins must be requested explicitly, e.g. bibtexparser==2.0.0b9
-    for dependency in pyproject["project"]["dependencies"]:
-        requirement = Requirement(dependency)
-        if any(specifier.operator == "==" and Version(specifier.version).is_prerelease for specifier in requirement.specifier):
-            pypi[requirement.name] = str(requirement.specifier)
-    return ToolchainSpec(conda=dict(pyproject["tool"]["pixi"]["dependencies"]), pypi=pypi, chromium=True)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(CLI_PYPROJECT_URL.format(version=version))
+        if response.status_code == 404:
+            raise ToolchainError(f"CEOS-ARD CLI {version} doesn't exist")
+        response.raise_for_status()
+        pyproject = tomllib.loads(response.text)
+        pypi = {CLI_PACKAGE: f"=={version}"}
+        # Pre-releases the CLI pins must be requested explicitly, e.g. bibtexparser==2.0.0b9
+        for dependency in pyproject["project"]["dependencies"]:
+            requirement = Requirement(dependency)
+            if any(specifier.operator == "==" and Version(specifier.version).is_prerelease for specifier in requirement.specifier):
+                pypi[requirement.name] = str(requirement.specifier)
+        return ToolchainSpec(conda=dict(pyproject["tool"]["pixi"]["dependencies"]), pypi=pypi, chromium=True)
+    except ToolchainError:
+        raise
+    except (httpx.HTTPError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as e:
+        raise ToolchainError(f"What CEOS-ARD CLI {version} needs can't be found out right now, try again later") from e
 
 
 class CeosArdType(WorkspaceType):

@@ -104,7 +104,10 @@ pixi install
 ```
 
 The toolchains for the builds (the CEOS-ARD CLI, pandoc and Chromium) are installed on demand into `TOOLCHAINS_ROOT`,
-one per CLI version. The first build with a new version waits for its install, up to a minute.
+one per CLI version, one at a time. The first build with a new version waits for its install, usually a minute, at
+most `TOOLCHAIN_INSTALL_TIMEOUT` per step; meanwhile the workspace's clients get a `preview.preparing` event. A failed
+install is reported for 10 minutes before it is tried again. At startup, the server removes toolchains that no workspace
+uses and no build used for a week.
 
 ### 3. Environment Configuration
 

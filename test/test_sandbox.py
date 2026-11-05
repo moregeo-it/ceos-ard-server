@@ -176,8 +176,8 @@ def test_each_build_runs_in_a_cgroup_of_its_own(workspace, monkeypatch):
     created = []
     create = isolation.cgroups.create
 
-    def record():
-        created.append(create())
+    def record(memory_max):
+        created.append(create(memory_max))
         return created[-1]
 
     monkeypatch.setattr(isolation.cgroups, "create", record)
@@ -187,4 +187,24 @@ def test_each_build_runs_in_a_cgroup_of_its_own(workspace, monkeypatch):
     assert len(created) == 2 and created[0] != created[1]
     assert all(cgroup.parent == isolation.cgroups.builds for cgroup in created)
     # Removed once done
+    assert [path for path in isolation.cgroups.builds.iterdir() if path.is_dir()] == []
+
+
+FORK_BOMB = """
+import os
+while True:
+    try:
+        os.fork()
+    except OSError:
+        pass
+"""
+
+
+def test_a_fork_bomb_stays_in_its_build(workspace):
+    requires_cgroups()
+    start = time.monotonic()
+    # pids.max stops it from taking the server's processes, the timeout or the memory limit ends it
+    with pytest.raises((TimeoutError, BuildOutOfMemory)):
+        build(workspace, FORK_BOMB, timeout=3)
+    assert time.monotonic() - start < 20
     assert [path for path in isolation.cgroups.builds.iterdir() if path.is_dir()] == []

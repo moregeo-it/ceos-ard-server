@@ -1,5 +1,7 @@
 import asyncio
+import os
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -10,8 +12,9 @@ from conftest import file_url
 from app.config import settings
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
-from app.utils import validation
-from app.utils.toolchains import ToolchainError, ToolchainSpec, _manifest, toolchains
+from app.services.events_service import event_broker
+from app.utils import limits
+from app.utils.toolchains import Toolchain, ToolchainError, Toolchains, ToolchainSpec, _manifest, toolchains
 from app.workspace_types.ceos_ard import cli_toolchain_spec, cli_version
 
 CLI_PYPROJECT = """
@@ -246,7 +249,7 @@ def test_builds_do_not_write_through_a_symlinked_build_folder(client, workspace,
 
 def test_previews_too_large_to_hold_in_memory_are_refused(client, workspace, fake_toolchains, monkeypatch):
     save_requirements(client, workspace, "ceos-ard-cli==0.5.9\n")
-    monkeypatch.setattr(validation, "MAX_READ_SIZE", 5)
+    monkeypatch.setattr(limits, "MAX_READ_SIZE", 5)
     response = client.post(f"/workspaces/{workspace['id']}/previews")
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The build produced a preview that is too large"
@@ -261,3 +264,94 @@ def test_builds_that_write_too_much_are_stopped_and_removed(client, workspace, f
     assert response.json()["detail"] == "Generating the document wrote too much and was stopped."
     with SessionLocal() as db:
         assert not (db.get(GitWorkspace, workspace["id"]).abs_path / "build").exists()
+
+
+def test_cli_versions_before_the_first_pin_are_refused(tmp_path):
+    with pytest.raises(ToolchainError, match="too old, at least 0.4.0"):
+        cli_version(requirements(tmp_path, "ceos-ard-cli==0.3.0"))
+
+
+@pytest.mark.parametrize(
+    "response",
+    [httpx.ConnectError("unreachable"), httpx.Response(503), httpx.Response(200, text="[project]\ndependencies = []\n")],
+    ids=["unreachable", "unavailable", "no toolchain"],
+)
+def test_cli_releases_that_can_not_be_read_are_reported(monkeypatch, response):
+    async def get(self, url):
+        if isinstance(response, Exception):
+            raise response
+        response.request = httpx.Request("GET", url)
+        return response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    with pytest.raises(ToolchainError, match="can't be found out right now"):
+        asyncio.run(cli_toolchain_spec("0.5.9"))
+
+
+def fake_toolchain(name):
+    async def spec():
+        return ToolchainSpec(conda={})
+
+    return Toolchain(name=name, spec=spec)
+
+
+def test_one_toolchain_is_installed_at_a_time(tmp_path):
+    installer = Toolchains(tmp_path)
+    running = []
+    peak = 0
+
+    async def install(toolchain):
+        nonlocal peak
+        running.append(toolchain.name)
+        peak = max(peak, len(running))
+        await asyncio.sleep(0.05)
+        installer.path(toolchain.name).mkdir()
+        (installer.path(toolchain.name) / ".ready").touch()
+        running.remove(toolchain.name)
+
+    installer._install = install
+
+    async def install_two():
+        await asyncio.gather(installer.ensure(fake_toolchain("first-1.0.0")), installer.ensure(fake_toolchain("second-1.0.0")))
+
+    asyncio.run(install_two())
+    assert peak == 1
+    assert sorted(installer.installed()) == ["first-1.0.0", "second-1.0.0"]
+
+
+def test_failed_installs_are_reported_for_a_while(tmp_path):
+    installer = Toolchains(tmp_path)
+    attempts = []
+
+    async def install(toolchain):
+        attempts.append(toolchain.name)
+        raise ToolchainError("The network is gone")
+
+    installer._install = install
+    toolchain = fake_toolchain("broken-1.0.0")
+    for _ in range(2):
+        with pytest.raises(ToolchainError, match="The network is gone"):
+            asyncio.run(installer.ensure(toolchain))
+    assert attempts == ["broken-1.0.0"]
+
+
+def test_toolchains_no_workspace_uses_are_removed(tmp_path):
+    installer = Toolchains(tmp_path)
+    for name in ("used-1.0.0", "unused-1.0.0", "recent-1.0.0", "half-1.0.0"):
+        installer.path(name).mkdir()
+        if name != "half-1.0.0":
+            (installer.path(name) / ".ready").touch()
+    long_ago = time.time() - 30 * 86400
+    os.utime(installer.path("unused-1.0.0") / ".ready", (long_ago, long_ago))
+
+    installer.remove_unused({"used-1.0.0"})
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["recent-1.0.0", "used-1.0.0"]
+
+
+def test_installs_are_announced_before_the_build(client, workspace, fake_toolchains, monkeypatch):
+    emitted = []
+    monkeypatch.setattr(event_broker, "emit", lambda workspace_id, event_type, **fields: emitted.append((event_type.value, fields)))
+    save_requirements(client, workspace, "ceos-ard-cli==0.6.3\n")
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 500, response.text
+    assert [fields["toolchain"] for event, fields in emitted if event == "preview.preparing"] == ["ceos-ard-cli-0.6.3"]

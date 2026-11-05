@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config import settings
-from app.utils.process import OutputTooLarge, command_env, run
+from app.utils.process import OutputTooLarge, command_env
+from app.utils.sandbox import BuildOutOfMemory, run_limited
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,11 @@ NAME_PATTERN = r"[a-z0-9][a-z0-9.\-]*"
 # Written once a toolchain is completely installed
 _READY = ".ready"
 # Packages with syntax errors, e.g. tests for other Python versions, don't fail the install
-_COMPILE_PACKAGES = "import compileall, site\nfor path in site.getsitepackages():\n    compileall.compile_dir(path, quiet=2, workers=0)"
+_COMPILE_PACKAGES = "import compileall, site\nfor path in site.getsitepackages():\n    compileall.compile_dir(path, quiet=2)"
+# A failed install is reported for this long instead of being tried again on every save and build
+_RETRY_AFTER = 600
+# Toolchains no workspace uses are removed at startup once no build used them for this long
+_UNUSED_FOR = 7 * 86400
 
 
 class ToolchainError(Exception):
@@ -68,6 +73,9 @@ class Toolchains:
     def __init__(self, root: Path):
         self.root = root
         self._installs: dict[str, asyncio.Task] = {}
+        self._failures: dict[str, tuple[float, str]] = {}
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop: asyncio.AbstractEventLoop | None = None
 
     def path(self, name: str) -> Path:
         if not re.fullmatch(NAME_PATTERN, name):
@@ -94,19 +102,48 @@ class Toolchains:
 
     async def ensure(self, toolchain: Toolchain) -> None:
         """Install the toolchain unless it is; waits for an install that is already running."""
-        if not self.is_installed(toolchain.name):
-            # Shielded: a cancelled request mustn't leave a half-installed toolchain
-            await asyncio.shield(self._start(toolchain))
+        if self.is_installed(toolchain.name):
+            # Marks it as used, see remove_unused()
+            (self.path(toolchain.name) / _READY).touch()
+            return
+        if failure := self._recent_failure(toolchain.name):
+            raise ToolchainError(failure)
+        # Shielded: a cancelled request mustn't leave a half-installed toolchain
+        await asyncio.shield(self._start(toolchain))
 
     def prepare(self, toolchain: Toolchain) -> None:
         """Start installing the toolchain in the background, so the first build doesn't wait for it."""
-        if not self.is_installed(toolchain.name):
+        if not self.is_installed(toolchain.name) and not self._recent_failure(toolchain.name):
             self._start(toolchain)
+
+    def remove_unused(self, used: set[str]) -> None:
+        """Remove half-installed toolchains, and those not in `used` that no build used for a while. Blocking."""
+        if not self.root.is_dir():
+            return
+        for path in self.root.iterdir():
+            if not path.is_dir() or path.name in used or path.name in self._installs:
+                continue
+            ready = path / _READY
+            if ready.exists() and time.time() - ready.stat().st_mtime < _UNUSED_FOR:
+                continue
+            logger.info(f"Removing the toolchain {path.name}, which no workspace uses")
+            shutil.rmtree(path, ignore_errors=True)
+
+    def _recent_failure(self, name: str) -> str | None:
+        failed_at, message = self._failures.get(name, (0.0, ""))
+        return message if time.monotonic() - failed_at < _RETRY_AFTER else None
+
+    def _install_lock(self) -> asyncio.Lock:
+        # One install at a time; one lock per event loop, as the tests run several
+        loop = asyncio.get_running_loop()
+        if self._lock_loop is not loop:
+            self._lock, self._lock_loop = asyncio.Lock(), loop
+        return self._lock
 
     def _start(self, toolchain: Toolchain) -> asyncio.Task:
         task = self._installs.get(toolchain.name)
         if task is None:
-            task = asyncio.create_task(self._install(toolchain))
+            task = asyncio.create_task(self._install_one(toolchain))
             self._installs[toolchain.name] = task
             task.add_done_callback(lambda task: self._finished(toolchain.name, task))
         return task
@@ -115,6 +152,14 @@ class Toolchains:
         self._installs.pop(name, None)
         if not task.cancelled() and (error := task.exception()):
             logger.warning(f"Installing the toolchain {name} failed: {error}")
+            message = str(error) if isinstance(error, ToolchainError) else f"Installing the toolchain {name} failed"
+            self._failures[name] = (time.monotonic(), message)
+        else:
+            self._failures.pop(name, None)
+
+    async def _install_one(self, toolchain: Toolchain) -> None:
+        async with self._install_lock():
+            await self._install(toolchain)
 
     async def _install(self, toolchain: Toolchain) -> None:
         path = self.path(toolchain.name)
@@ -145,9 +190,9 @@ class Toolchains:
     @staticmethod
     async def _run(name: str, env: dict[str, str], *args: str) -> None:
         try:
-            result = await run(*args, timeout=settings.TOOLCHAIN_INSTALL_TIMEOUT, env=env)
-        except (TimeoutError, OutputTooLarge) as e:
-            raise ToolchainError(f"Installing the toolchain {name} took too long or printed too much") from e
+            result = await run_limited(*args, timeout=settings.TOOLCHAIN_INSTALL_TIMEOUT, env=env)
+        except (TimeoutError, OutputTooLarge, BuildOutOfMemory) as e:
+            raise ToolchainError(f"Installing the toolchain {name} took too long, printed too much or needed too much memory") from e
         if result.returncode != 0:
             logger.error(f"Installing the toolchain {name} failed: {result.stderr.decode(errors='replace')[-2000:]}")
             raise ToolchainError(f"Installing the toolchain {name} failed")

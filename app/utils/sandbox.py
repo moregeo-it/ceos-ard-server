@@ -137,11 +137,11 @@ class Cgroups:
         _write(cgroups.builds / "cgroup.subtree_control", " ".join(f"+{controller}" for controller in CONTROLLERS))
         return cgroups
 
-    def create(self) -> Path:
+    def create(self, memory_max: str) -> Path:
         cgroup = self.builds / uuid.uuid4().hex
         cgroup.mkdir()
         try:
-            _write(cgroup / "memory.max", str(parse_size(settings.BUILD_MEMORY_MAX_PER_BUILD)))
+            _write(cgroup / "memory.max", str(parse_size(memory_max)))
             _write_if_exists(cgroup / "memory.swap.max", "0")
             _write(cgroup / "memory.oom.group", "1")
             _write(cgroup / "pids.max", "1024")
@@ -229,6 +229,24 @@ def _bwrap_args(read_only: list[Path], writable: list[Path], hidden: list[Path],
     return [*args, "--chdir", str(cwd)]
 
 
+async def run_limited(*args: str, timeout: float, env: dict[str, str]) -> subprocess.CompletedProcess:
+    """
+    Run a command that isn't a build but needs the network, e.g. installing a toolchain: not in the sandbox,
+    but in a cgroup under `builds/`, so it shares the builds' limits and is killed before the server.
+    A cold install peaks at about 700 MB, mostly file cache, so it may use all the builds' memory.
+    """
+    cgroup = isolation.cgroups.create(settings.BUILD_MEMORY_MAX) if isolation.cgroups else None
+    try:
+        command = ["/bin/sh", "-c", _ENTER_CGROUP, "sh", str(cgroup), *args] if cgroup else list(args)
+        result = await run(*command, timeout=timeout, env=env)
+        if cgroup and Cgroups.out_of_memory(cgroup):
+            raise BuildOutOfMemory()
+        return result
+    finally:
+        if cgroup:
+            await asyncio.to_thread(Cgroups.remove, cgroup)
+
+
 async def run_build(
     command: list[str], *, path: list[Path], read_only: list[Path], writable: list[Path], hidden: list[Path], cwd: Path, timeout: float
 ) -> subprocess.CompletedProcess:
@@ -259,7 +277,7 @@ async def run_build(
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
 
     async with _semaphore:
-        cgroup = isolation.cgroups.create() if isolation.cgroups else None
+        cgroup = isolation.cgroups.create(settings.BUILD_MEMORY_MAX_PER_BUILD) if isolation.cgroups else None
         try:
             if cgroup:
                 command = ["/bin/sh", "-c", _ENTER_CGROUP, "sh", str(cgroup), *command]

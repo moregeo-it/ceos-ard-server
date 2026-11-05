@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import re
 import shutil
@@ -13,10 +14,14 @@ from app.schemas.events import EventType
 from app.services.build_service import BuildService
 from app.services.events_service import EventBroker, event_broker
 from app.services.workspace_service import WorkspaceService
+from app.utils.limits import FileTooLarge
 from app.utils.locks import build_locks, user_build_locks
-from app.utils.validation import FileTooLarge, normalize_workspace_path, validate_workspace_path
+from app.utils.toolchains import ToolchainError, toolchains
+from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
+
+DOCUMENT_FORMATS = ("pdf", "docx")
 
 
 class PreviewService:
@@ -44,6 +49,17 @@ class PreviewService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
         return build_info["output_file"]
 
+    async def _prepare(self, workspace: GitWorkspace) -> None:
+        """Install the workspace's toolchain before a build takes any lock, so a long install doesn't block e.g. GET .../previews/current."""
+        toolchain = BuildService.missing_toolchain(workspace.workspace_type, workspace.abs_path)
+        if toolchain is None:
+            return
+        # Without an actor, so the waiting client gets it too: the gateway withholds events from the client that caused them
+        self.broker.emit(workspace.id, EventType.PREVIEW_PREPARING, toolchain=toolchain.name)
+        # The build reports a failure
+        with contextlib.suppress(ToolchainError):
+            await toolchains.ensure(toolchain)
+
     @staticmethod
     def _require_pfs(workspace: GitWorkspace) -> None:
         if not workspace.workspace_type.pfs:
@@ -55,6 +71,7 @@ class PreviewService:
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         self._require_pfs(workspace)
 
+        await self._prepare(workspace)
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
             prefix = await self._build(workspace, user_id, workspace.pfs)
@@ -72,7 +89,7 @@ class PreviewService:
         prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
 
         async with build_locks(workspace_id):
-            if not BuildService.artifact(Path(prefix + ".html")):
+            if not BuildService.artifact(Path(prefix + ".html"), workspace.abs_path / "build"):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
             return await self._get_preview_files(workspace, file_prefix=prefix)
 
@@ -83,7 +100,7 @@ class PreviewService:
         if not build_dir.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build directory not found")
 
-        filepath = BuildService.artifact(Path(file_prefix + ".html"))
+        filepath = BuildService.artifact(Path(file_prefix + ".html"), build_dir)
         if not filepath:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no preview")
         try:
@@ -129,12 +146,16 @@ class PreviewService:
 
         Each download builds into its own folder, so it needs no `build_locks`, and no other build can rewrite it while it is sent.
         """
+        # Part of the document's file name, which mustn't lead out of its folder
+        if format not in DOCUMENT_FORMATS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The format must be one of {', '.join(DOCUMENT_FORMATS)}")
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         self._require_pfs(workspace)
+        await self._prepare(workspace)
         build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:
             prefix = await self._build(workspace, user_id, pfs, include_format=format, build_dir=build_dir)
-            document = BuildService.artifact(Path(f"{prefix}.{format}"))
+            document = BuildService.artifact(Path(f"{prefix}.{format}"), build_dir)
             if not document:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no document")
             return document

@@ -23,9 +23,10 @@ from app.services.github_service import GitHubAPIError, GitHubService, head_repo
 from app.services.share_service import ROLE_RANK, resolve_role
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
+from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
-from app.utils.validation import FileTooLarge, check_read_size, validate_pathname
+from app.utils.validation import validate_pathname
 from app.utils.yaml_cache import load_yaml_cached
 from app.workspace_types import Upstream, available_types, default_type, get_type
 
