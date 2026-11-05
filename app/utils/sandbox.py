@@ -285,10 +285,13 @@ async def run_build(
             try:
                 # The output folders are on disk, unlike /tmp, so their size is limited by watching them
                 max_size = parse_size(settings.BUILD_OUTPUT_MAX)
-                while not build.done():
+                while True:
                     await asyncio.wait([build], timeout=_OUTPUT_CHECK_INTERVAL)
-                    if not build.done() and await asyncio.to_thread(_output_exceeds, writable, max_size):
+                    # Once more when it's done: it may have written too much since the last check
+                    if await asyncio.to_thread(_output_exceeds, writable, max_size):
                         raise BuildOutputTooLarge()
+                    if build.done():
+                        break
             finally:
                 if not build.done():
                     build.cancel()

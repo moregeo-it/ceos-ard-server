@@ -15,6 +15,11 @@ with open(pathlib.Path(sys.argv[1], "large.bin"), "wb") as file:
     while True:
         file.write(b"x" * (1 << 16))
 """
+# Writes too much at once and is done before the next check
+FINITE = """
+import pathlib, sys
+pathlib.Path(sys.argv[1], "large.bin").write_bytes(b"x" * (8 << 20))
+"""
 MANY = """
 import pathlib, sys
 i = 0
@@ -43,7 +48,7 @@ def build(tmp_path: Path, script: str):
     )
 
 
-@pytest.mark.parametrize("script", [LARGE, MANY], ids=["large", "many files"])
+@pytest.mark.parametrize("script", [LARGE, FINITE, MANY], ids=["large", "large and done", "many files"])
 def test_a_build_that_writes_too_much_is_stopped(tmp_path, monkeypatch, script):
     monkeypatch.setattr(settings, "BUILD_OUTPUT_MAX", "5M")
     start = time.monotonic()
