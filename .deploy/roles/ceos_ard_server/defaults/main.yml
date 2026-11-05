@@ -48,6 +48,8 @@ app_build_timeout: 60
 app_build_cpu_cores: 3
 app_build_memory_max: 1536M
 app_build_memory_max_per_build: 700M
+# What a build may write into its output folder, a few MB usually
+app_build_output_max: 512M
 
 # --- Backups ----------------------------------------------------------------
 app_backup_db_keep: 30          # daily database copies to retain
