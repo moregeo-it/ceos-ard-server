@@ -39,6 +39,7 @@ GLOSSARY_UI_SCHEMA = {
 CLI_PACKAGE = "ceos-ard-cli"
 CLI_PYPROJECT_URL = "https://raw.githubusercontent.com/ceos-org/ceos-ard-cli/v{version}/pyproject.toml"
 REQUIREMENTS_FILE = "requirements.txt"
+MAX_REQUIREMENTS_SIZE = 4096
 
 
 def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
@@ -47,12 +48,20 @@ def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
     from 1.0.0 the highest installed version that satisfies it, else the version given.
     """
     invalid = ToolchainError(f"{REQUIREMENTS_FILE} may only contain one line like `{CLI_PACKAGE}~=1.2.3`")
-    try:
-        text = (workspace_path / REQUIREMENTS_FILE).read_text(encoding="utf-8")
-    except FileNotFoundError:
+    file = workspace_path / REQUIREMENTS_FILE
+    if not file.exists() and not file.is_symlink():
         raise ToolchainError(
             f"The workspace has no {REQUIREMENTS_FILE}, which sets the version of the CEOS-ARD CLI. Update the workspace from upstream to get it."
-        ) from None
+        )
+    # Read in the server, so only a regular file of the workspace, and only as much as one line needs
+    if file.is_symlink() or not file.is_file():
+        raise invalid
+    try:
+        with file.open("rb") as handle:
+            content = handle.read(MAX_REQUIREMENTS_SIZE + 1)
+        if len(content) > MAX_REQUIREMENTS_SIZE:
+            raise invalid
+        text = content.decode("utf-8")
     except (OSError, UnicodeDecodeError):
         raise invalid from None
     lines = [line for line in (line.split("#", 1)[0].strip() for line in text.splitlines()) if line]

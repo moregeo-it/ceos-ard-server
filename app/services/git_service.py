@@ -49,6 +49,16 @@ def _init_repository(path: str, bare: bool) -> pygit2.Repository:
     return repo
 
 
+def disable_symlinks(workspace_path: Path) -> None:
+    """For workspaces cloned before core.symlinks=false, so later syncs and reverts check out no symlinks either."""
+    try:
+        repo = pygit2.Repository(str(workspace_path))
+    except pygit2.GitError:
+        return
+    if "core.symlinks" not in repo.config or repo.config.get_bool("core.symlinks"):
+        repo.config["core.symlinks"] = False
+
+
 class GitService:
     def __init__(self):
         self.workspaces_root = settings.WORKSPACES_ROOT

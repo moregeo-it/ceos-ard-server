@@ -13,6 +13,7 @@ from app.schemas.workspace import PFS_ID_PATTERN
 from app.utils.process import OutputTooLarge
 from app.utils.sandbox import BuildOutOfMemory, run_build
 from app.utils.toolchains import ToolchainError, toolchains
+from app.utils.validation import check_read_size
 from app.workspace_types import WorkspaceType
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,19 @@ class BuildService:
 
     @staticmethod
     def artifact(path: Path) -> Path | None:
-        """A file the build wrote, unless it is missing or not a regular file: a build can leave symlinks to anything."""
-        return path if not path.is_symlink() and path.is_file() else None
+        """
+        A file the build wrote, unless it is missing or not a regular file: a build can leave symlinks to anything,
+        and a workspace cloned before core.symlinks=false can have its `build` folder link elsewhere.
+        """
+        if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
+            return None
+        return path
+
+    @staticmethod
+    def read_preview(path: Path) -> str:
+        """The preview HTML of a build, which the server reads into its memory, unlike documents it sends as files."""
+        check_read_size(path.stat().st_size, path.name)
+        return path.read_text(encoding="utf-8")
 
     @staticmethod
     def prepare(workspace_type: WorkspaceType, workspace_path: Path) -> None:

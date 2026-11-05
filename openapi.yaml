@@ -795,6 +795,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than the server reads into memory (32 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:
@@ -1240,6 +1246,12 @@ paths:
                   \ No newline at end of file
         '404':
           description: Workspace or file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than the server reads into memory (32 MB)
           content:
             application/json:
               schema:

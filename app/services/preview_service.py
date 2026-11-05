@@ -13,8 +13,8 @@ from app.schemas.events import EventType
 from app.services.build_service import BuildService
 from app.services.events_service import EventBroker, event_broker
 from app.services.workspace_service import WorkspaceService
-from app.utils.locks import build_locks
-from app.utils.validation import normalize_workspace_path, validate_workspace_path
+from app.utils.locks import build_locks, user_build_locks
+from app.utils.validation import FileTooLarge, normalize_workspace_path, validate_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +27,19 @@ class PreviewService:
         self.workspace_service = workspace_service or WorkspaceService()
         self.broker = broker or event_broker
 
-    async def _build(self, workspace: GitWorkspace, pfs: list[str] | None, include_format: str | None = None, build_dir: Path | None = None) -> str:
+    async def _build(
+        self, workspace: GitWorkspace, user_id: str, pfs: list[str] | None, include_format: str | None = None, build_dir: Path | None = None
+    ) -> str:
         """Run the build and return the output prefix; into the workspace's `build/` only under `build_locks`."""
-        build_info = await self.build_service.build(
-            workspace_path=workspace.abs_path,
-            workspace_id=workspace.id,
-            workspace_type=workspace.workspace_type,
-            pfs=pfs,
-            include_format=include_format,
-            build_dir=build_dir,
-        )
+        async with user_build_locks(user_id):
+            build_info = await self.build_service.build(
+                workspace_path=workspace.abs_path,
+                workspace_id=workspace.id,
+                workspace_type=workspace.workspace_type,
+                pfs=pfs,
+                include_format=include_format,
+                build_dir=build_dir,
+            )
         if build_info.get("status") != "success":
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=build_info.get("message"))
         return build_info["output_file"]
@@ -54,7 +57,7 @@ class PreviewService:
 
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
-            prefix = await self._build(workspace, workspace.pfs)
+            prefix = await self._build(workspace, user_id, workspace.pfs)
             html = await self._get_preview_files(workspace, file_prefix=prefix)
 
         self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(workspace.pfs))
@@ -83,7 +86,10 @@ class PreviewService:
         filepath = BuildService.artifact(Path(file_prefix + ".html"))
         if not filepath:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no preview")
-        html_content = filepath.read_text(encoding="utf-8")
+        try:
+            html_content = BuildService.read_preview(filepath)
+        except FileTooLarge as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced a preview that is too large") from e
         # Only the owner of an active workspace can edit; everyone else opens the file read-only
         label = "Edit" if workspace.viewer_role == "owner" and workspace.status != WorkspaceStatus.ARCHIVED else "View"
 
@@ -127,7 +133,7 @@ class PreviewService:
         self._require_pfs(workspace)
         build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:
-            prefix = await self._build(workspace, pfs, include_format=format, build_dir=build_dir)
+            prefix = await self._build(workspace, user_id, pfs, include_format=format, build_dir=build_dir)
             document = BuildService.artifact(Path(f"{prefix}.{format}"))
             if not document:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no document")

@@ -5,6 +5,7 @@ LOCK ORDERING (single event loop, single process — see each lock's note):
     workspace lock (run_exclusive): OUTER
     fork_locks (per user): INNER — only ever taken while a workspace lock is held
     build_locks: independent — builds never take the workspace lock
+    user_build_locks (per user): INNER — taken inside build_locks, never the other way round
     refresh_locks (per user): independent — taken in the auth dependency, before any handler runs
 
 Never hold two workspace locks at once. The cross-process file lock sits strictly inside the
@@ -83,6 +84,10 @@ fork_locks = KeyedLocks()
 # One lock per build output prefix (workspace id + pfs selection): serializes preview builds
 # that would clobber each other's output, without blocking file edits behind a 60s build.
 build_locks = KeyedLocks()
+
+# One lock per user around builds: a user waits for their own previous build instead of taking
+# another of the BUILD_CONCURRENCY slots, so one user can't keep everyone else's builds waiting.
+user_build_locks = KeyedLocks()
 
 # One lock per user, serializing provider token refreshes: GitHub's refresh token is single-use,
 # so concurrent requests wait for the first renewal instead of each spending it.

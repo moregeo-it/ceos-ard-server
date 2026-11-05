@@ -25,7 +25,7 @@ from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
-from app.utils.validation import validate_pathname
+from app.utils.validation import FileTooLarge, check_read_size, validate_pathname
 from app.utils.yaml_cache import load_yaml_cached
 from app.workspace_types import Upstream, available_types, default_type, get_type
 
@@ -712,12 +712,13 @@ class WorkspaceService:
 
                     if documents_path.exists():
                         try:
+                            check_read_size(documents_path.stat().st_size, documents_path.name)
                             data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
                             # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
                             # This means we will loose e.g. comments in the document.yaml file.
                             # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
                             # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
-                        except YAMLValidationError as ye:
+                        except (YAMLValidationError, FileTooLarge) as ye:
                             raise HTTPException(
                                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                             ) from ye

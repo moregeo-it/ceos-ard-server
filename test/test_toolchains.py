@@ -9,6 +9,7 @@ from conftest import file_url
 
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
+from app.utils import validation
 from app.utils.toolchains import ToolchainError, ToolchainSpec, _manifest, toolchains
 from app.workspace_types.ceos_ard import cli_toolchain_spec, cli_version
 
@@ -94,6 +95,19 @@ def test_anything_else_in_requirements_txt_is_refused(tmp_path, text):
 
 def test_requirements_txt_that_is_no_text_is_refused(tmp_path):
     (tmp_path / "requirements.txt").write_bytes(b"ceos-ard-cli~=0.5.9\xff\xfe\n")
+    with pytest.raises(ToolchainError, match="may only contain one line"):
+        cli_version(tmp_path)
+
+
+def test_requirements_txt_is_read_only_as_far_as_needed(tmp_path):
+    (tmp_path / "requirements.txt").write_text("ceos-ard-cli~=0.5.9\n" + "#" * 10_000)
+    with pytest.raises(ToolchainError, match="may only contain one line"):
+        cli_version(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_requirements_txt_that_is_a_symlink_is_refused(tmp_path):
+    (tmp_path / "requirements.txt").symlink_to("/dev/zero")
     with pytest.raises(ToolchainError, match="may only contain one line"):
         cli_version(tmp_path)
 
@@ -216,3 +230,17 @@ def test_builds_do_not_write_through_a_symlinked_build_folder(client, workspace,
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The build folder of the workspace is not a folder."
     assert list((tmp_path / "elsewhere").iterdir()) == []
+
+    # Nor show what is there, e.g. the preview of another workspace
+    (tmp_path / "elsewhere" / "NRB.html").write_text("<p>Another workspace</p>")
+    response = client.get(f"/workspaces/{workspace['id']}/previews/current")
+    assert response.status_code == 404, response.text
+    assert "Another workspace" not in response.text
+
+
+def test_previews_too_large_to_hold_in_memory_are_refused(client, workspace, fake_toolchains, monkeypatch):
+    save_requirements(client, workspace, "ceos-ard-cli==0.5.9\n")
+    monkeypatch.setattr(validation, "MAX_READ_SIZE", 5)
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "The build produced a preview that is too large"

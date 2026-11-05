@@ -1,10 +1,13 @@
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from app import dependencies
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
+from app.services.preview_service import PreviewService
 
 
 @pytest.fixture
@@ -55,3 +58,28 @@ def test_download_document(client, workspace, builds, format, media_type):
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith(media_type)
     assert builds[0]["pfs"] == ["NRB"]
+
+
+def test_each_user_runs_one_build_at_a_time():
+    running = []
+    peak = 0
+
+    async def build(**kwargs):
+        nonlocal peak
+        running.append(kwargs["workspace_id"])
+        peak = max(peak, len(running))
+        await asyncio.sleep(0.05)
+        running.pop()
+        return {"status": "success", "output_file": "prefix"}
+
+    service = PreviewService(build_service=SimpleNamespace(build=build))
+    workspace = SimpleNamespace(abs_path=Path("."), id="workspace", workspace_type=None)
+
+    async def builds(users):
+        await asyncio.gather(*(service._build(workspace, user, ["NRB"]) for user in users))
+
+    asyncio.run(builds(["jane", "jane", "jane"]))
+    assert peak == 1
+    peak = 0
+    asyncio.run(builds(["jane", "john"]))
+    assert peak == 2

@@ -12,6 +12,8 @@ from pathlib import Path
 
 from yaml import load as yaml_load
 
+from app.utils.validation import check_read_size
+
 logger = logging.getLogger(__name__)
 
 # Bounded so long-gone workspaces cannot grow it forever
@@ -30,6 +32,7 @@ def load_yaml_cached(path: Path, loader) -> object:
     parse (create_workspace_pfs does) must load directly instead, or they poison the cache.
     """
     stat = path.stat()
+    check_read_size(stat.st_size, path.name)
     key = str(path)
     with _lock:
         cached = _cache.get(key)
