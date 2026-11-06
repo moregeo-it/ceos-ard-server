@@ -21,7 +21,7 @@ from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.limits import FileTooLarge, check_read_size
-from app.utils.locks import run_exclusive
+from app.utils.locks import run_exclusive, user_build_locks
 from app.utils.validation import (
     ignore_file_path,
     normalize_workspace_path,
@@ -508,22 +508,36 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
 
-    async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
-        if not search_query:
+    async def search_files(self, db: Session, workspace_id: str, search_query: str | None, user_id: str, filters: dict[str, set[str]] | None = None):
+        query = (search_query or "").strip()
+        filters = {key: values for key, values in (filters or {}).items() if values}
+        if not query and not filters:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query is required")
-        if len(search_query.strip()) < 3:
+        if query and len(query) < 3:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query must be at least 3 characters long")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace_type = workspace.workspace_type
+
+        def search(files: list[dict]) -> list[dict]:
+            if filters:
+                files = [
+                    file
+                    for file in files
+                    if not file["is_directory"]
+                    and file["status"] != "deleted"
+                    and workspace_type.matches_search_filters(workspace.abs_path, file["path"], filters)
+                ]
+                if not query:
+                    return [{**file, "type": "filter"} for file in sorted(files, key=lambda file: file["path"])]
+            return self._search_file_contents(files, workspace.abs_path, query.lower(), workspace_type.searchable_extensions)
 
         try:
             files = await self.get_workspace_files("/", db, workspace_id, user_id, recurse=True)
 
             # In a thread: reads every searchable file. Deliberately lock-free — a racing save
             # yields at worst a stale hit, and the per-file error handling covers deletions.
-            return await asyncio.to_thread(
-                self._search_file_contents, files, workspace.abs_path, search_query.lower(), workspace.workspace_type.searchable_extensions
-            )
+            return await asyncio.to_thread(search, files)
         except HTTPException:
             raise
         except Exception as e:
@@ -758,7 +772,9 @@ class FileService:
         repo = get_repo(workspace.abs_path)
 
         try:
-            usage = await workspace.workspace_type.file_usage(workspace.abs_path, rel_file_path)
+            # Can run in the build sandbox, e.g. for glossary terms
+            async with user_build_locks(user_id):
+                usage = await workspace.workspace_type.file_usage(workspace.abs_path, rel_file_path)
         except Exception as e:
             # The file still opens, just without its usage
             logger.warning(f"Usage of {rel_file_path} in workspace {workspace_id} failed: {e}")

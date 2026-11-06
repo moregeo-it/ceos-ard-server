@@ -27,7 +27,7 @@ def test_list_types(client):
     response = client.get("/types")
     assert response.status_code == 200, response.text
     types = response.json()
-    assert [item["id"] for item in types] == ["ceos-ard"]
+    assert [item["id"] for item in types] == ["ceos-ard", "eo-glossary"]
     ceos_ard = types[0]
     assert ceos_ard["title"] == "CEOS-ARD"
     assert ceos_ard["available"] is True
