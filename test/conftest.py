@@ -19,6 +19,7 @@ os.environ.update(
         "DATABASE_URL": f"sqlite:///{(DATA / 'test.db').as_posix()}",
         "WORKSPACES_ROOT": str(DATA / "workspaces"),
         "SECRET_KEY": "test-secret",
+        "TOKEN_ENCRYPTION_KEY": "uHS3sy9D3UIkMkeLynxz1U6-YiMhQ8LeE2dRWeyFZv8=",
         "SESSION_COOKIE_SECURE": "false",
         "ENVIRONMENT": "development",
         "CEOS_ARD_ORG": "ceos-org",

@@ -17,6 +17,7 @@ python-dotenv = ">=1.1.1,<2"
 sqlalchemy = ">=2.0.41,<3"
 itsdangerous = ">=2.2.0,<3"
 pyjwt = ">=2.10.1,<3"
+cryptography = ">=46.0.7,<47"
 strictyaml = ">=1.7.3,<2"
 PyYAML = ">=6.0,<7" # todo: replace usage with strictyaml once the CLI is more library friendly
 pygit2 = ">=1.17.0,<2"
