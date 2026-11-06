@@ -96,9 +96,9 @@ class EventBroker:
                 queue.put_nowait(envelope)
             except asyncio.QueueFull:
                 logger.warning(
-                    "Realtime queue full for workspace %s; forcing subscriber to disconnect and resync (dropped %s)",
-                    workspace_id,
+                    "Realtime queue full; forcing subscriber to disconnect and resync (dropped %s of workspace %s)",
                     event.get("type"),
+                    workspace_id,
                 )
                 self._signal(queue, FORCE_RESYNC)
 

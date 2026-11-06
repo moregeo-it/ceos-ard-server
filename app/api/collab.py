@@ -26,7 +26,7 @@ router = APIRouter(tags=["Realtime"])
 # Delivering one of these ends a workspace's connection: the viewer's access is gone, so it shouldn't reconnect.
 # This is also what makes mid-session revocation close the socket - `collaborator.revoked` is targeted at the
 # revoked user (see share_service.revoke_collaborator), so only their connection receives it and then closes.
-_CLOSING_EVENTS = {EventType.COLLABORATOR_REVOKED.value, EventType.WORKSPACE_DELETED.value}
+_CLOSING_EVENTS = frozenset({EventType.COLLABORATOR_REVOKED.value, EventType.WORKSPACE_DELETED.value})
 
 # Gateway-only fields, stripped before sending.
 _INTERNAL_FIELDS = frozenset({"actor_client_id"})
