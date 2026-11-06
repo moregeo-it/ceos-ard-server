@@ -220,3 +220,7 @@ __marimo__/
 
 # OS generated files
 .DS_Store
+
+# Toolchains of the builds and their browsers
+toolchains/
+playwright-browsers/

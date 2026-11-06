@@ -1,13 +1,22 @@
+import asyncio
 import hashlib
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import PFS_ID_PATTERN
-from app.utils.cli_utils import run
+from app.utils import limits
+from app.utils.process import OutputTooLarge
+from app.utils.sandbox import BuildOutOfMemory, BuildOutputTooLarge, run_build
+from app.utils.toolchains import Toolchain, ToolchainError, toolchains
+from app.workspace_types import WorkspaceType
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +38,67 @@ class BuildService:
             name = hashlib.sha256(name.encode()).hexdigest()
         return str((build_dir or workspace_path / "build") / name)
 
+    @staticmethod
+    def artifact(path: Path, output_dir: Path) -> Path | None:
+        """
+        A file the build wrote directly into `output_dir`, unless it is missing or not a regular file: a build can leave
+        symlinks and folders that lead anywhere, and a workspace cloned before core.symlinks=false can have its `build`
+        folder link elsewhere.
+        """
+        if path.parent != output_dir or output_dir.is_symlink() or path.is_symlink() or not path.is_file():
+            return None
+        return path
+
+    @staticmethod
+    def read_preview(path: Path) -> str:
+        """The preview HTML of a build, which the server reads into its memory, unlike documents it sends as files."""
+        limits.check_read_size(path.stat().st_size, path.name, limits.MAX_PREVIEW_SIZE)
+        return path.read_text(encoding="utf-8")
+
+    @staticmethod
+    def prepare(workspace_type: WorkspaceType, workspace_path: Path) -> None:
+        """Start installing the workspace's toolchain in the background, so its first build doesn't wait for it."""
+        try:
+            toolchain = workspace_type.toolchain(workspace_path)
+        except ToolchainError:
+            return  # The build reports it
+        except Exception as e:
+            # Workspace content, so it mustn't break e.g. the server's start
+            logger.warning(f"Can't prepare the toolchain of {workspace_path}: {e}")
+            return
+        if toolchain:
+            toolchains.prepare(toolchain)
+
+    def prepare_all(self, db: Session) -> None:
+        """Remove the toolchains no workspace uses anymore, and start installing those of active workspaces, e.g. after a deployment."""
+        used = set()
+        for workspace in db.query(GitWorkspace):
+            try:
+                if toolchain := workspace.workspace_type.toolchain(workspace.abs_path):
+                    used.add(toolchain.name)
+            except Exception:
+                continue
+        toolchains.remove_unused(used)
+        for workspace in db.query(GitWorkspace).filter(GitWorkspace.status == WorkspaceStatus.ACTIVE):
+            self.prepare(workspace.workspace_type, workspace.abs_path)
+
+    @staticmethod
+    def missing_toolchain(workspace_type: WorkspaceType, workspace_path: Path) -> Toolchain | None:
+        """The toolchain a build would have to install first, if any; a build reports invalid ones."""
+        try:
+            toolchain = workspace_type.toolchain(workspace_path)
+        except ToolchainError:
+            return None
+        return toolchain if toolchain and not toolchains.is_installed(toolchain.name) else None
+
     async def build(
-        self, workspace_path: Path, workspace_id: str, pfs: list[str], include_format: str | None = None, build_dir: Path | None = None
+        self,
+        workspace_path: Path,
+        workspace_id: str,
+        workspace_type: WorkspaceType,
+        pfs: list[str],
+        include_format: str | None = None,
+        build_dir: Path | None = None,
     ) -> dict[str, Any]:
         if not workspace_path or not workspace_id:
             raise ValueError("Workspace path and ID must be provided")
@@ -40,24 +108,47 @@ class BuildService:
 
         output_file = self.output_prefix(workspace_path, pfs, build_dir)
 
-        logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)}")
+        def error(message: str) -> dict[str, Any]:
+            return {"status": "error", "message": message, "output_file": output_file}
 
-        cmd_args = ["ceos-ard", "generate", *pfs, "-o", output_file, "-i", str(workspace_path), "--pdf", "--docx"]
+        try:
+            toolchain = workspace_type.toolchain(workspace_path)
+            if toolchain is None:
+                return error(f"Workspaces of type {workspace_type.id} can't be built.")
+            # Its own timeout, not the build's
+            await toolchains.ensure(toolchain)
+        except ToolchainError as e:
+            return error(str(e))
 
-        if include_format == "pdf":
-            cmd_args.remove("--pdf")
-        elif include_format == "docx":
-            cmd_args.remove("--docx")
+        logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)} and the toolchain {toolchain.name}")
+        command = workspace_type.build_command(workspace_path, pfs, output_file, include_format)
+        output_dir = Path(output_file).parent
+        # The build may write there, so not through a symlink, e.g. a committed `build` link
+        if output_dir.is_symlink() or not output_dir.resolve().is_relative_to((build_dir or workspace_path).resolve()):
+            return error("The build folder of the workspace is not a folder.")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            process = await run_build(
+                command,
+                path=toolchains.bin_path(toolchain.name),
+                read_only=[toolchains.path(toolchain.name), workspace_path],
+                writable=[output_dir],
+                hidden=[workspace_path / ".git"],
+                cwd=workspace_path,
+                timeout=settings.BUILD_TIMEOUT,
+            )
+        except TimeoutError:
+            return error(f"Generating the document took longer than {settings.BUILD_TIMEOUT} seconds and was stopped.")
+        except BuildOutOfMemory:
+            return error("Generating the document needed too much memory and was stopped.")
+        except OutputTooLarge:
+            return error("Generating the document printed too much output and was stopped.")
+        except BuildOutputTooLarge:
+            # Not left on the disk until the next build
+            await asyncio.to_thread(shutil.rmtree, output_dir, ignore_errors=True)
+            return error("Generating the document wrote too much and was stopped.")
 
-        logger.debug(f"Executing build command: {' '.join(cmd_args)}")
-
-        process = await run(*cmd_args)
         if process.returncode == 0:
             return {"status": "success", "message": "Build completed successfully.", "output_file": output_file}
-        else:
-            logger.error(f"Build failed for workspace {workspace_id} with code {process.returncode}:")
-            return {
-                "status": "error",
-                "message": "Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).",
-                "output_file": output_file,
-            }
+        logger.error(f"Build failed for workspace {workspace_id} with code {process.returncode}: {process.stderr.decode(errors='replace')[-2000:]}")
+        return error("Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).")

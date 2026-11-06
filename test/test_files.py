@@ -1,7 +1,18 @@
+import sys
+from collections import OrderedDict
+from pathlib import Path
+
+import pygit2
 import pytest
 from conftest import file_url
+from fastapi.testclient import TestClient
 
+from app.db.database import SessionLocal
+from app.main import app
+from app.models.workspace import GitWorkspace
 from app.services.events_service import event_broker
+from app.utils import limits, yaml_cache
+from app.utils.pfs_utils import PlainStringSafeLoader
 from app.workspace_types.ceos_ard import CeosArdType
 
 MB = 1024 * 1024
@@ -28,6 +39,32 @@ def test_search_skips_hidden_folders(client, workspace):
 @pytest.mark.parametrize("path", ["/templates", "/.github", "/.git"])
 def test_hidden_folders_are_not_listed(client, workspace, path):
     response = client.get(f"/workspaces/{workspace['id']}/files", params={"path": path})
+    assert response.status_code in (400, 403, 404), response.text
+
+
+def test_workspaces_cloned_with_symlinks_check_out_none_after_a_restart(client, workspace):
+    with SessionLocal() as db:
+        path = str(db.get(GitWorkspace, workspace["id"]).abs_path)
+    # As before core.symlinks=false was set for new clones
+    pygit2.Repository(path).config["core.symlinks"] = True
+    with TestClient(app):
+        pass
+    assert pygit2.Repository(path).config.get_bool("core.symlinks") is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_symlinks_are_not_listed_or_searched(client, workspace, tmp_path):
+    secret = tmp_path / "secret.yaml"
+    secret.write_text("SECRET_KEY: must-not-leak\n")
+    with SessionLocal() as db:
+        root = db.get(GitWorkspace, workspace["id"]).abs_path
+    (root / "requirements" / "leak.yaml").symlink_to(secret)
+    (root / "outside").symlink_to(tmp_path, target_is_directory=True)
+
+    assert "leak.yaml" not in names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/requirements"}))
+    assert "outside" not in names(client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/"}))
+    assert names(client.get(f"/workspaces/{workspace['id']}/search", params={"query": "must-not-leak"})) == []
+    response = client.get(file_url(workspace, "files", "/requirements/leak.yaml"))
     assert response.status_code in (400, 403, 404), response.text
 
 
@@ -165,3 +202,55 @@ def test_saving_restores_deleted_files(client, workspace):
     response = client.put(file_url(workspace, "files", "/requirements/general/unused.yaml"), content="title: Unused\n")
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "modified"
+
+
+def test_files_too_large_to_hold_in_memory_are_not_read(client, workspace, monkeypatch):
+    monkeypatch.setattr(limits, "MAX_TEXT_SIZE", 1000)
+    with SessionLocal() as db:
+        root = db.get(GitWorkspace, workspace["id"]).abs_path
+    large = "description: needle\n" + "#" * 2000 + "\n"
+    (root / "README.md").write_text(large)
+    (root / "pfs/SR/document.yaml").write_text("title: Surface Reflectance\n" + large)
+
+    response = client.get(file_url(workspace, "files", "/README.md"))
+    assert response.status_code == 413, response.text
+    response = client.get(file_url(workspace, "diffs", "/README.md"))
+    assert response.status_code == 413, response.text
+    assert names(client.get(f"/workspaces/{workspace['id']}/search", params={"query": "needle"})) == []
+    # The PFS whose document can't be read is left out
+    response = client.get(file_url(workspace, "context", "/requirements/general/metadata-machine-readable.yaml"))
+    assert response.json()["usage"] == [{"label": "NRB", "path": "/pfs/NRB/document.yaml"}]
+
+
+def test_diff_of_a_changed_file(client, workspace):
+    response = client.put(file_url(workspace, "files", "/README.md"), content="# Changed\n")
+    assert response.status_code == 200, response.text
+    response = client.get(file_url(workspace, "diffs", "/README.md"))
+    assert response.status_code == 200, response.text
+    assert "-# CEOS-ARD" in response.text
+    assert "+# Changed" in response.text
+
+
+def test_other_files_have_a_limit_of_their_own(client, workspace, monkeypatch):
+    with SessionLocal() as db:
+        (db.get(GitWorkspace, workspace["id"]).abs_path / "images" / "large.png").write_bytes(b"x" * 2000)
+    # Larger than text may be, but not than other files
+    monkeypatch.setattr(limits, "MAX_TEXT_SIZE", 1000)
+    response = client.get(file_url(workspace, "files", "/images/large.png"))
+    assert response.status_code == 200, response.text
+    assert response.content == b"x" * 2000
+
+    monkeypatch.setattr(limits, "MAX_BINARY_SIZE", 1000)
+    response = client.get(file_url(workspace, "files", "/images/large.png"))
+    assert response.status_code == 413, response.text
+
+
+def test_the_yaml_cache_holds_a_limited_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(yaml_cache, "_MAX_BYTES", 250)
+    monkeypatch.setattr(yaml_cache, "_cache", OrderedDict())
+    monkeypatch.setattr(yaml_cache, "_cached_bytes", 0)
+    for name in ("a", "b", "c"):
+        (tmp_path / f"{name}.yaml").write_text(f"name: {name}\n" + "#" * 90 + "\n")
+        yaml_cache.load_yaml_cached(tmp_path / f"{name}.yaml", PlainStringSafeLoader)
+    assert [Path(key).name for key in yaml_cache._cache] == ["b.yaml", "c.yaml"]
+    assert yaml_cache._cached_bytes <= 250

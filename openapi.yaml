@@ -783,8 +783,20 @@ paths:
           description: File content
           content:
             '*/*': {}
+        '400':
+          description: The path is outside the workspace, e.g. through a symlink
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than the server reads into memory (32 MB)
           content:
             application/json:
               schema:
@@ -1238,6 +1250,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than the server reads into memory (32 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:
@@ -1366,6 +1384,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          description: |
+            The preview could not be built, e.g. invalid content, a `requirements.txt` that doesn't
+            name a valid CLI version, or a build that took too long or needed too much memory.
+            `detail` says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/previews/current:
     get:
@@ -1431,6 +1458,12 @@ paths:
               $ref: '#/components/headers/ETag'
             Cache-Control:
               $ref: '#/components/headers/CacheControl'
+        '400':
+          description: The path is outside the preview, e.g. through a symlink
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: File not found
           content:
@@ -1465,6 +1498,12 @@ paths:
           content:
             application/pdf: {}
             application/vnd.openxmlformats-officedocument.wordprocessingml.document: {}
+        '400':
+          description: A format other than `pdf` or `docx`, or no or an invalid PFS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
           description: Forbidden - missing `X-Client-Id`
           content:
@@ -2929,6 +2968,7 @@ components:
         - workspace.synced
         - workspace.updated
         - preview.generated
+        - preview.preparing
         - collaborator.revoked
         - collaborator.updated
         - workspace.archived
@@ -2945,6 +2985,7 @@ components:
         - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic sync on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
         - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
         - `preview.generated`: the owner generated the preview via `POST .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
+        - `preview.preparing`: a preview or download waits for the toolchain of the workspace's CLI version to be installed (see `toolchain`), up to a few minutes.
         - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
@@ -2984,6 +3025,7 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceSynced'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
         - $ref: '#/components/schemas/WorkspaceEventPreviewGenerated'
+        - $ref: '#/components/schemas/WorkspaceEventPreviewPreparing'
         - $ref: '#/components/schemas/WorkspaceEventCollaboratorRevoked'
         - $ref: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
@@ -3001,6 +3043,7 @@ components:
           workspace.synced: '#/components/schemas/WorkspaceEventWorkspaceSynced'
           workspace.updated: '#/components/schemas/WorkspaceEventWorkspaceUpdated'
           preview.generated: '#/components/schemas/WorkspaceEventPreviewGenerated'
+          preview.preparing: '#/components/schemas/WorkspaceEventPreviewPreparing'
           collaborator.revoked: '#/components/schemas/WorkspaceEventCollaboratorRevoked'
           collaborator.updated: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
@@ -3281,6 +3324,25 @@ components:
               items:
                 type: string
               description: The PFS list the preview was generated for.
+
+    WorkspaceEventPreviewPreparing:
+      description: |
+        A preview (`POST .../previews`) or download (`GET .../download`) waits for the toolchain of
+        the workspace's CLI version to be installed, once per version, up to a few minutes. The
+        request answers once the toolchain is installed and the document built. Sent to every
+        client of the workspace, the waiting one included, so `actor_user_id` is `null`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - toolchain
+          properties:
+            type:
+              const: preview.preparing
+            toolchain:
+              type: string
+              description: The toolchain being installed, e.g. `ceos-ard-cli-0.5.9`.
+              example: ceos-ard-cli-0.5.9
 
     WorkspaceEventWorkspaceDeleted:
       description: |

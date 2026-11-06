@@ -42,6 +42,23 @@ class RemoteAccessError(HTTPException):
         super().__init__(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
 
 
+def _init_repository(path: str, bare: bool) -> pygit2.Repository:
+    repo = pygit2.init_repository(path, bare)
+    # Symlinks in the repository become plain files: a build or a preview could otherwise read through them
+    repo.config["core.symlinks"] = False
+    return repo
+
+
+def disable_symlinks(workspace_path: Path) -> None:
+    """For workspaces cloned before core.symlinks=false, so later syncs and reverts check out no symlinks either."""
+    try:
+        repo = pygit2.Repository(str(workspace_path))
+    except pygit2.GitError:
+        return
+    if "core.symlinks" not in repo.config or repo.config.get_bool("core.symlinks"):
+        repo.config["core.symlinks"] = False
+
+
 class GitService:
     def __init__(self):
         self.workspaces_root = settings.WORKSPACES_ROOT
@@ -62,7 +79,7 @@ class GitService:
 
             # Clone with full history (no depth limit) to preserve upstream history
             callbacks = UserPassCredentials(user.username, user.access_token)
-            repo = await asyncio.to_thread(pygit2.clone_repository, clone_url, str(workspace_path), callbacks=callbacks)
+            repo = await asyncio.to_thread(pygit2.clone_repository, clone_url, str(workspace_path), callbacks=callbacks, repository=_init_repository)
 
             # Add upstream remote
             upstream_url = f"https://github.com/{upstream_owner}/{upstream_repo}"

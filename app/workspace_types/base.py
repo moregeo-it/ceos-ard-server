@@ -1,9 +1,11 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.utils.toolchains import Toolchain
 
 DEFAULT_HIDDEN_PATHS = frozenset({".git", ".github"})
 
@@ -125,6 +127,17 @@ class WorkspaceType:
 
     async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return None
+
+    # Files of the workspace that choose its toolchain: saving them prepares the new toolchain
+    toolchain_files: ClassVar[frozenset[str]] = frozenset()
+
+    def toolchain(self, workspace_path: Path) -> Toolchain | None:
+        """The toolchain the workspace builds with; raises ToolchainError if the workspace doesn't name a valid one."""
+        return None
+
+    def build_command(self, workspace_path: Path, pfs: list[str], output_prefix: str, include_format: str | None) -> list[str]:
+        """The build command, run with the programs of the toolchain."""
+        raise NotImplementedError(f"Workspaces of type {self.id} can't be built")
 
     def to_public(self, available: bool) -> dict[str, Any]:
         return {

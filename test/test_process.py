@@ -6,7 +6,8 @@ import time
 
 import pytest
 
-from app.utils.cli_utils import run
+from app.utils.limits import MB
+from app.utils.process import OutputTooLarge, run
 
 # Starts a grandchild that writes the time into a file every 0.1 s for 30 s, then waits
 CHILD = """
@@ -77,3 +78,10 @@ def test_a_timeout_returns_even_if_a_process_left_the_group(tmp_path):
                 os.kill(int(pid_file.read_text()), signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_a_command_that_prints_too_much_is_stopped():
+    start = time.monotonic()
+    with pytest.raises(OutputTooLarge):
+        asyncio.run(run("python", "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)", max_output=1 * MB))
+    assert time.monotonic() - start < 20

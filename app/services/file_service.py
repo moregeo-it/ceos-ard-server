@@ -13,12 +13,14 @@ from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
 from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
+from app.services.build_service import BuildService
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
 from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
+from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import run_exclusive
 from app.utils.validation import (
     ignore_file_path,
@@ -152,6 +154,9 @@ class FileService:
             # Add deleted files and folders
             for filepath, state in status_map.items():
                 file = Path(filepath)
+                # A symlink's key is where it points to
+                if not file.is_relative_to(workspace.abs_path):
+                    continue
                 is_directory = None
                 if state == "deleted:folder":
                     state = "deleted"
@@ -236,10 +241,14 @@ class FileService:
         return await run_exclusive(workspace_id, transaction)
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
+        """The file to send and its media type; sent from disk, so it never needs to fit into memory."""
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file", rules=workspace.workspace_type.paths)
         try:
-            return {"content": file_path.read_bytes(), "media_type": get_file_media_type(file_path)}
+            check_read_size(file_path.stat().st_size, file_path.name)
+            return {"path": file_path, "media_type": get_file_media_type(file_path)}
+        except FileTooLarge as e:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
@@ -291,6 +300,8 @@ class FileService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to store file: {str(e)}") from e
             event = EventType.FILE_CREATED if created else EventType.FILE_SAVED
             self.broker.emit(workspace_id, event, actor_user_id=user_id, path=result["path"], file=result)
+            if relative_path in workspace.workspace_type.toolchain_files:
+                BuildService.prepare(workspace.workspace_type, workspace.abs_path)
             return result
 
         return await run_exclusive(workspace_id, transaction)
@@ -542,6 +553,7 @@ class FileService:
 
             # Search within file content
             try:
+                check_read_size(filepath.stat().st_size, filepath.name)
                 with filepath.open(encoding="utf-8", errors="ignore") as f:
                     for i, line in enumerate(f):
                         start = line.lower().find(pattern)
@@ -556,7 +568,7 @@ class FileService:
                             )
                             search_results.append(file)
                             break  # todo: shall we return all results from within a file?
-            except (UnicodeDecodeError, FileNotFoundError) as e:
+            except (UnicodeDecodeError, FileNotFoundError, FileTooLarge) as e:
                 logger.warning(f"Could not read file '{file['path']}': {str(e)}")
 
         return search_results
@@ -586,27 +598,36 @@ class FileService:
             diff.find_similar()  # Enable rename detection
 
             # Find the specific file in the diff
-            for patch in diff:
-                patch_path = patch.delta.new_file.path
-                if patch_path == relative_path_str:
-                    return patch.text
-                # Handle renamed files
-                if info and info.get("status") == "renamed":
-                    if patch.delta.old_file.path == info.get("source") or patch.delta.new_file.path == relative_path_str:
-                        return patch.text
+            for index, delta in enumerate(diff.deltas):
+                renamed = info and info.get("status") == "renamed" and delta.old_file.path == info.get("source")
+                if delta.new_file.path == relative_path_str or renamed:
+                    return self._patch_text(repo, diff, index, delta, target_path)
 
             # If file not found in staged diff, check working directory changes. The no-argument
             # form diffs index-to-workdir; passing the Index object is not a valid overload on
             # pygit2 1.19 and raises TypeError, which escaped the GitError handler below as a 500.
             diff_workdir = repo.diff()
-            for patch in diff_workdir:
-                if patch.delta.new_file.path == relative_path_str:
-                    return patch.text
+            for index, delta in enumerate(diff_workdir.deltas):
+                if delta.new_file.path == relative_path_str:
+                    return self._patch_text(repo, diff_workdir, index, delta, target_path)
 
             return ""
+        except FileTooLarge as e:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
         except pygit2.GitError as e:
             logger.error(f"Git error for {relative_path_str}: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file diff: {str(e)}") from e
+
+    @staticmethod
+    def _patch_text(repo: pygit2.Repository, diff: pygit2.Diff, index: int, delta: pygit2.DiffDelta, target_path: Path) -> str:
+        """The patch of one file, unless one of its sides is too large to hold in memory."""
+        for side in (delta.old_file, delta.new_file):
+            if side.id != pygit2.Oid(hex="0" * 40) and side.id in repo.odb:
+                _, size = repo.odb.read_header(side.id)
+                check_read_size(size, target_path.name)
+        if target_path.is_file():
+            check_read_size(target_path.stat().st_size, target_path.name)
+        return diff[index].text
 
     def _revert_commit(self, repo: pygit2.Repository, workspace_id: str, commit_id: str, reason: str):
         """Soft-reset HEAD to its parent, so the commit's changes go back to being staged."""

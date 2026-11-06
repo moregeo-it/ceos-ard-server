@@ -25,6 +25,8 @@ class EventType(str, Enum):
     WORKSPACE_UPDATED = "workspace.updated"
     # The owner generated the preview; every other client fetches GET .../previews/current.
     PREVIEW_GENERATED = "preview.generated"
+    # A preview or download waits for the toolchain of the workspace's CLI version to be installed
+    PREVIEW_PREPARING = "preview.preparing"
     COLLABORATOR_REVOKED = "collaborator.revoked"
     # The owner changed this user's mode; sent only to that user, who refetches the workspace
     COLLABORATOR_UPDATED = "collaborator.updated"

@@ -23,6 +23,7 @@ from app.services.github_service import GitHubAPIError, GitHubService, head_repo
 from app.services.share_service import ROLE_RANK, resolve_role
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
+from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
 from app.utils.validation import validate_pathname
@@ -109,6 +110,7 @@ class WorkspaceService:
                     db.commit()
                     db.refresh(workspace)
                     logger.info(f"Successfully setup workspace {workspace.id}")
+                    self.build_service.prepare(workspace_type, workspace.abs_path)
                 else:
                     db.rollback()
                     raise Exception("Failed to setup workspace")
@@ -331,6 +333,7 @@ class WorkspaceService:
             # (read-only collaborators) must reload the tree.
             if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
                 self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
+                self.build_service.prepare(workspace.workspace_type, workspace.abs_path)
             # Like restoring the branch, only for live work: a merged or closed proposal takes no updates
             if restore_branch:
                 result.upstream = self.git_service.upstream_status(repo, workspace.upstream_branch)
@@ -710,12 +713,13 @@ class WorkspaceService:
 
                     if documents_path.exists():
                         try:
+                            check_read_size(documents_path.stat().st_size, documents_path.name)
                             data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
                             # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
                             # This means we will loose e.g. comments in the document.yaml file.
                             # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
                             # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
-                        except YAMLValidationError as ye:
+                        except (YAMLValidationError, FileTooLarge) as ye:
                             raise HTTPException(
                                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
                             ) from ye

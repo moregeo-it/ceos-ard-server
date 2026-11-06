@@ -3,9 +3,7 @@
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
-import types
 import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,16 +26,16 @@ os.environ.update(
         "CEOS_ARD_BRANCH": "main",
     }
 )
-
-# POSIX file locks are not available on Windows (ceos-ard-server#139); the tests run in one process
-if sys.platform == "win32":
-    sys.modules.setdefault("fcntl", types.SimpleNamespace(flock=lambda *a: None, LOCK_EX=2, LOCK_NB=4, LOCK_UN=8))
+os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))
 
 import pygit2  # noqa: E402
 
 # The server fetches upstream from GitHub; point that URL to the local upstream repository
 (DATA / "home").mkdir()
-(DATA / "home" / ".gitconfig").write_text(f'[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n')
+# Git for Windows' system config converts line endings on checkout
+(DATA / "home" / ".gitconfig").write_text(
+    f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
+)
 pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home")
 
 from alembic import command  # noqa: E402
@@ -50,6 +48,7 @@ from app.db.database import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.user import IdentityProvider, User  # noqa: E402
 from app.services.jwt_service import JWTService  # noqa: E402
+from app.utils.toolchains import ToolchainError, Toolchains  # noqa: E402
 
 REPOSITORY = {
     "README.md": "# CEOS-ARD\n",
@@ -91,7 +90,7 @@ def commit_upstream(files: dict[str, str], message: str):
     git("clone", "-q", str(UPSTREAM), str(clone))
     for path, content in files.items():
         (clone / path).parent.mkdir(parents=True, exist_ok=True)
-        (clone / path).write_text(content, encoding="utf-8")
+        (clone / path).write_text(content, encoding="utf-8", newline="\n")
     git("add", "-A", cwd=clone)
     git("-c", "user.name=Upstream", "-c", "user.email=upstream@example.org", "commit", "-q", "-m", message, cwd=clone)
     git("push", "-q", "origin", "main", cwd=clone)
@@ -102,7 +101,7 @@ def repositories():
     source = DATA / "source"
     for path, content in REPOSITORY.items():
         (source / path).parent.mkdir(parents=True, exist_ok=True)
-        (source / path).write_text(content, encoding="utf-8")
+        (source / path).write_text(content, encoding="utf-8", newline="\n")
     git("init", "-q", "-b", "main", cwd=source)
     git("add", "-A", cwd=source)
     git("-c", "user.name=Upstream", "-c", "user.email=upstream@example.org", "commit", "-q", "-m", "Initial", cwd=source)
@@ -114,6 +113,22 @@ def repositories():
     engine.dispose()
     # pygit2 may still hold pack files open on Windows
     shutil.rmtree(DATA, ignore_errors=True)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "installs_toolchains: may install the toolchains of builds")
+
+
+@pytest.fixture(autouse=True)
+def no_toolchain_installs(request, monkeypatch):
+    """Toolchains are only installed by tests marked `installs_toolchains`: installs take a minute and need the network."""
+    if request.node.get_closest_marker("installs_toolchains"):
+        return
+
+    async def install(self, toolchain):
+        raise ToolchainError(f"The toolchain {toolchain.name} isn't installed")
+
+    monkeypatch.setattr(Toolchains, "_install", install)
 
 
 @pytest.fixture(scope="session")

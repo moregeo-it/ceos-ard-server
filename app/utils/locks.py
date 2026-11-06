@@ -5,6 +5,7 @@ LOCK ORDERING (single event loop, single process — see each lock's note):
     workspace lock (run_exclusive): OUTER
     fork_locks (per user): INNER — only ever taken while a workspace lock is held
     build_locks: independent — builds never take the workspace lock
+    user_build_locks (per user): INNER — taken inside build_locks, never the other way round
     refresh_locks (per user): independent — taken in the auth dependency, before any handler runs
 
 Never hold two workspace locks at once. The cross-process file lock sits strictly inside the
@@ -13,13 +14,12 @@ asyncio lock, so within the process it is uncontended; it exists to exclude the 
 """
 
 import asyncio
-import fcntl
 import logging
-import os
-import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TypeVar
+
+from filelock import FileLock, Timeout
 
 from app.config import settings
 
@@ -85,6 +85,10 @@ fork_locks = KeyedLocks()
 # that would clobber each other's output, without blocking file edits behind a 60s build.
 build_locks = KeyedLocks()
 
+# One lock per user around builds: a user waits for their own previous build instead of taking
+# another of the BUILD_CONCURRENCY slots, so one user can't keep everyone else's builds waiting.
+user_build_locks = KeyedLocks()
+
 # One lock per user, serializing provider token refreshes: GitHub's refresh token is single-use,
 # so concurrent requests wait for the first renewal instead of each spending it.
 refresh_locks = KeyedLocks()
@@ -97,31 +101,22 @@ def workspace_lock_file(workspace_id: str):
     return lock_dir / f"{workspace_id}.lock"
 
 
-def acquire_workspace_file_lock(workspace_id: str, timeout: float | None = None) -> int:
-    """
-    Take the per-workspace flock, returning the file descriptor; closing it releases the lock.
+def acquire_workspace_file_lock(workspace_id: str, timeout: float) -> FileLock:
+    """Take the per-workspace file lock, or raise TimeoutError; release it with `.release()`. For the cron scripts."""
+    lock = FileLock(workspace_lock_file(workspace_id))
+    lock.acquire(timeout=timeout)
+    return lock
 
-    Blocking — call via asyncio.to_thread on the event loop. With a timeout, polls
-    non-blocking and raises TimeoutError (used by the cron scripts to skip a busy workspace).
-    """
-    fd = os.open(workspace_lock_file(workspace_id), os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        if timeout is None:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        else:
-            deadline = time.monotonic() + timeout
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError(f"Workspace {workspace_id} is locked by another process") from None
-                    time.sleep(0.1)
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
+
+async def _acquire_workspace_file_lock(workspace_id: str) -> FileLock:
+    # Polled on the event loop: filelock tracks locks per thread, so it must be released on the thread that took it
+    lock = FileLock(workspace_lock_file(workspace_id))
+    while True:
+        try:
+            lock.acquire(blocking=False)
+            return lock
+        except Timeout:
+            await asyncio.sleep(0.1)
 
 
 async def run_exclusive(workspace_id: str, fn: Callable[[], Awaitable[T]]) -> T:
@@ -142,11 +137,11 @@ async def run_exclusive(workspace_id: str, fn: Callable[[], Awaitable[T]]) -> T:
 
 async def _run_locked(workspace_id: str, fn: Callable[[], Awaitable[T]]) -> T:
     async with workspace_locks(workspace_id):
-        fd = await asyncio.to_thread(acquire_workspace_file_lock, workspace_id)
+        lock = await _acquire_workspace_file_lock(workspace_id)
         try:
             return await fn()
         finally:
-            os.close(fd)
+            lock.release()
 
 
 def _log_abandoned_outcome(workspace_id: str, task: asyncio.Task) -> None:

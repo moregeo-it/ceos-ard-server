@@ -1,10 +1,16 @@
+import asyncio
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from app import dependencies
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
+from app.services.build_service import BuildService
+from app.services.preview_service import PreviewService
+from app.utils.locks import build_locks
 
 
 @pytest.fixture
@@ -12,7 +18,7 @@ def builds(monkeypatch):
     """Replaces the ceos-ard CLI with a build that writes a small document."""
     calls = []
 
-    async def build(workspace_path, workspace_id, pfs, include_format=None, build_dir=None):
+    async def build(workspace_path, workspace_id, workspace_type, pfs, include_format=None, build_dir=None):
         calls.append({"pfs": pfs, "include_format": include_format})
         prefix = Path(dependencies.build_service.output_prefix(workspace_path, pfs, build_dir))
         prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -55,3 +61,88 @@ def test_download_document(client, workspace, builds, format, media_type):
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith(media_type)
     assert builds[0]["pfs"] == ["NRB"]
+
+
+def test_each_user_runs_one_build_at_a_time():
+    running = []
+    peak = 0
+
+    async def build(**kwargs):
+        nonlocal peak
+        running.append(kwargs["workspace_id"])
+        peak = max(peak, len(running))
+        await asyncio.sleep(0.05)
+        running.pop()
+        return {"status": "success", "output_file": "prefix"}
+
+    service = PreviewService(build_service=SimpleNamespace(build=build))
+    workspace = SimpleNamespace(abs_path=Path("."), id="workspace", workspace_type=None)
+
+    async def builds(users):
+        await asyncio.gather(*(service._build(workspace, user, ["NRB"]) for user in users))
+
+    asyncio.run(builds(["jane", "jane", "jane"]))
+    assert peak == 1
+    peak = 0
+    asyncio.run(builds(["jane", "john"]))
+    assert peak == 2
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks need extra rights on Windows")
+def test_preview_assets_are_not_read_through_symlinks(client, workspace, builds, tmp_path):
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 200, response.text
+    secret = tmp_path / "secret.png"
+    secret.write_text("SECRET_KEY=must-not-leak")
+    with SessionLocal() as db:
+        build = db.get(GitWorkspace, workspace["id"]).abs_path / "build"
+    # A build can leave symlinks in its output, the sandbox only stops it from reading their targets
+    (build / "leak.png").symlink_to(secret)
+    (build / "workspace.png").symlink_to(build.parent / "README.md")
+
+    for asset in ("leak.png", "workspace.png"):
+        response = client.get(f"/workspaces/{workspace['id']}/previews/{asset}")
+        assert response.status_code in (400, 404), response.text
+        assert "must-not-leak" not in response.text
+
+
+def test_downloads_only_offer_pdf_and_word(client, workspace, builds):
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "escape/../../../etc/hostname", "pfs": ["NRB"]})
+    assert response.status_code == 400, response.text
+    assert builds == []
+
+
+def test_build_results_are_only_taken_from_their_folder(tmp_path):
+    output = tmp_path / "output"
+    # A build can create a folder that a document's name then leads through
+    (output / "NRB.escape").mkdir(parents=True)
+    (tmp_path / "secret.env").write_text("SECRET_KEY=must-not-leak")
+    assert BuildService.artifact(output / "NRB.escape/../../secret.env", output) is None
+    assert BuildService.artifact(tmp_path / "secret.env", output) is None
+
+    (output / "NRB.pdf").write_bytes(b"document")
+    assert BuildService.artifact(output / "NRB.pdf", output) == output / "NRB.pdf"
+
+
+def test_preview_assets_are_opened_while_no_build_runs(client, workspace, builds, user):
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        (db.get(GitWorkspace, workspace["id"]).abs_path / "build" / "logo.png").write_bytes(b"image")
+
+    async def request_during_a_build():
+        # A running build could swap a checked folder for a symlink before the asset is opened
+        async with build_locks(workspace["id"]):
+            with SessionLocal() as db:
+                request = asyncio.create_task(dependencies.preview_service.open_preview_static_file(db, "logo.png", workspace["id"], user.id))
+                await asyncio.sleep(0.2)
+                assert not request.done()
+        file, _ = await request
+        with file:
+            return file.read()
+
+    assert asyncio.run(request_during_a_build()) == b"image"
+    response = client.get(f"/workspaces/{workspace['id']}/previews/logo.png")
+    assert response.status_code == 200, response.text
+    assert response.content == b"image"
+    assert response.headers["content-type"] == "image/png"

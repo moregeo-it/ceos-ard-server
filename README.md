@@ -38,6 +38,8 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 - **Content Search**: Search through workspace files
 - **Diff Tracking**: View changes and file differences
 - **File Upload**: Support for file uploads and content storage
+- **File Sizes**: Saves and uploads up to `MAX_FILE_SIZE_MB` (1 MB). Files a sync brings in can be larger, but the server
+  only opens, searches, diffs or parses text files up to 1 MB (YAML, Markdown, BibTeX, …) and other files up to 5 MB
 
 ### PFS (Product Family Specification) Management
 
@@ -50,9 +52,10 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 ### Preview & Build System
 
-- **Document Preview**: Generate HTML previews of CEOS-ARD documents
-- **Pandoc Integration**: Convert markdown to various formats
-- **Cross-reference Support**: Handle document cross-references
+- **Document Preview**: Generate HTML previews of CEOS-ARD documents, and PDF and Word documents for download
+- **CLI Versions**: Each workspace builds with the CEOS-ARD CLI version in its `requirements.txt`; the toolchain of
+  each version (the CLI, pandoc and Chromium) is installed on demand
+- **Isolated Builds**: On Linux, builds run in a sandbox without network and with their own memory and CPU limits
 
 ### Pull Request Integration
 
@@ -76,8 +79,10 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 
 ## 📋 Prerequisites
 
-- **Pixi** (for dependency management; it also installs Python)
+- **Pixi** (for dependency management; it also installs Python and the toolchains of the builds)
 - **Git** (for repository operations)
+- **Linux** in production, with systemd, cgroup v2 and bubblewrap (see [Isolated Builds](#isolated-builds)); development
+  also works on Windows and macOS, without isolated builds
 - **sqlite3** command-line tool (for backups)
 - **GitHub OAuth App** (for authentication; a Google OAuth App is optional)
 
@@ -98,10 +103,13 @@ curl -fsSL https://pixi.sh/install.sh | bash
 
 # Install project dependencies
 pixi install
-
-# Install Chromium for PDF rendering
-pixi run install-browser
 ```
+
+The toolchains for the builds (the CEOS-ARD CLI, pandoc and Chromium) are installed on demand into `TOOLCHAINS_ROOT`,
+one per CLI version, one at a time. The first build with a new version waits for its install, usually a minute, at
+most `TOOLCHAIN_INSTALL_TIMEOUT` per step; meanwhile the workspace's clients get a `preview.preparing` event. A failed
+install is reported for 10 minutes before it is tried again. At startup, the server removes toolchains that no workspace
+uses and no build used for a week.
 
 ### 3. Environment Configuration
 
@@ -302,6 +310,12 @@ pixi run -e dev test
 The tests use local git repositories in place of GitHub and need no credentials.
 Every response the tests receive is checked against [`openapi.yaml`](openapi.yaml).
 
+The sandbox tests only run on Linux with bubblewrap. With `CEOS_ARD_CHECKOUT` set to a checkout of
+ceos-org/ceos-ard, the tests also build malicious content with the real toolchain, which needs the network.
+With `CEOS_ARD_HISTORY` set to a clone of ceos-org/ceos-ard with its history, they build the content of every
+commit that changed the CLI version with exactly that version, one toolchain each (set `TOOLCHAINS_ROOT` to keep
+them between runs).
+
 ## 🐳 Database
 
 The application uses SQLite as the database backend:
@@ -475,6 +489,11 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
   change data (workspace and proposal refresh the pull request state, download builds the document)
 - **User Content Sandbox**: Workspace files and previews are served with `Content-Security-Policy: sandbox`, so a
   script in them can't run on the API origin with the session cookie
+- **Isolated Builds**: Builds run content of the workspaces (Lua filters, templates, JavaScript in Chromium), so
+  they run in bubblewrap: no network, no environment variables of the server, nothing of the host but the system
+  libraries, their toolchain, the workspace (read-only, without `.git`) and their output folder. Each build has its own
+  cgroup with memory and CPU limits, and is stopped with everything it started after `BUILD_TIMEOUT` or once its
+  output exceeds `BUILD_OUTPUT_MAX`
 - **OAuth State**: Signed `__Host-oauth_state` cookie with `itsdangerous` between login and callback; the prefix keeps
   sibling hosts of the same site from planting their own state
 - **CORS Protection**: Credentialed requests from the exact origins in `CORS_ORIGINS` only; the realtime WebSocket
@@ -549,7 +568,71 @@ CORS_ORIGINS=https://yourdomain.com
 
 # Use absolute path for database in production
 DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
+
+# Toolchains of the builds and their Chromium, writable by the service user
+TOOLCHAINS_ROOT=/home/server/toolchains
+PLAYWRIGHT_BROWSERS_PATH=/home/server/playwright-browsers
 ```
+
+Any `ENVIRONMENT` other than `development` counts as production: the server refuses to start if a startup check
+fails, including the isolation of builds below.
+
+### Isolated Builds
+
+Builds run in [bubblewrap](https://github.com/containers/bubblewrap), each in its own cgroup under the service's
+cgroup. This needs Linux with systemd and cgroup v2, which current Debian and Ubuntu have.
+
+```text
+ceos-ard-server.service   Delegate=yes, MemoryMax=3G
+├── main/                 the server, preferred for CPU
+└── builds/               BUILD_CPU_CORES and BUILD_MEMORY_MAX for all builds, no swap
+    └── <build>/          BUILD_MEMORY_MAX_PER_BUILD, stopped as a whole after BUILD_TIMEOUT
+```
+
+1.  Install bubblewrap and the libraries Chromium needs:
+
+    ```bash
+    sudo apt-get install bubblewrap
+    sudo /home/server/.pixi/bin/pixi exec playwright install-deps chromium
+    ```
+
+2.  Allow user namespaces for bubblewrap, depending on the kernel settings:
+
+    - If `sysctl kernel.apparmor_restrict_unprivileged_userns` is `1` (e.g. Ubuntu 24.04), allow them for `bwrap`
+      with an AppArmor profile in `/etc/apparmor.d/bwrap`, then `sudo systemctl reload apparmor`:
+
+      ```text
+      abi <abi/4.0>,
+      include <tunables/global>
+
+      profile bwrap /usr/bin/bwrap flags=(unconfined) {
+        userns,
+        include if exists <local/bwrap>
+      }
+      ```
+
+    - If `sysctl kernel.unprivileged_userns_clone` is `0`, set it to `1` in `/etc/sysctl.d/90-userns.conf`
+      and run `sudo sysctl --system`.
+
+    Then, as the service user, `bwrap --unshare-all --ro-bind / / true` must succeed without output.
+
+3.  Add to the `[Service]` section of the unit below:
+
+    ```ini
+    # The server splits its cgroup into main/ and builds/
+    Delegate=yes
+    MemoryMax=3G
+    # Builds are killed before the server when memory runs out
+    OOMScoreAdjust=-500
+    ```
+
+    `ProtectControlGroups=yes` must not be set, it hides the cgroup from the server.
+
+4.  Optionally adjust the limits in `.env` (see [.env.example](.env.example)): `BUILD_CONCURRENCY`, `BUILD_TIMEOUT`,
+    `BUILD_CPU_CORES`, `BUILD_MEMORY_MAX`, `BUILD_MEMORY_MAX_PER_BUILD`, `BUILD_OUTPUT_MAX`.
+
+After a restart, `systemd-cgls -u ceos-ard-server.service` shows `main/` and `builds/`, and the log shows no
+`CHECKS FAILED`. At startup, the server installs the toolchains of all active workspaces in the background.
 
 ### Running the Production Server Persistently
 

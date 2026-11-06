@@ -181,4 +181,5 @@ def ignore_file_path(file: Path, relative_path: Path, rules: PathRules) -> bool:
     # Ignore hidden files
     if file.name.startswith("."):
         return True
-    return False
+    # And symlinks, which can point out of the workspace; clones have none since core.symlinks=false
+    return file.is_symlink()
