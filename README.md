@@ -224,6 +224,8 @@ pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 4096
 > shared across processes, so do **not** pass `--workers N` (or run gunicorn with multiple workers /
 > multiple replicas): extra workers silently drop cross-worker events and their viewers miss live
 > updates. To scale horizontally, put a shared pub/sub (e.g. Redis) behind the `EventBroker`.
+> For the same reason, the cron scripts' changes aren't live: a workspace archived or reactivated by
+> `check_pr_status.py`, or deleted by `cleanup_archived_workspaces.py`, shows on the next load or reconnect.
 
 > **Realtime WebSocket.** Clients never send data on `/events` or `/workspaces/{id}/events`, so `--ws-max-size 4096`
 > caps inbound frames (larger frames are rejected with close code `1009`; any data frame at all closes
