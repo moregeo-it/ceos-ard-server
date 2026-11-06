@@ -13,12 +13,12 @@ LARGE = """
 import pathlib, sys
 with open(pathlib.Path(sys.argv[1], "large.bin"), "wb") as file:
     while True:
-        file.write(b"x" * (1 << 16))
+        file.write(b"x" * 65536)
 """
 # Writes too much at once and is done before the next check
 FINITE = """
 import pathlib, sys
-pathlib.Path(sys.argv[1], "large.bin").write_bytes(b"x" * (8 << 20))
+pathlib.Path(sys.argv[1], "large.bin").write_bytes(b"x" * 8 * 1024 * 1024)
 """
 MANY = """
 import pathlib, sys

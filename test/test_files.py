@@ -1,4 +1,6 @@
 import sys
+from collections import OrderedDict
+from pathlib import Path
 
 import pygit2
 import pytest
@@ -9,7 +11,8 @@ from app.db.database import SessionLocal
 from app.main import app
 from app.models.workspace import GitWorkspace
 from app.services.events_service import event_broker
-from app.utils import limits
+from app.utils import limits, yaml_cache
+from app.utils.pfs_utils import PlainStringSafeLoader
 from app.workspace_types.ceos_ard import CeosArdType
 
 MB = 1024 * 1024
@@ -202,7 +205,7 @@ def test_saving_restores_deleted_files(client, workspace):
 
 
 def test_files_too_large_to_hold_in_memory_are_not_read(client, workspace, monkeypatch):
-    monkeypatch.setattr(limits, "MAX_READ_SIZE", 1000)
+    monkeypatch.setattr(limits, "MAX_TEXT_SIZE", 1000)
     with SessionLocal() as db:
         root = db.get(GitWorkspace, workspace["id"]).abs_path
     large = "description: needle\n" + "#" * 2000 + "\n"
@@ -226,3 +229,28 @@ def test_diff_of_a_changed_file(client, workspace):
     assert response.status_code == 200, response.text
     assert "-# CEOS-ARD" in response.text
     assert "+# Changed" in response.text
+
+
+def test_other_files_have_a_limit_of_their_own(client, workspace, monkeypatch):
+    with SessionLocal() as db:
+        (db.get(GitWorkspace, workspace["id"]).abs_path / "images" / "large.png").write_bytes(b"x" * 2000)
+    # Larger than text may be, but not than other files
+    monkeypatch.setattr(limits, "MAX_TEXT_SIZE", 1000)
+    response = client.get(file_url(workspace, "files", "/images/large.png"))
+    assert response.status_code == 200, response.text
+    assert response.content == b"x" * 2000
+
+    monkeypatch.setattr(limits, "MAX_BINARY_SIZE", 1000)
+    response = client.get(file_url(workspace, "files", "/images/large.png"))
+    assert response.status_code == 413, response.text
+
+
+def test_the_yaml_cache_holds_a_limited_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(yaml_cache, "_MAX_BYTES", 250)
+    monkeypatch.setattr(yaml_cache, "_cache", OrderedDict())
+    monkeypatch.setattr(yaml_cache, "_cached_bytes", 0)
+    for name in ("a", "b", "c"):
+        (tmp_path / f"{name}.yaml").write_text(f"name: {name}\n" + "#" * 90 + "\n")
+        yaml_cache.load_yaml_cached(tmp_path / f"{name}.yaml", PlainStringSafeLoader)
+    assert [Path(key).name for key in yaml_cache._cache] == ["b.yaml", "c.yaml"]
+    assert yaml_cache._cached_bytes <= 250

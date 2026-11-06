@@ -241,11 +241,12 @@ class FileService:
         return await run_exclusive(workspace_id, transaction)
 
     async def read_file_content(self, db: Session, workspace_id: str, file_path: str, user_id: str):
+        """The file to send and its media type; sent from disk, so it never needs to fit into memory."""
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         file_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file", rules=workspace.workspace_type.paths)
         try:
             check_read_size(file_path.stat().st_size, file_path.name)
-            return {"content": file_path.read_bytes(), "media_type": get_file_media_type(file_path)}
+            return {"path": file_path, "media_type": get_file_media_type(file_path)}
         except FileTooLarge as e:
             raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e)) from e
         except Exception as e:

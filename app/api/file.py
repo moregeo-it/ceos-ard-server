@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import FileResponse as StarletteFileResponse
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
@@ -80,9 +81,7 @@ async def read_file_content(
     with internal_errors("read file", logger):
         file_info = await file_service.read_file_content(db=db, workspace_id=workspace_id, file_path=file_path, user_id=current_user["user"].id)
 
-        return Response(
-            content=file_info["content"], media_type=file_info["media_type"], status_code=status.HTTP_200_OK, headers=USER_CONTENT_HEADERS
-        )
+        return StarletteFileResponse(file_info["path"], media_type=file_info["media_type"], headers=USER_CONTENT_HEADERS)
 
 
 @router.put(

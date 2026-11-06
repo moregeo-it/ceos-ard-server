@@ -1,6 +1,7 @@
 """The programs builds run with: one pixi environment per toolchain, e.g. per CEOS-ARD CLI version, installed on demand."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -27,6 +28,8 @@ _READY = ".ready"
 _COMPILE_PACKAGES = "import compileall, site\nfor path in site.getsitepackages():\n    compileall.compile_dir(path, quiet=2)"
 # A failed install is reported for this long instead of being tried again on every save and build
 _RETRY_AFTER = 600
+# Installs running or waiting at once, as any owner can ask for any version
+_MAX_INSTALLS = 4
 # Toolchains no workspace uses are removed at startup once no build used them for this long
 _UNUSED_FOR = 7 * 86400
 
@@ -114,7 +117,8 @@ class Toolchains:
     def prepare(self, toolchain: Toolchain) -> None:
         """Start installing the toolchain in the background, so the first build doesn't wait for it."""
         if not self.is_installed(toolchain.name) and not self._recent_failure(toolchain.name):
-            self._start(toolchain)
+            with contextlib.suppress(ToolchainError):
+                self._start(toolchain)
 
     def remove_unused(self, used: set[str]) -> None:
         """Remove half-installed toolchains, and those not in `used` that no build used for a while. Blocking."""
@@ -153,6 +157,8 @@ class Toolchains:
     def _start(self, toolchain: Toolchain) -> asyncio.Task:
         task = self._installs.get(toolchain.name)
         if task is None:
+            if len(self._installs) >= _MAX_INSTALLS:
+                raise ToolchainError("Too many CLI versions are being installed, try again in a few minutes")
             task = asyncio.create_task(self._install_one(toolchain))
             self._installs[toolchain.name] = task
             task.add_done_callback(lambda task: self._finished(toolchain.name, task))
@@ -163,7 +169,10 @@ class Toolchains:
         if not task.cancelled() and (error := task.exception()):
             logger.warning(f"Installing the toolchain {name} failed: {error}")
             message = str(error) if isinstance(error, ToolchainError) else f"Installing the toolchain {name} failed"
-            self._failures[name] = (time.monotonic(), message)
+            now = time.monotonic()
+            # Expired ones go, so made-up versions don't pile up
+            self._failures = {key: value for key, value in self._failures.items() if now - value[0] < _RETRY_AFTER}
+            self._failures[name] = (now, message)
         else:
             self._failures.pop(name, None)
 

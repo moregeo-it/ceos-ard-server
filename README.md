@@ -38,6 +38,8 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 - **Content Search**: Search through workspace files
 - **Diff Tracking**: View changes and file differences
 - **File Upload**: Support for file uploads and content storage
+- **File Sizes**: Saves and uploads up to `MAX_FILE_SIZE_MB` (1 MB). Files a sync brings in can be larger, but the server
+  only opens, searches, diffs or parses text files up to 1 MB (YAML, Markdown, BibTeX, …) and other files up to 5 MB
 
 ### PFS (Product Family Specification) Management
 

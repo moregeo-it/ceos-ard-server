@@ -1,10 +1,13 @@
 import logging
+import mimetypes
+import os
 import shutil
+from collections.abc import Iterator
 from email.utils import formatdate
-from typing import Any
+from typing import Any, BinaryIO
 
 from fastapi import APIRouter, Depends, Query, Request, status
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
@@ -14,9 +17,17 @@ from app.schemas.workspace import PfsId
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
 from app.utils.http_utils import USER_CONTENT_HEADERS, compute_file_etag, if_none_match_matches, internal_errors
+from app.utils.limits import KB
 from app.utils.session_cookie import require_client_id
 
 logger = logging.getLogger(__name__)
+
+
+def _chunks(file: BinaryIO) -> Iterator[bytes]:
+    with file:
+        while chunk := file.read(64 * KB):
+            yield chunk
+
 
 router = APIRouter(prefix="/workspaces", tags=["Previews"])
 
@@ -80,9 +91,11 @@ async def get_preview_static_file(
 ):
     with internal_errors("get preview static file", logger):
         # Raises 404 if the asset no longer exists (e.g. it was deleted).
-        file = await preview_service.get_preview_static_file(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
-
-        stat_result = file.stat()
+        file, path = await preview_service.open_preview_static_file(
+            db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id
+        )
+        # Sent from the file opened after the check, never opened again by path
+        stat_result = os.fstat(file.fileno())
         etag = compute_file_etag(stat_result)
         cache_headers = {
             "ETag": etag,
@@ -97,9 +110,11 @@ async def get_preview_static_file(
         # Also on the 304: browsers update a cached response's headers from it
         headers = {**cache_headers, **USER_CONTENT_HEADERS}
         if if_none_match and if_none_match_matches(if_none_match, etag):
+            file.close()
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
 
-        return FileResponse(str(file), headers=headers)
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return StreamingResponse(_chunks(file), media_type=media_type, headers=headers, background=BackgroundTask(file.close))
 
 
 @router.get(

@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.utils.limits import KB, MB
+
 # The only environment variables commands get: .env is loaded into the server's environment, and
 # its secrets must not reach builds, which run content from the workspaces
 _ENV_KEYS = (
@@ -42,7 +44,7 @@ _ENV_KEYS = (
 
 
 # What a command may make the server hold in memory per stream, e.g. a build printing in a loop
-MAX_OUTPUT = 16 << 20
+MAX_OUTPUT = 16 * MB
 
 
 class OutputTooLarge(Exception):
@@ -69,10 +71,10 @@ async def _kill_tree(pid: int) -> None:
 
 async def _read(stream: asyncio.StreamReader, limit: int) -> bytes:
     data = bytearray()
-    while chunk := await stream.read(1 << 16):
+    while chunk := await stream.read(64 * KB):
         data += chunk
         if len(data) > limit:
-            raise OutputTooLarge(f"The output exceeds {limit >> 20} MB")
+            raise OutputTooLarge(f"The output exceeds {limit / MB:g} MB")
     return bytes(data)
 
 
@@ -84,7 +86,7 @@ async def _collect(process: asyncio.subprocess.Process, readers: list[asyncio.Ta
 
 async def _discard(process: asyncio.subprocess.Process) -> None:
     for stream in (process.stdout, process.stderr):
-        while await stream.read(1 << 16):
+        while await stream.read(64 * KB):
             pass
     await process.wait()
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.workspace import GitWorkspace, WorkspaceStatus
 from app.schemas.workspace import PFS_ID_PATTERN
-from app.utils.limits import check_read_size
+from app.utils import limits
 from app.utils.process import OutputTooLarge
 from app.utils.sandbox import BuildOutOfMemory, BuildOutputTooLarge, run_build
 from app.utils.toolchains import Toolchain, ToolchainError, toolchains
@@ -52,7 +52,7 @@ class BuildService:
     @staticmethod
     def read_preview(path: Path) -> str:
         """The preview HTML of a build, which the server reads into its memory, unlike documents it sends as files."""
-        check_read_size(path.stat().st_size, path.name)
+        limits.check_read_size(path.stat().st_size, path.name, limits.MAX_PREVIEW_SIZE)
         return path.read_text(encoding="utf-8")
 
     @staticmethod

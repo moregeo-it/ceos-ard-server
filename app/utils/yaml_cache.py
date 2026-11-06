@@ -12,14 +12,15 @@ from pathlib import Path
 
 from yaml import load as yaml_load
 
-from app.utils.limits import check_read_size
+from app.utils.limits import MB, check_read_size
 
 logger = logging.getLogger(__name__)
 
-# Bounded so long-gone workspaces cannot grow it forever
-_MAX_ENTRIES = 1024
+# By the size of the files it holds, as a parse takes about eight times that in memory
+_MAX_BYTES = 16 * MB
 
 _cache: OrderedDict[str, tuple[int, int, object]] = OrderedDict()
+_cached_bytes = 0
 # Also used from worker threads, e.g. the usage lookup of /context
 _lock = threading.Lock()
 
@@ -44,8 +45,12 @@ def load_yaml_cached(path: Path, loader) -> object:
 
     parsed = yaml_load(path.read_text(encoding="utf-8"), Loader=loader)
     with _lock:
+        global _cached_bytes
+        if (previous := _cache.pop(key, None)) is not None:
+            _cached_bytes -= previous[1]
         _cache[key] = (stat.st_mtime_ns, stat.st_size, parsed)
-        _cache.move_to_end(key)
-        while len(_cache) > _MAX_ENTRIES:
-            _cache.popitem(last=False)
+        _cached_bytes += stat.st_size
+        while _cached_bytes > _MAX_BYTES and len(_cache) > 1:
+            _, (_, size, _) = _cache.popitem(last=False)
+            _cached_bytes -= size
     return parsed

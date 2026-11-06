@@ -5,6 +5,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from typing import BinaryIO
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -122,7 +123,13 @@ class PreviewService:
 
         return html_content
 
-    async def get_preview_static_file(self, db: Session, file_path: str, workspace_id: str, user_id: str):
+    async def open_preview_static_file(self, db: Session, file_path: str, workspace_id: str, user_id: str) -> tuple[BinaryIO, Path]:
+        """
+        Open a file of the preview; the caller closes it.
+
+        Checked and opened while no build runs: a build can swap a checked folder for a symlink to anything before
+        the file is opened. Once open, the file stays the one checked.
+        """
         if not workspace_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
 
@@ -131,7 +138,11 @@ class PreviewService:
 
         try:
             workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-            return validate_workspace_path(("build/" + file_path), workspace.abs_path, exists=True, type="file", is_preview=True)
+            # Not holding the read transaction while a build runs
+            db.commit()
+            async with build_locks(workspace_id):
+                path = validate_workspace_path(("build/" + file_path), workspace.abs_path, exists=True, type="file", is_preview=True)
+                return path.open("rb"), path
         except HTTPException:
             raise
         except Exception as e:

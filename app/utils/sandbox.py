@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
+from app.utils.limits import GB, KB, MB
 from app.utils.process import command_env, run
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ def _output_exceeds(paths: list[Path], max_size: int) -> bool:
 def parse_size(value: str) -> int:
     """Bytes from e.g. `700M` or `1.5G`."""
     value = value.strip().upper().removesuffix("B")
-    units = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
+    units = {"K": KB, "M": MB, "G": GB}
     if value[-1:] in units:
         return int(float(value[:-1]) * units[value[-1]])
     return int(value)

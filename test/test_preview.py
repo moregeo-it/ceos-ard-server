@@ -10,6 +10,7 @@ from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
 from app.services.build_service import BuildService
 from app.services.preview_service import PreviewService
+from app.utils.locks import build_locks
 
 
 @pytest.fixture
@@ -121,3 +122,27 @@ def test_build_results_are_only_taken_from_their_folder(tmp_path):
 
     (output / "NRB.pdf").write_bytes(b"document")
     assert BuildService.artifact(output / "NRB.pdf", output) == output / "NRB.pdf"
+
+
+def test_preview_assets_are_opened_while_no_build_runs(client, workspace, builds, user):
+    response = client.post(f"/workspaces/{workspace['id']}/previews")
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        (db.get(GitWorkspace, workspace["id"]).abs_path / "build" / "logo.png").write_bytes(b"image")
+
+    async def request_during_a_build():
+        # A running build could swap a checked folder for a symlink before the asset is opened
+        async with build_locks(workspace["id"]):
+            with SessionLocal() as db:
+                request = asyncio.create_task(dependencies.preview_service.open_preview_static_file(db, "logo.png", workspace["id"], user.id))
+                await asyncio.sleep(0.2)
+                assert not request.done()
+        file, _ = await request
+        with file:
+            return file.read()
+
+    assert asyncio.run(request_during_a_build()) == b"image"
+    response = client.get(f"/workspaces/{workspace['id']}/previews/logo.png")
+    assert response.status_code == 200, response.text
+    assert response.content == b"image"
+    assert response.headers["content-type"] == "image/png"

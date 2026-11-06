@@ -250,7 +250,7 @@ def test_builds_do_not_write_through_a_symlinked_build_folder(client, workspace,
 
 def test_previews_too_large_to_hold_in_memory_are_refused(client, workspace, fake_toolchains, monkeypatch):
     save_requirements(client, workspace, "ceos-ard-cli==0.5.9\n")
-    monkeypatch.setattr(limits, "MAX_READ_SIZE", 5)
+    monkeypatch.setattr(limits, "MAX_PREVIEW_SIZE", 5)
     response = client.post(f"/workspaces/{workspace['id']}/previews")
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The build produced a preview that is too large"
@@ -387,3 +387,25 @@ def test_installs_are_announced_before_the_build(client, workspace, fake_toolcha
     response = client.post(f"/workspaces/{workspace['id']}/previews")
     assert response.status_code == 500, response.text
     assert [fields["toolchain"] for event, fields in emitted if event == "preview.preparing"] == ["ceos-ard-cli-0.6.3"]
+
+
+def test_only_a_few_installs_wait_at_once(tmp_path):
+    installer = Toolchains(tmp_path)
+    done = None
+
+    async def install(toolchain):
+        await done.wait()
+
+    installer._install = install
+
+    async def install_many():
+        nonlocal done
+        done = asyncio.Event()
+        for version in range(4):
+            installer.prepare(fake_toolchain(f"cli-0.0.{version}"))
+        with pytest.raises(ToolchainError, match="Too many CLI versions"):
+            await installer.ensure(fake_toolchain("cli-0.0.9"))
+        done.set()
+        await asyncio.gather(*installer._installs.values())
+
+    asyncio.run(install_many())
