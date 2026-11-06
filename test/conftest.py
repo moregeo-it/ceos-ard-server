@@ -27,6 +27,7 @@ os.environ.update(
         "WORKSPACES_ROOT": str(DATA / "workspaces"),
         # At least 32 bytes, as PyJWT recommends for HS256
         "SECRET_KEY": "test-secret-long-enough-for-hs256",
+        "TOKEN_ENCRYPTION_KEY": "uHS3sy9D3UIkMkeLynxz1U6-YiMhQ8LeE2dRWeyFZv8=",
         "SESSION_COOKIE_SECURE": "false",
         "ENVIRONMENT": "development",
         "WORKSPACE_TYPES_CONFIG": str(TYPES_CONFIG),
