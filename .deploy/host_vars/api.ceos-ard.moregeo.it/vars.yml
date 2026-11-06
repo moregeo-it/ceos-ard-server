@@ -4,7 +4,7 @@
 # --- Code version -----------------------------------------------------------
 # The exact commit deployed. setup.yml never changes the checkout; only
 # deploy.yml moves the code, and only to this ref. Bump deliberately.
-app_version: 6341171ddbeecdf8c3a1c816a4f8119b3191ba6a
+app_version: ea05412717fbd82ee3841d780be06424fe71f650
 
 # --- Data location ----------------------------------------------------------
 # false  = database and workspaces still live inside the git checkout (today).
