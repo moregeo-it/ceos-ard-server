@@ -59,7 +59,7 @@
 - name: Check that the service user can create a sandbox
   become: true
   become_user: "{{ app_user }}"
-  ansible.builtin.command: bwrap --unshare-all --ro-bind / / true
+  ansible.builtin.command: bwrap --unshare-all --die-with-parent --ro-bind / / true
   register: bwrap_check
   changed_when: false
   failed_when: false
