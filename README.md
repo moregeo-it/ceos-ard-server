@@ -30,6 +30,7 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 - **Collaborators**: Invite GitHub users by username, read-only
 - **Share Links**: Anyone with the link and a GitHub login joins as a read-only collaborator; links can expire
 - **Live Updates**: Viewers get every save, commit, sync and status change over a WebSocket as it happens
+- **Workspace List Updates**: A second WebSocket per user reports new, shared, changed, archived and deleted workspaces
 - **Viewer Access**: Collaborators read and search the files, see the preview, and download PDF and Word
 
 ### File Operations
@@ -224,12 +225,12 @@ pixi run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 4096
 > multiple replicas): extra workers silently drop cross-worker events and their viewers miss live
 > updates. To scale horizontally, put a shared pub/sub (e.g. Redis) behind the `EventBroker`.
 
-> **Realtime WebSocket.** Clients never send data on `/workspaces/{id}/events`, so `--ws-max-size 4096`
+> **Realtime WebSocket.** Clients never send data on `/events` or `/workspaces/{id}/events`, so `--ws-max-size 4096`
 > caps inbound frames (larger frames are rejected with close code `1009`; any data frame at all closes
 > the socket with `1008`). The handshake checks the `Origin` header against `CORS_ORIGINS`, and the
 > server closes with `4001` when the JWT expires or the user logs out, `4003` when access is gone,
-> and `4009` when a client must reconnect and resync. See the `/workspaces/{workspaceId}/events` entry in
-> `openapi.yaml`.
+> and `4009` when a client must reconnect and resync. See the `/events` and `/workspaces/{workspaceId}/events`
+> entries in `openapi.yaml`.
 
 The API will be available at:
 

@@ -155,6 +155,8 @@ class FakeGitHub:
 
     def __init__(self):
         self.calls = []
+        # GitHub accounts by login, for invitations
+        self.users = {}
 
     async def fork(self, user, upstream_owner, upstream_repo):
         self.calls.append(("fork", upstream_owner, upstream_repo))
@@ -163,6 +165,10 @@ class FakeGitHub:
     async def get_pfs_types(self, owner, repo, token, branch):
         self.calls.append(("get_pfs_types", owner, repo, branch))
         return ["NRB", "SR"]
+
+    async def get_github_user(self, username, access_token):
+        self.calls.append(("get_github_user", username))
+        return self.users.get(username)
 
     async def create_pull_request(self, access_token, owner, repo, pr_data):
         self.calls.append(("create_pull_request", owner, repo, pr_data["head"]))

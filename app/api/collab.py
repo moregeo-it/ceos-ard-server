@@ -2,10 +2,12 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 import anyio
 from fastapi import APIRouter, HTTPException, WebSocket, status
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.database import SessionLocal
@@ -19,9 +21,9 @@ from app.utils.session_cookie import request_token
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/workspaces", tags=["Realtime"])
+router = APIRouter(tags=["Realtime"])
 
-# Delivering one of these ends the connection: the viewer's access is gone, so it shouldn't reconnect.
+# Delivering one of these ends a workspace's connection: the viewer's access is gone, so it shouldn't reconnect.
 # This is also what makes mid-session revocation close the socket - `collaborator.revoked` is targeted at the
 # revoked user (see share_service.revoke_collaborator), so only their connection receives it and then closes.
 _CLOSING_EVENTS = {EventType.COLLABORATOR_REVOKED.value, EventType.WORKSPACE_DELETED.value}
@@ -71,10 +73,34 @@ def _own_change(event: dict[str, Any], user_id: str, client_id: str | None) -> b
     return client_id is not None and event.get("actor_user_id") == user_id and event.get("actor_client_id") == client_id
 
 
-@router.websocket("/{workspace_id}/events")
+@router.websocket("/workspaces/{workspace_id}/events")
 async def workspace_events(websocket: WebSocket, workspace_id: str):
-    """Real-time workspace event stream over WebSocket.
+    """Real-time event stream of one workspace, for anyone with access to it."""
+    broker = get_event_broker()
+    await _serve(
+        websocket,
+        subscribe=lambda user_id: broker.subscribe_workspace(workspace_id, user_id),
+        unsubscribe=lambda queue, user_id: broker.unsubscribe_workspace(workspace_id, queue, user_id),
+        check_access=lambda db, user_id: get_workspace_service().get_workspace_by_id(db, workspace_id, user_id),
+        closing_events=_CLOSING_EVENTS,
+    )
 
+
+@router.websocket("/events")
+async def user_events(websocket: WebSocket):
+    """Real-time event stream of a user: the events that concern their list of workspaces."""
+    broker = get_event_broker()
+    await _serve(websocket, subscribe=broker.subscribe_user, unsubscribe=broker.unsubscribe_user)
+
+
+async def _serve(
+    websocket: WebSocket,
+    subscribe: Callable[[str], asyncio.Queue],
+    unsubscribe: Callable[[asyncio.Queue, str], None],
+    check_access: Callable[[Session, str], Any] | None = None,
+    closing_events: frozenset[str] = frozenset(),
+) -> None:
+    """
     Handshake: Origin check → JWT from the session cookie (browsers send it on the handshake) or an
     `Authorization: Bearer` header → subscribe → access check → accept.
     Subscribing before the access check keeps a revocation committing in between from being missed.
@@ -84,13 +110,12 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
     if origin is not None and origin not in settings.CORS_ORIGINS:
         # Browsers always send Origin; a foreign page just gets a failed upgrade. This is also what keeps
         # other same-site hosts from using the session cookie: SameSite=Strict does not stop them.
-        logger.warning("Rejected realtime connection from origin %s for workspace %s", origin, workspace_id)
+        logger.warning("Rejected realtime connection from origin %s to %s", origin, websocket.url.path)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     token = request_token(websocket)
     client_id = validate_client_id(websocket.query_params.get(CLIENT_ID_QUERY_PARAM))
-    broker = get_event_broker()
 
     # Session for the handshake only.
     db = SessionLocal()
@@ -102,11 +127,12 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
             await _reject(websocket, e.code, e.reason)
             return
 
-        queue = broker.subscribe(workspace_id, user_id)
+        queue = subscribe(user_id)
         try:
-            get_workspace_service().get_workspace_by_id(db, workspace_id, user_id)
+            if check_access:
+                check_access(db, user_id)
         except HTTPException:
-            broker.unsubscribe(workspace_id, queue, user_id)
+            unsubscribe(queue, user_id)
             db.close()
             await _reject(websocket, WS_CLOSE_ACCESS_REVOKED, "no access to this workspace")
             return
@@ -152,7 +178,7 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
                     if not _own_change(item, user_id, client_id):
                         await websocket.send_text(json.dumps({k: v for k, v in item.items() if k not in _INTERNAL_FIELDS}, default=str))
 
-                    if item["type"] in _CLOSING_EVENTS:
+                    if item["type"] in closing_events:
                         # Terminal event: end the connection, also for the tab that caused it
                         await close_and_stop(WS_CLOSE_ACCESS_REVOKED, "access revoked")
                         return
@@ -164,11 +190,11 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
                     if message["type"] == "websocket.disconnect":
                         tg.cancel_scope.cancel()
                         return
-                    logger.warning("Realtime client sent data on workspace %s; closing", workspace_id)
+                    logger.warning("Realtime client sent data to %s; closing", websocket.url.path)
                     await close_and_stop(status.WS_1008_POLICY_VIOLATION, "clients must not send data")
                     return
 
             tg.start_soon(writer)
             tg.start_soon(reader)
     finally:
-        broker.unsubscribe(workspace_id, queue, user_id)
+        unsubscribe(queue, user_id)
