@@ -14,6 +14,7 @@ from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
 from app.services.events_service import event_broker
 from app.utils import limits
+from app.utils.cli_utils import check_toolchains_root
 from app.utils.toolchains import Toolchain, ToolchainError, Toolchains, ToolchainSpec, _manifest, toolchains
 from app.workspace_types.ceos_ard import cli_toolchain_spec, cli_version
 
@@ -338,14 +339,45 @@ def test_failed_installs_are_reported_for_a_while(tmp_path):
 def test_toolchains_no_workspace_uses_are_removed(tmp_path):
     installer = Toolchains(tmp_path)
     for name in ("used-1.0.0", "unused-1.0.0", "recent-1.0.0", "half-1.0.0"):
-        installer.path(name).mkdir()
+        (installer.path(name) / ".pixi").mkdir(parents=True)
+        (installer.path(name) / "pixi.toml").touch()
         if name != "half-1.0.0":
             (installer.path(name) / ".ready").touch()
     long_ago = time.time() - 30 * 86400
     os.utime(installer.path("unused-1.0.0") / ".ready", (long_ago, long_ago))
+    # Anything else, as if TOOLCHAINS_ROOT pointed to the server's folder
+    for name in (".git", "app", "workspaces", "other-1.0.0"):
+        (tmp_path / name).mkdir()
 
     installer.remove_unused({"used-1.0.0"})
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["recent-1.0.0", "used-1.0.0"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".git", "app", "other-1.0.0", "recent-1.0.0", "used-1.0.0", "workspaces"]
+
+
+@pytest.mark.parametrize(
+    ("root", "error"),
+    [
+        (lambda: Path.cwd(), "must not be or contain the server's folder"),
+        (lambda: Path.cwd().parent, "must not be or contain the server's folder"),
+        (lambda: settings.WORKSPACES_ROOT, "must not be or contain WORKSPACES_ROOT"),
+        (lambda: settings.WORKSPACES_ROOT / "toolchains", "must not be inside WORKSPACES_ROOT"),
+    ],
+    ids=["server", "above the server", "workspaces", "inside the workspaces"],
+)
+def test_the_server_refuses_toolchains_where_its_data_is(monkeypatch, root, error):
+    monkeypatch.setattr(settings, "TOOLCHAINS_ROOT", root().resolve())
+    with pytest.raises(Exception, match=error):
+        asyncio.run(check_toolchains_root())
+
+
+def test_the_server_refuses_an_empty_toolchains_root(monkeypatch):
+    monkeypatch.setenv("TOOLCHAINS_ROOT", "")
+    with pytest.raises(Exception, match="TOOLCHAINS_ROOT is empty"):
+        asyncio.run(check_toolchains_root())
+
+
+def test_the_default_toolchains_root_is_accepted(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "TOOLCHAINS_ROOT", tmp_path / "toolchains")
+    asyncio.run(check_toolchains_root())
 
 
 def test_installs_are_announced_before_the_build(client, workspace, fake_toolchains, monkeypatch):

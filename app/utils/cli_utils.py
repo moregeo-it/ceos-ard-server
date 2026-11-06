@@ -1,6 +1,8 @@
 import logging
+import os
 import sys
 import tomllib
+from pathlib import Path
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
@@ -26,13 +28,14 @@ def load_project_info() -> tuple[str, str]:
 async def run_checks():
     checks = {
         "Build isolation": check_build_isolation,
+        "Toolchains": check_toolchains_root,
         "pixi": check_pixi,
         "Session cookie": check_session_cookie,
         "Database schema": check_database_schema,
     }
     # Missing tools only break builds, but a session misconfiguration exposes sessions in every environment,
     # and an outdated schema breaks every request. Outside development, every check is fatal.
-    fatal_checks = {check_session_cookie, check_database_schema}
+    fatal_checks = {check_session_cookie, check_database_schema, check_toolchains_root}
     failures = []
     fatal = False
     for check_name, check_func in checks.items():
@@ -75,6 +78,18 @@ async def check_build_isolation():
         if settings.ENVIRONMENT != "development":
             raise
         logger.warning(f"Builds aren't isolated, which is only acceptable in development: {e}")
+
+
+async def check_toolchains_root():
+    """Unused toolchains are removed from TOOLCHAINS_ROOT at startup, so it must be a folder of its own."""
+    if os.environ.get("TOOLCHAINS_ROOT", None) == "":
+        raise Exception("TOOLCHAINS_ROOT is empty; leave it out for the default or set a folder of its own")
+    root = settings.TOOLCHAINS_ROOT
+    for name, path in (("the server's folder", Path.cwd().resolve()), ("WORKSPACES_ROOT", settings.WORKSPACES_ROOT)):
+        if path.is_relative_to(root):
+            raise Exception(f"TOOLCHAINS_ROOT ({root}) must not be or contain {name} ({path})")
+    if root.is_relative_to(settings.WORKSPACES_ROOT):
+        raise Exception(f"TOOLCHAINS_ROOT ({root}) must not be inside WORKSPACES_ROOT ({settings.WORKSPACES_ROOT})")
 
 
 async def check_pixi():

@@ -121,13 +121,23 @@ class Toolchains:
         if not self.root.is_dir():
             return
         for path in self.root.iterdir():
-            if not path.is_dir() or path.name in used or path.name in self._installs:
+            if path.name in used or path.name in self._installs or not self._is_toolchain(path):
                 continue
             ready = path / _READY
             if ready.exists() and time.time() - ready.stat().st_mtime < _UNUSED_FOR:
                 continue
             logger.info(f"Removing the toolchain {path.name}, which no workspace uses")
             shutil.rmtree(path, ignore_errors=True)
+
+    @staticmethod
+    def _is_toolchain(path: Path) -> bool:
+        # Only what _install() created, should TOOLCHAINS_ROOT ever hold anything else
+        return (
+            re.fullmatch(NAME_PATTERN, path.name) is not None
+            and not path.is_symlink()
+            and (path / ".pixi").is_dir()
+            and (path / "pixi.toml").is_file()
+        )
 
     def _recent_failure(self, name: str) -> str | None:
         failed_at, message = self._failures.get(name, (0.0, ""))
