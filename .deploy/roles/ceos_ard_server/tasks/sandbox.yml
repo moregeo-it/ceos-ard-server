@@ -1,0 +1,74 @@
+---
+# Builds run in bubblewrap, which needs unprivileged user namespaces. Whether
+# they are allowed depends on kernel settings, not on the distribution.
+- name: Install bubblewrap
+  become: true
+  ansible.builtin.apt:
+    name: bubblewrap
+    state: present
+
+- name: Install the libraries Chromium needs for PDFs
+  become: true
+  ansible.builtin.command:
+    cmd: "{{ pixi_bin }} exec playwright install-deps chromium"
+  register: chromium_deps
+  changed_when: "' 0 newly installed' not in chromium_deps.stdout"
+
+- name: Read whether AppArmor restricts user namespaces
+  ansible.builtin.slurp:
+    src: /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+  register: apparmor_userns
+  failed_when: false
+
+- name: Allow user namespaces for bubblewrap in AppArmor
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apparmor.d/bwrap
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible ({{ app_name }} role).
+      abi <abi/4.0>,
+      include <tunables/global>
+
+      profile bwrap /usr/bin/bwrap flags=(unconfined) {
+        userns,
+        include if exists <local/bwrap>
+      }
+  when: (apparmor_userns.content | default('') | b64decode | trim) == '1'
+  notify: Reload apparmor
+
+- name: Read whether unprivileged user namespaces are disabled
+  ansible.builtin.slurp:
+    src: /proc/sys/kernel/unprivileged_userns_clone
+  register: userns_clone
+  failed_when: false
+
+- name: Enable unprivileged user namespaces
+  become: true
+  ansible.posix.sysctl:
+    name: kernel.unprivileged_userns_clone
+    value: "1"
+    sysctl_file: /etc/sysctl.d/90-userns.conf
+  when: (userns_clone.content | default('') | b64decode | trim) == '0'
+
+- name: Flush handlers so the AppArmor profile applies before the check
+  ansible.builtin.meta: flush_handlers
+
+- name: Check that the service user can create a sandbox
+  become: true
+  become_user: "{{ app_user }}"
+  ansible.builtin.command: bwrap --unshare-all --die-with-parent --ro-bind / / true
+  register: bwrap_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fail when builds can't be isolated
+  ansible.builtin.assert:
+    that: bwrap_check.rc == 0
+    fail_msg: >-
+      bubblewrap can't create a sandbox as {{ app_user }}, so the server would
+      refuse to start: {{ bwrap_check.stderr | default('') }}
+  when: not ansible_check_mode

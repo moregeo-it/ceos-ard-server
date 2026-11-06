@@ -1,0 +1,28 @@
+#!/bin/bash
+# Managed by Ansible ({{ app_name }} role).
+# Daily: a WAL-safe copy of the database (36 KB, so retention is nearly free).
+# Weekly (Mondays): an archive of the workspaces, the only writable copy of
+# users' work.
+set -euo pipefail
+
+DB="{{ app_db_path }}"
+WORKSPACES="{{ app_workspaces_root }}"
+DEST="{{ app_backup_dir }}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+# .backup, never cp: the database runs in WAL mode and a plain copy can miss
+# committed transactions still in the -wal sidecar.
+sqlite3 "$DB" ".backup '$DEST/db-$STAMP.sqlite'"
+echo "database -> $DEST/db-$STAMP.sqlite"
+
+if [ "$(date +%u)" = "1" ]; then
+    tar czf "$DEST/workspaces-$STAMP.tar.gz" -C "$(dirname "$WORKSPACES")" "$(basename "$WORKSPACES")"
+    echo "workspaces -> $DEST/workspaces-$STAMP.tar.gz"
+fi
+
+# Retention
+ls -1t "$DEST"/db-*.sqlite 2>/dev/null | tail -n +{{ app_backup_db_keep + 1 }} | xargs -r rm --
+ls -1t "$DEST"/workspaces-*.tar.gz 2>/dev/null | tail -n +{{ app_backup_workspaces_keep + 1 }} | xargs -r rm --
+
+# NOTE: these copies live on the same disk as the originals. Pulling them off
+# the host is a separate, still-manual step. See .deploy/README.md.

@@ -1,0 +1,9 @@
+---
+# Inventory used only by CI, so --syntax-check and ansible-lint never need the
+# production vault. Never used to reach a real host.
+all:
+  children:
+    ceos_ard_servers:
+      hosts:
+        ci.invalid:
+          ansible_connection: local
