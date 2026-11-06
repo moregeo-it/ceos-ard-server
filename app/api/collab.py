@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 from fastapi import APIRouter, HTTPException, WebSocket, status
@@ -14,7 +14,7 @@ from app.db.database import SessionLocal
 from app.dependencies import get_event_broker, get_workspace_service
 from app.schemas.events import EventType
 from app.services.auth_service import get_current_user, require_github_user
-from app.services.events_service import HEARTBEAT_SECONDS, WS_CLOSE_ACCESS_REVOKED, WS_CLOSE_SESSION_EXPIRED, CloseSignal
+from app.services.events_service import HEARTBEAT_SECONDS, WS_CLOSE_ACCESS_REVOKED, WS_CLOSE_SESSION_EXPIRED, CloseSignal, Topic
 from app.services.jwt_service import JWTService
 from app.utils.request_context import CLIENT_ID_QUERY_PARAM, validate_client_id
 from app.utils.session_cookie import request_token
@@ -76,11 +76,10 @@ def _own_change(event: dict[str, Any], user_id: str, client_id: str | None) -> b
 @router.websocket("/workspaces/{workspace_id}/events")
 async def workspace_events(websocket: WebSocket, workspace_id: str):
     """Real-time event stream of one workspace, for anyone with access to it."""
-    broker = get_event_broker()
     await _serve(
         websocket,
-        subscribe=lambda user_id: broker.subscribe_workspace(workspace_id, user_id),
-        unsubscribe=lambda queue, user_id: broker.unsubscribe_workspace(workspace_id, queue, user_id),
+        "workspace",
+        workspace_id,
         check_access=lambda db, user_id: get_workspace_service().get_workspace_by_id(db, workspace_id, user_id),
         closing_events=_CLOSING_EVENTS,
     )
@@ -89,14 +88,13 @@ async def workspace_events(websocket: WebSocket, workspace_id: str):
 @router.websocket("/events")
 async def user_events(websocket: WebSocket):
     """Real-time event stream of a user: the events that concern their list of workspaces."""
-    broker = get_event_broker()
-    await _serve(websocket, subscribe=broker.subscribe_user, unsubscribe=broker.unsubscribe_user)
+    await _serve(websocket, "user")
 
 
 async def _serve(
     websocket: WebSocket,
-    subscribe: Callable[[str], asyncio.Queue],
-    unsubscribe: Callable[[asyncio.Queue, str], None],
+    kind: Literal["workspace", "user"],
+    key: str | None = None,
     check_access: Callable[[Session, str], Any] | None = None,
     closing_events: frozenset[str] = frozenset(),
 ) -> None:
@@ -116,6 +114,7 @@ async def _serve(
 
     token = request_token(websocket)
     client_id = validate_client_id(websocket.query_params.get(CLIENT_ID_QUERY_PARAM))
+    broker = get_event_broker()
 
     # Session for the handshake only.
     db = SessionLocal()
@@ -127,12 +126,14 @@ async def _serve(
             await _reject(websocket, e.code, e.reason)
             return
 
-        queue = subscribe(user_id)
+        # A user stream is keyed by the authenticated user
+        topic: Topic = (kind, key or user_id)
+        queue = broker.subscribe(topic, user_id)
         try:
             if check_access:
                 check_access(db, user_id)
         except HTTPException:
-            unsubscribe(queue, user_id)
+            broker.unsubscribe(topic, queue, user_id)
             db.close()
             await _reject(websocket, WS_CLOSE_ACCESS_REVOKED, "no access to this workspace")
             return
@@ -197,4 +198,4 @@ async def _serve(
             tg.start_soon(writer)
             tg.start_soon(reader)
     finally:
-        unsubscribe(queue, user_id)
+        broker.unsubscribe(topic, queue, user_id)

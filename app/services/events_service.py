@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from app.schemas.events import EventType, build_event
 
@@ -35,6 +35,10 @@ FORCE_RESYNC = CloseSignal(WS_CLOSE_RESYNC, "events dropped, resync")
 LOGGED_OUT = CloseSignal(WS_CLOSE_SESSION_EXPIRED, "logged out")
 
 
+# What a stream subscribes to: ("workspace", workspace_id) or ("user", user_id)
+Topic = tuple[Literal["workspace", "user"], str]
+
+
 class EventBroker:
     """In-memory pub/sub for real-time workspace events, keyed by workspace id, plus one stream per user
     for the events that concern their list of workspaces.
@@ -53,33 +57,22 @@ class EventBroker:
     """
 
     def __init__(self) -> None:
-        self._workspace_streams: dict[str, set[asyncio.Queue]] = defaultdict(set)
-        self._user_streams: dict[str, set[asyncio.Queue]] = defaultdict(set)
+        self._streams: dict[Topic, set[asyncio.Queue]] = defaultdict(set)
         self._by_user: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._seq = 0
 
-    def subscribe_workspace(self, workspace_id: str, user_id: str) -> asyncio.Queue:
+    def subscribe(self, topic: Topic, user_id: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._workspace_streams[workspace_id].add(queue)
+        self._streams[topic].add(queue)
         self._by_user[user_id].add(queue)
         return queue
 
-    def unsubscribe_workspace(self, workspace_id: str, queue: asyncio.Queue, user_id: str) -> None:
-        self._discard(self._workspace_streams, workspace_id, queue)
-        self._discard(self._by_user, user_id, queue)
-
-    def subscribe_user(self, user_id: str) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._user_streams[user_id].add(queue)
-        self._by_user[user_id].add(queue)
-        return queue
-
-    def unsubscribe_user(self, queue: asyncio.Queue, user_id: str) -> None:
-        self._discard(self._user_streams, user_id, queue)
+    def unsubscribe(self, topic: Topic, queue: asyncio.Queue, user_id: str) -> None:
+        self._discard(self._streams, topic, queue)
         self._discard(self._by_user, user_id, queue)
 
     @staticmethod
-    def _discard(registry: dict[str, set[asyncio.Queue]], key: str, queue: asyncio.Queue) -> None:
+    def _discard(registry: dict[Any, set[asyncio.Queue]], key: Any, queue: asyncio.Queue) -> None:
         queues = registry.get(key)
         if not queues:
             return
@@ -95,9 +88,9 @@ class EventBroker:
         """Fan an event out to every subscriber of a workspace, and to the user streams of `users`. Non-blocking and never raises."""
         self._seq += 1
         envelope = {**event, "workspace_id": workspace_id, "seq": self._seq, "ts": datetime.now(UTC).isoformat()}
-        queues = list(self._workspace_streams.get(workspace_id, ()))
+        queues = list(self._streams.get(("workspace", workspace_id), ()))
         for user_id in set(users):
-            queues += self._user_streams.get(user_id, ())
+            queues += self._streams.get(("user", user_id), ())
         for queue in queues:
             try:
                 queue.put_nowait(envelope)

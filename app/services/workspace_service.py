@@ -111,7 +111,7 @@ class WorkspaceService:
                     db.refresh(workspace)
                     logger.info(f"Successfully setup workspace {workspace.id}")
                     self.build_service.prepare(workspace_type, workspace.abs_path)
-                    self.broker.emit(workspace.id, EventType.WORKSPACE_CREATED, actor_user_id=user.id, users=[user.id])
+                    self._emit_to_members(workspace, EventType.WORKSPACE_CREATED, actor_user_id=user.id)
                 else:
                     db.rollback()
                     raise Exception("Failed to setup workspace")
@@ -428,12 +428,17 @@ class WorkspaceService:
             return True
         return False
 
+    def _emit_to_members(self, workspace: GitWorkspace, event_type: EventType, *, members: list[str] | None = None, **fields: Any) -> None:
+        """For events that change the workspace list: also sent to the user streams of the workspace's members."""
+        users = workspace_members(workspace) if members is None else members
+        self.broker.emit(workspace.id, event_type, users=users, **fields)
+
     def _publish_status_change(self, workspace: GitWorkspace, user_id: str | None, *, reactivated: bool = False, archived: bool = False) -> None:
         """The same events update_workspace sends when the status changes as a side effect of a PR refresh."""
         if reactivated:
-            self.broker.emit(workspace.id, EventType.WORKSPACE_UPDATED, actor_user_id=user_id, fields=["status"], users=workspace_members(workspace))
+            self._emit_to_members(workspace, EventType.WORKSPACE_UPDATED, actor_user_id=user_id, fields=["status"])
         if archived:
-            self.broker.emit(workspace.id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id, users=workspace_members(workspace))
+            self._emit_to_members(workspace, EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id)
 
     async def sync_workspace(
         self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = AccessMode.READONLY.value
@@ -573,12 +578,11 @@ class WorkspaceService:
 
             changed = [key for key, value in previous.items() if getattr(workspace, key) != value]
             archived_now = "status" in changed and workspace.status == WorkspaceStatus.ARCHIVED
-            members = workspace_members(workspace)
             if archived_now:
-                self.broker.emit(workspace_id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id, users=members)
+                self._emit_to_members(workspace, EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id)
             fields = [key for key in changed if key != "status" or not archived_now]
             if fields:
-                self.broker.emit(workspace_id, EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields, users=members)
+                self._emit_to_members(workspace, EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields)
 
             return workspace
         except HTTPException:
@@ -596,6 +600,7 @@ class WorkspaceService:
         # Under the workspace lock so an in-flight commit/push/sync finishes before its tree
         # disappears; requests queued behind the delete then 404 at the workspace read.
         async def transaction():
+            # Before the delete takes the collaborators with it
             members = workspace_members(workspace)
             try:
                 if workspace.abs_path.exists():
@@ -615,7 +620,7 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
             # Tell subscribers the workspace is gone (the realtime gateway closes their connections)
-            self.broker.emit(workspace_id, EventType.WORKSPACE_DELETED, actor_user_id=user_id, users=members)
+            self._emit_to_members(workspace, EventType.WORKSPACE_DELETED, members=members, actor_user_id=user_id)
             return "Workspace deleted successfully"
 
         result = await run_exclusive(workspace_id, transaction)
