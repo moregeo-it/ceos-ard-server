@@ -35,6 +35,10 @@ class EventType(str, Enum):
     # The owner opened, edited, closed or reopened the pull request; sent only to the owner, as the
     # proposal is owner-only
     PROPOSAL_UPDATED = "proposal.updated"
+    # Only on the user streams (GET /events): the owner created a workspace
+    WORKSPACE_CREATED = "workspace.created"
+    # Only on the user streams: a user gained access to a workspace, by invitation or a share link
+    COLLABORATOR_ADDED = "collaborator.added"
 
 
 def build_event(

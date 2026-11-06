@@ -1,9 +1,10 @@
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from app.schemas.events import EventType, build_event
 
@@ -34,8 +35,13 @@ FORCE_RESYNC = CloseSignal(WS_CLOSE_RESYNC, "events dropped, resync")
 LOGGED_OUT = CloseSignal(WS_CLOSE_SESSION_EXPIRED, "logged out")
 
 
+# What a stream subscribes to: ("workspace", workspace_id) or ("user", user_id)
+Topic = tuple[Literal["workspace", "user"], str]
+
+
 class EventBroker:
-    """In-memory pub/sub for real-time workspace events, keyed by workspace id.
+    """In-memory pub/sub for real-time workspace events, keyed by workspace id, plus one stream per user
+    for the events that concern their list of workspaces.
 
     Transport-agnostic: the realtime WebSocket gateway (app/api/collab.py) drains each subscriber's
     queue and sends it over the socket. Each subscriber gets its own asyncio.Queue, fanned out
@@ -51,22 +57,22 @@ class EventBroker:
     """
 
     def __init__(self) -> None:
-        self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
+        self._streams: dict[Topic, set[asyncio.Queue]] = defaultdict(set)
         self._by_user: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._seq = 0
 
-    def subscribe(self, workspace_id: str, user_id: str) -> asyncio.Queue:
+    def subscribe(self, topic: Topic, user_id: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._subscribers[workspace_id].add(queue)
+        self._streams[topic].add(queue)
         self._by_user[user_id].add(queue)
         return queue
 
-    def unsubscribe(self, workspace_id: str, queue: asyncio.Queue, user_id: str) -> None:
-        self._discard(self._subscribers, workspace_id, queue)
+    def unsubscribe(self, topic: Topic, queue: asyncio.Queue, user_id: str) -> None:
+        self._discard(self._streams, topic, queue)
         self._discard(self._by_user, user_id, queue)
 
     @staticmethod
-    def _discard(registry: dict[str, set[asyncio.Queue]], key: str, queue: asyncio.Queue) -> None:
+    def _discard(registry: dict[Any, set[asyncio.Queue]], key: Any, queue: asyncio.Queue) -> None:
         queues = registry.get(key)
         if not queues:
             return
@@ -74,22 +80,25 @@ class EventBroker:
         if not queues:
             registry.pop(key, None)
 
-    def emit(self, workspace_id: str, event_type: EventType, **fields: Any) -> None:
+    def emit(self, workspace_id: str, event_type: EventType, *, users: Iterable[str] = (), **fields: Any) -> None:
         """Build and publish an event; see `build_event` for the fields."""
-        self.publish(workspace_id, build_event(event_type, **fields))
+        self.publish(workspace_id, build_event(event_type, **fields), users=users)
 
-    def publish(self, workspace_id: str, event: dict[str, Any]) -> None:
-        """Fan an event out to every subscriber of a workspace. Non-blocking and never raises."""
+    def publish(self, workspace_id: str, event: dict[str, Any], users: Iterable[str] = ()) -> None:
+        """Fan an event out to every subscriber of a workspace, and to the user streams of `users`. Non-blocking and never raises."""
         self._seq += 1
-        envelope = {**event, "seq": self._seq, "ts": datetime.now(UTC).isoformat()}
-        for queue in list(self._subscribers.get(workspace_id, ())):
+        envelope = {**event, "workspace_id": workspace_id, "seq": self._seq, "ts": datetime.now(UTC).isoformat()}
+        queues = list(self._streams.get(("workspace", workspace_id), ()))
+        for user_id in set(users):
+            queues += self._streams.get(("user", user_id), ())
+        for queue in queues:
             try:
                 queue.put_nowait(envelope)
             except asyncio.QueueFull:
                 logger.warning(
-                    "Realtime queue full for workspace %s; forcing subscriber to disconnect and resync (dropped %s)",
-                    workspace_id,
+                    "Realtime queue full; forcing subscriber to disconnect and resync (dropped %s of workspace %s)",
                     event.get("type"),
+                    workspace_id,
                 )
                 self._signal(queue, FORCE_RESYNC)
 

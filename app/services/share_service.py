@@ -66,6 +66,12 @@ def resolve_role(db: Session, workspace: GitWorkspace, user_id: str) -> str | No
     return collaborator.mode.value
 
 
+def workspace_members(workspace: GitWorkspace) -> list[str]:
+    """The users who can open a workspace: its owner and accepted collaborators."""
+    collaborators = (c.invitee_user_id for c in workspace.collaborators if c.status == CollaboratorStatus.ACCEPTED)
+    return [workspace.user_id, *filter(None, collaborators)]
+
+
 def activate_pending_collaborators(db: Session, user: User) -> None:
     """At login: accept this GitHub account's pending collaborations and refresh the cached username.
 
@@ -176,12 +182,29 @@ class ShareService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Not personal GitHub accounts: {', '.join(not_users)}")
 
         now = datetime.now(UTC)
+        # Who had access before, and with which mode
+        modes = {c.invitee_user_id: c.mode for c in workspace.collaborators if c.status == CollaboratorStatus.ACCEPTED}
         try:
-            return self._upsert_collaborators(db, workspace, user, request.mode, github_users, now)
+            collaborators = self._upsert_collaborators(db, workspace, user, request.mode, github_users, now)
         except IntegrityError:
             # Lost a race with a concurrent share of the same account: redo on top of its row
             db.rollback()
-            return self._upsert_collaborators(db, workspace, user, request.mode, github_users, now)
+            collaborators = self._upsert_collaborators(db, workspace, user, request.mode, github_users, now)
+
+        for collaborator in collaborators:
+            if collaborator.status != CollaboratorStatus.ACCEPTED:
+                continue
+            if collaborator.invitee_user_id not in modes:
+                self._emit_access(workspace_id, EventType.COLLABORATOR_ADDED, collaborator, actor_user_id=user.id)
+            elif modes[collaborator.invitee_user_id] != collaborator.mode:
+                self._emit_access(workspace_id, EventType.COLLABORATOR_UPDATED, collaborator, actor_user_id=user.id)
+        return collaborators
+
+    def _emit_access(self, workspace_id: str, event_type: EventType, collaborator: WorkspaceCollaborator, actor_user_id: str) -> None:
+        """Tell the collaborator that they gained access or have another mode."""
+        target = collaborator.invitee_user_id
+        mode = collaborator.mode.value
+        self.broker.emit(workspace_id, event_type, actor_user_id=actor_user_id, target_user_id=target, mode=mode, users=[target])
 
     @staticmethod
     def _upsert_collaborators(
@@ -240,13 +263,7 @@ class ShareService:
         db.refresh(collaborator)
 
         if changed and collaborator.invitee_user_id:
-            self.broker.emit(
-                workspace_id,
-                EventType.COLLABORATOR_UPDATED,
-                actor_user_id=user_id,
-                target_user_id=collaborator.invitee_user_id,
-                mode=collaborator.mode.value,
-            )
+            self._emit_access(workspace_id, EventType.COLLABORATOR_UPDATED, collaborator, actor_user_id=user_id)
         return collaborator
 
     async def revoke_collaborator(self, db: Session, workspace_id: str, collaborator_id: str, user_id: str) -> None:
@@ -257,9 +274,11 @@ class ShareService:
         db.delete(collaborator)
         db.commit()
 
-        # Only the affected user is told; the gateway closes their connection after delivery
+        # Only the affected user is told; the gateway then closes their connection to the workspace
         if invitee_user_id:
-            self.broker.emit(workspace_id, EventType.COLLABORATOR_REVOKED, actor_user_id=user_id, target_user_id=invitee_user_id)
+            self.broker.emit(
+                workspace_id, EventType.COLLABORATOR_REVOKED, actor_user_id=user_id, target_user_id=invitee_user_id, users=[invitee_user_id]
+            )
 
     # --- Shares ---
 
@@ -340,12 +359,16 @@ class ShareService:
         collaborator = None
 
         if workspace.user_id != user.id:
+            added = user.id not in workspace_members(workspace)
             try:
                 collaborator = self._accept_share(db, share, workspace, user)
             except IntegrityError:
                 # Lost a race with a concurrent redemption by the same account: redo on top of its row
                 db.rollback()
                 collaborator = self._accept_share(db, share, workspace, user)
+            if added:
+                # For the user's other tabs
+                self._emit_access(workspace.id, EventType.COLLABORATOR_ADDED, collaborator, actor_user_id=user.id)
 
         workspace.annotate_viewer(resolve_role(db, workspace, user.id))
         return collaborator, workspace

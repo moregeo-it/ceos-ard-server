@@ -596,6 +596,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /events:
+    get:
+      summary: Real-time events of the user (WebSocket)
+      description: |
+        WebSocket stream of the events that concern the user's list of workspaces, for every workspace
+        they can open. Clients keep it open while the user is logged in, next to the stream of the
+        workspace they have open. (Documented under `get` because OpenAPI has no WebSocket type.)
+
+        It carries `workspace.created`, `workspace.updated`, `workspace.archived`, `workspace.deleted`,
+        `collaborator.added`, `collaborator.updated` and `collaborator.revoked`, each with the
+        `workspace_id` it is about, plus the `{"type":"ping"}` heartbeat. None of them closes the
+        connection.
+
+        Handshake, close codes and echo filtering are those of `GET /workspaces/{workspaceId}/events`,
+        without the access check: `4003` only means the account isn't a GitHub account.
+      operationId: subscribeUserEvents
+      tags:
+        - Realtime
+      parameters:
+        - name: client_id
+          in: query
+          required: false
+          description: The id this page load also sends as `X-Client-Id` on requests that change data; used for echo filtering only.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{8,64}$'
+      responses:
+        '101':
+          description: Handshake succeeded; the server streams `WorkspaceEvent` messages until the client disconnects or the server closes the connection.
+
   /workspaces/{workspaceId}/events:
     get:
       summary: Real-time workspace events (WebSocket)
@@ -2974,6 +3004,8 @@ components:
         - workspace.archived
         - workspace.deleted
         - proposal.updated
+        - workspace.created
+        - collaborator.added
       description: |
         Kind of `WorkspaceEvent`.
 
@@ -2991,10 +3023,15 @@ components:
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
         - `proposal.updated`: the owner opened, edited, closed or reopened the pull request via `PUT .../proposal`; sent only to the owner (see `proposal`).
+        - `workspace.created`: the owner created a workspace via `POST /workspaces`; only on the owner's user stream (`GET /events`).
+        - `collaborator.added`: the target gained access, invited via `POST .../collaborators` or by redeeming a share link; only on the target's user stream.
+
+        `workspace.updated`, `workspace.archived`, `workspace.deleted`, `collaborator.updated` and
+        `collaborator.revoked` also reach the user streams of everyone they concern (see `GET /events`).
 
     WorkspaceEvent:
       description: |
-        JSON payload of each realtime message pushed over the workspace WebSocket connection.
+        JSON payload of each realtime message pushed over the workspace and user WebSocket connections.
 
         Contract rules:
         - Every event embeds the response body of the REST operation that caused it, unmodified,
@@ -3031,6 +3068,8 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
         - $ref: '#/components/schemas/WorkspaceEventProposalUpdated'
+        - $ref: '#/components/schemas/WorkspaceEventWorkspaceCreated'
+        - $ref: '#/components/schemas/WorkspaceEventCollaboratorAdded'
       discriminator:
         propertyName: type
         mapping:
@@ -3049,18 +3088,24 @@ components:
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
           workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
           proposal.updated: '#/components/schemas/WorkspaceEventProposalUpdated'
+          workspace.created: '#/components/schemas/WorkspaceEventWorkspaceCreated'
+          collaborator.added: '#/components/schemas/WorkspaceEventCollaboratorAdded'
 
     WorkspaceEventBase:
       type: object
       description: Fields shared by all realtime workspace events.
       required:
         - type
+        - workspace_id
         - seq
         - ts
         - actor_user_id
       properties:
         type:
           $ref: '#/components/schemas/WorkspaceEventType'
+        workspace_id:
+          type: string
+          description: The workspace the event is about.
         seq:
           type: integer
           description: >-
@@ -3242,6 +3287,36 @@ components:
           properties:
             type:
               const: collaborator.updated
+            target_user_id:
+              type: string
+              description: The user id this event is delivered to (never broadcast to other subscribers).
+            mode:
+              $ref: '#/components/schemas/AccessMode'
+
+    WorkspaceEventWorkspaceCreated:
+      description: |
+        The owner created a workspace via `POST /workspaces`. Only on the owner's user stream; like
+        `workspace.updated`, it carries no workspace: clients fetch it.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          properties:
+            type:
+              const: workspace.created
+
+    WorkspaceEventCollaboratorAdded:
+      description: |
+        The target gained access to the workspace, invited by the owner via `POST .../collaborators`
+        or by redeeming a share link. Only on the target's user stream, who fetches the workspace.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - target_user_id
+            - mode
+          properties:
+            type:
+              const: collaborator.added
             target_user_id:
               type: string
               description: The user id this event is delivered to (never broadcast to other subscribers).

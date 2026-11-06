@@ -20,7 +20,7 @@ from app.services.build_service import BuildService
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
-from app.services.share_service import ROLE_RANK, resolve_role
+from app.services.share_service import ROLE_RANK, resolve_role, workspace_members
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
 from app.utils.limits import FileTooLarge, check_read_size
@@ -111,6 +111,7 @@ class WorkspaceService:
                     db.refresh(workspace)
                     logger.info(f"Successfully setup workspace {workspace.id}")
                     self.build_service.prepare(workspace_type, workspace.abs_path)
+                    self._emit_to_members(workspace, EventType.WORKSPACE_CREATED, actor_user_id=user.id)
                 else:
                     db.rollback()
                     raise Exception("Failed to setup workspace")
@@ -427,12 +428,17 @@ class WorkspaceService:
             return True
         return False
 
-    def _publish_status_change(self, workspace_id: str, user_id: str | None, *, reactivated: bool = False, archived: bool = False) -> None:
+    def _emit_to_members(self, workspace: GitWorkspace, event_type: EventType, *, members: list[str] | None = None, **fields: Any) -> None:
+        """For events that change the workspace list: also sent to the user streams of the workspace's members."""
+        users = workspace_members(workspace) if members is None else members
+        self.broker.emit(workspace.id, event_type, users=users, **fields)
+
+    def _publish_status_change(self, workspace: GitWorkspace, user_id: str | None, *, reactivated: bool = False, archived: bool = False) -> None:
         """The same events update_workspace sends when the status changes as a side effect of a PR refresh."""
         if reactivated:
-            self.broker.emit(workspace_id, EventType.WORKSPACE_UPDATED, actor_user_id=user_id, fields=["status"])
+            self._emit_to_members(workspace, EventType.WORKSPACE_UPDATED, actor_user_id=user_id, fields=["status"])
         if archived:
-            self.broker.emit(workspace_id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id)
+            self._emit_to_members(workspace, EventType.WORKSPACE_ARCHIVED, actor_user_id=user_id)
 
     async def sync_workspace(
         self, db: Session, user_id: str, workspace_id: str, access_token: str, min_role: str = AccessMode.READONLY.value
@@ -474,7 +480,7 @@ class WorkspaceService:
         db.refresh(workspace)
 
         # A merged or closed proposal archives the workspace here; connected tabs must learn it too
-        self._publish_status_change(workspace.id, user_id, archived=archived)
+        self._publish_status_change(workspace, user_id, archived=archived)
         return workspace
 
     async def _reactivation_blocked_reason(self, workspace: GitWorkspace, access_token: str) -> str | None:
@@ -573,10 +579,10 @@ class WorkspaceService:
             changed = [key for key, value in previous.items() if getattr(workspace, key) != value]
             archived_now = "status" in changed and workspace.status == WorkspaceStatus.ARCHIVED
             if archived_now:
-                self.broker.emit(workspace_id, EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id)
+                self._emit_to_members(workspace, EventType.WORKSPACE_ARCHIVED, actor_user_id=user.id)
             fields = [key for key in changed if key != "status" or not archived_now]
             if fields:
-                self.broker.emit(workspace_id, EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields)
+                self._emit_to_members(workspace, EventType.WORKSPACE_UPDATED, actor_user_id=user.id, fields=fields)
 
             return workspace
         except HTTPException:
@@ -594,6 +600,8 @@ class WorkspaceService:
         # Under the workspace lock so an in-flight commit/push/sync finishes before its tree
         # disappears; requests queued behind the delete then 404 at the workspace read.
         async def transaction():
+            # Before the delete takes the collaborators with it
+            members = workspace_members(workspace)
             try:
                 if workspace.abs_path.exists():
                     await asyncio.to_thread(shutil.rmtree, workspace.abs_path)
@@ -612,7 +620,7 @@ class WorkspaceService:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete workspace: {str(e)}") from e
 
             # Tell subscribers the workspace is gone (the realtime gateway closes their connections)
-            self.broker.emit(workspace_id, EventType.WORKSPACE_DELETED, actor_user_id=user_id)
+            self._emit_to_members(workspace, EventType.WORKSPACE_DELETED, members=members, actor_user_id=user_id)
             return "Workspace deleted successfully"
 
         result = await run_exclusive(workspace_id, transaction)
@@ -793,7 +801,7 @@ class WorkspaceService:
             archived = self._apply_pull_request_state(workspace, pull_request)
             db.commit()
             # A merged or closed proposal archives the workspace here too; connected tabs must learn it
-            self._publish_status_change(workspace.id, user_id, archived=archived)
+            self._publish_status_change(workspace, user_id, archived=archived)
 
             return self._to_proposal(pull_request)
         except HTTPException:
@@ -883,7 +891,7 @@ class WorkspaceService:
                 workspace.pull_request_number = str(pr_response["number"])
                 archived = self._apply_pull_request_state(workspace, pr_response)
                 db.commit()
-                self._publish_status_change(workspace_id, user.id, reactivated=reactivated, archived=archived)
+                self._publish_status_change(workspace, user.id, reactivated=reactivated, archived=archived)
 
                 proposal = self._to_proposal(pr_response)
                 self.broker.emit(
