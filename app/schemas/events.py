@@ -30,6 +30,11 @@ class EventType(str, Enum):
     COLLABORATOR_REVOKED = "collaborator.revoked"
     # The owner changed this user's mode; sent only to that user, who refetches the workspace
     COLLABORATOR_UPDATED = "collaborator.updated"
+    # A comment thread was started, or changed (reply, edit, deletion, resolved, reopened); carries the thread
+    THREAD_CREATED = "thread.created"
+    THREAD_UPDATED = "thread.updated"
+    # The only comment left in a thread was deleted, and the thread with it; carries `thread_id`
+    THREAD_DELETED = "thread.deleted"
     WORKSPACE_ARCHIVED = "workspace.archived"
     WORKSPACE_DELETED = "workspace.deleted"
     # The owner opened, edited, closed or reopened the pull request; sent only to the owner, as the

@@ -1,4 +1,5 @@
 from app.services.build_service import BuildService
+from app.services.comment_service import CommentService
 from app.services.events_service import EventBroker, event_broker
 from app.services.file_service import FileService
 from app.services.git_service import GitService
@@ -18,6 +19,7 @@ build_service = BuildService()
 github_service = GitHubService()
 workspace_service = WorkspaceService(git_service=git_service, build_service=build_service, github_service=github_service, broker=event_broker)
 share_service = ShareService(workspace_service=workspace_service, github_service=github_service, broker=event_broker)
+comment_service = CommentService(workspace_service=workspace_service, broker=event_broker)
 file_service = FileService(git_service=git_service, workspace_service=workspace_service, broker=event_broker)
 preview_service = PreviewService(build_service=build_service, workspace_service=workspace_service, broker=event_broker)
 token_refresh_service = TokenRefreshService()
@@ -41,6 +43,10 @@ def get_event_broker() -> EventBroker:
 
 def get_workspace_service() -> WorkspaceService:
     return workspace_service
+
+
+def get_comment_service() -> CommentService:
+    return comment_service
 
 
 def get_file_service() -> FileService:

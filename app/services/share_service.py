@@ -30,17 +30,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Effective-role ranking used to gate access. Owner is the sole writer.
-ROLE_RANK = {AccessMode.READONLY.value: 0, "owner": 1}
+# Effective-role ranking used to gate access. Owner is the sole writer of files; commenters also write comments.
+ROLE_RANK = {AccessMode.READONLY.value: 0, AccessMode.COMMENT.value: 1, "owner": 2}
 # GitHub login syntax: alphanumerics and single hyphens, up to 39 characters. Checked before the
 # name goes into the API URL path, where e.g. "octocat/repos" would hit another endpoint.
 GITHUB_USERNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 
 
 def resolve_role(db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
-    """The effective role of a user on a workspace: "owner", "readonly", or None without access.
+    """The effective role of a user on a workspace: "owner", "comment", "readonly", or None without access.
 
-    The owner is the sole writer; collaborators are readonly, as is everyone on an archived workspace.
+    The owner is the sole writer of files; collaborators have their mode, and are readonly on an archived workspace.
     """
     if not user_id:
         return None

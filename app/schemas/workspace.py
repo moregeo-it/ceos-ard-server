@@ -26,6 +26,7 @@ class WorkspaceStatus(str, Enum):
 class ViewerRole(str, Enum):
     OWNER = "owner"
     READONLY = "readonly"
+    COMMENT = "comment"
 
 
 class SyncStatus(str, Enum):

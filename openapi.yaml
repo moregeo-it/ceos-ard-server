@@ -38,6 +38,8 @@ tags:
     description: Product Family Specification management
   - name: Sharing
     description: Workspace sharing, collaborator management, and invitations
+  - name: Comments
+    description: Comment threads on the files of a workspace
 
 paths:
   /types:
@@ -350,7 +352,7 @@ paths:
         Retrieves all workspaces the authenticated user has access to - both
         workspaces they own and workspaces they collaborate on ("Shared with
         me"). Each workspace's `viewer_role` field indicates whether the
-        caller owns it ("owner") or the mode of their collaboration ("readonly"),
+        caller owns it ("owner") or the mode of their collaboration ("readonly" or "comment"),
         while `user_id`, `owner_username`, and `owner_full_name` identify the
         workspace owner.
       operationId: listWorkspaces
@@ -1906,6 +1908,305 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/threads:
+    get:
+      summary: List the comment threads of a workspace
+      description: |
+        All comment threads on the files of the workspace, newest first, each with its comments.
+        Everyone with access can read them.
+
+        A thread follows its file when the file is renamed (see `previous_paths`). It is `outdated`
+        while its file doesn't exist, e.g. after a deletion, and current again when the file comes back.
+      operationId: listThreads
+      tags:
+        - Comments
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: The threads of the workspace
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Thread'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Start a comment thread on a file
+      description: |
+        Starts a thread with its first comment on a file of the workspace. Owner and commenters only,
+        not on an archived workspace. Sends `thread.created`.
+      operationId: createThread
+      tags:
+        - Comments
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreadCreateRequest'
+      responses:
+        '201':
+          description: The new thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '400':
+          description: The path isn't a file of the workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the owner and commenters can comment, and not on an archived workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace or file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid request data, e.g. an empty comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/threads/{threadId}:
+    patch:
+      summary: Resolve or reopen a comment thread
+      description: |
+        Resolves or reopens a thread. Owner and commenters only, not on an archived workspace.
+        Sends `thread.updated` if the status changed.
+      operationId: updateThread
+      tags:
+        - Comments
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreadUpdateRequest'
+      responses:
+        '200':
+          description: The updated thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the owner and commenters can comment, and not on an archived workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace, thread or comment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid request data, e.g. an empty comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/threads/{threadId}/comments:
+    post:
+      summary: Reply to a comment thread
+      description: |
+        Adds a reply to a thread. Owner and commenters only, not on an archived workspace.
+        A resolved thread stays resolved. Sends `thread.updated`.
+      operationId: addComment
+      tags:
+        - Comments
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentRequest'
+      responses:
+        '201':
+          description: The thread with the reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the owner and commenters can comment, and not on an archived workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace, thread or comment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid request data, e.g. an empty comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/threads/{threadId}/comments/{commentId}:
+    patch:
+      summary: Edit your own comment
+      description: |
+        Changes the text of one of your own comments. Not on an archived workspace. Sends
+        `thread.updated` if the text changed.
+      operationId: editComment
+      tags:
+        - Comments
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/CommentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentRequest'
+      responses:
+        '200':
+          description: The thread with the edited comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - not your comment, not allowed to comment, or the workspace is archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace, thread or comment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid request data, e.g. an empty comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete a comment
+      description: |
+        Deletes one of your own comments; the owner can delete any comment. Not on an archived workspace.
+        Only the first and the last comment of a thread can be deleted; replies in between can only
+        be edited (`409`), so the discussion keeps its context. Threads can't be deleted as such.
+
+        - The last comment is removed. Sends `thread.updated`.
+        - The first comment of a thread that has replies becomes a placeholder
+          (`deleted: true`, `body: null`), and the replies stay. Sends `thread.updated`.
+        - When only deleted comments are left, e.g. after deleting the only comment, the thread
+          goes as well: `204`, and `thread.deleted` is sent.
+      operationId: deleteComment
+      tags:
+        - Comments
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/CommentId'
+      responses:
+        '200':
+          description: The thread without the comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '204':
+          description: The thread was deleted with its last comment
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - not your comment and you aren't the owner, not allowed to comment, or the workspace is archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace, thread or comment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The comment is a reply in between, which can't be deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /workspaces/{workspaceId}/collaborators:
     get:
       summary: List the collaborators of a workspace
@@ -2445,6 +2746,24 @@ components:
       schema:
         type: string
 
+    ThreadId:
+      name: threadId
+      in: path
+      required: true
+      description: Unique identifier of the comment thread
+      schema:
+        type: string
+        format: uuid
+
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      description: Unique identifier of the comment
+      schema:
+        type: string
+        format: uuid
+
     IfNoneMatch:
       name: If-None-Match
       in: header
@@ -2977,6 +3296,7 @@ components:
           type: string
           enum:
             - owner
+            - comment
             - readonly
           readOnly: true
           description: |
@@ -3001,6 +3321,9 @@ components:
         - preview.preparing
         - collaborator.revoked
         - collaborator.updated
+        - thread.created
+        - thread.updated
+        - thread.deleted
         - workspace.archived
         - workspace.deleted
         - proposal.updated
@@ -3020,6 +3343,9 @@ components:
         - `preview.preparing`: a preview or download waits for the toolchain of the workspace's CLI version to be installed (see `toolchain`), up to a few minutes.
         - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
+        - `thread.created`: a comment thread was started via `POST .../threads` (see `thread`).
+        - `thread.updated`: a thread was resolved or reopened, or one of its comments was added, edited or deleted (see `thread`). Threads also follow `file.renamed`, and `file.reverted` with an `old_path`, without an event of their own: clients move them like the file.
+        - `thread.deleted`: the only comment left in a thread was deleted, and the thread with it (see `thread_id`). Threads can't be deleted as such.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
         - `proposal.updated`: the owner opened, edited, closed or reopened the pull request via `PUT .../proposal`; sent only to the owner (see `proposal`).
@@ -3065,6 +3391,9 @@ components:
         - $ref: '#/components/schemas/WorkspaceEventPreviewPreparing'
         - $ref: '#/components/schemas/WorkspaceEventCollaboratorRevoked'
         - $ref: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
+        - $ref: '#/components/schemas/WorkspaceEventThreadCreated'
+        - $ref: '#/components/schemas/WorkspaceEventThreadUpdated'
+        - $ref: '#/components/schemas/WorkspaceEventThreadDeleted'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceArchived'
         - $ref: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
         - $ref: '#/components/schemas/WorkspaceEventProposalUpdated'
@@ -3085,6 +3414,9 @@ components:
           preview.preparing: '#/components/schemas/WorkspaceEventPreviewPreparing'
           collaborator.revoked: '#/components/schemas/WorkspaceEventCollaboratorRevoked'
           collaborator.updated: '#/components/schemas/WorkspaceEventCollaboratorUpdated'
+          thread.created: '#/components/schemas/WorkspaceEventThreadCreated'
+          thread.updated: '#/components/schemas/WorkspaceEventThreadUpdated'
+          thread.deleted: '#/components/schemas/WorkspaceEventThreadDeleted'
           workspace.archived: '#/components/schemas/WorkspaceEventWorkspaceArchived'
           workspace.deleted: '#/components/schemas/WorkspaceEventWorkspaceDeleted'
           proposal.updated: '#/components/schemas/WorkspaceEventProposalUpdated'
@@ -3452,6 +3784,58 @@ components:
                 - merged
               description: Whether the branch was fast-forwarded or reset to GitHub's (`updated`), or local commits were replayed on top of it (`merged`).
 
+    WorkspaceEventThreadCreated:
+      description: A comment thread was started via `POST .../threads`. `thread` equals the REST response body; `path` equals `thread.path`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - thread
+          properties:
+            type:
+              const: thread.created
+            path:
+              type: string
+            thread:
+              $ref: '#/components/schemas/Thread'
+
+    WorkspaceEventThreadUpdated:
+      description: |
+        A thread was resolved or reopened, or one of its comments was added, edited or deleted.
+        `thread` equals the REST response body; `path` equals `thread.path`.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - thread
+          properties:
+            type:
+              const: thread.updated
+            path:
+              type: string
+            thread:
+              $ref: '#/components/schemas/Thread'
+
+    WorkspaceEventThreadDeleted:
+      description: The last comment of a thread was deleted via `DELETE .../comments/{commentId}`, and the thread with it.
+      allOf:
+        - $ref: '#/components/schemas/WorkspaceEventBase'
+        - type: object
+          required:
+            - path
+            - thread_id
+          properties:
+            type:
+              const: thread.deleted
+            path:
+              type: string
+              description: The path of the thread's file.
+            thread_id:
+              type: string
+              format: uuid
+
     CommitChange:
       type: object
       description: |
@@ -3558,11 +3942,16 @@ components:
       type: string
       enum:
         - readonly
+        - comment
       description: |
-        Access level granted to a collaborator.
+        Access level granted to a collaborator. Which modes can be granted is configured on the
+        server (`SHARING_MODES_ENABLED`); others are refused with `400`.
 
-        - "readonly": Can view the workspace and its files, cannot make
+        - "readonly": Can view the workspace, its files and comments, cannot make
           changes. Equivalent to viewing an archived workspace.
+        - "comment": Like "readonly", and can also start comment threads, reply, resolve and
+          reopen threads, and edit and delete their own comments. Files stay read-only.
+          On an archived workspace, comments are read-only for everyone.
 
     CollaboratorStatus:
       type: string
@@ -3777,3 +4166,157 @@ components:
           description: Null when the requester is the workspace owner, who needs no collaborator entry.
         workspace:
           $ref: '#/components/schemas/Workspace'
+
+    ThreadStatus:
+      type: string
+      enum:
+        - open
+        - resolved
+
+    CommentAuthor:
+      type: object
+      description: A GitHub user who wrote a comment or resolved a thread.
+      required:
+        - user_id
+        - github_id
+        - username
+      properties:
+        user_id:
+          type:
+            - string
+            - "null"
+          description: The user's account in the editor, as in `GET /auth/user`; null once the account is deleted.
+        github_id:
+          type: string
+          description: The user's GitHub account id, which never changes.
+        username:
+          type: string
+          description: The user's GitHub username when they wrote the comment.
+
+    Comment:
+      type: object
+      required:
+        - id
+        - author
+        - body
+        - deleted
+        - created_at
+        - edited_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/CommentAuthor'
+        body:
+          type:
+            - string
+            - "null"
+          description: The comment in Markdown; null when `deleted`.
+        deleted:
+          type: boolean
+          description: A deleted first comment of a thread that has replies, kept as a placeholder.
+        created_at:
+          type: string
+          format: date-time
+        edited_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the author last changed the text.
+
+    Thread:
+      type: object
+      description: |
+        A discussion on a file: a first comment and a flat list of replies, oldest first.
+      required:
+        - id
+        - workspace_id
+        - path
+        - previous_paths
+        - status
+        - outdated
+        - created_by
+        - created_at
+        - updated_at
+        - resolved_by
+        - resolved_at
+        - comments
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        path:
+          type: string
+          description: The file, as the file endpoints name it, e.g. `/requirements/x.yaml`.
+        previous_paths:
+          type: array
+          items:
+            type: string
+          description: Earlier paths of the file from renames, oldest first.
+        status:
+          $ref: '#/components/schemas/ThreadStatus'
+        outdated:
+          type: boolean
+          description: The file doesn't exist in the workspace, e.g. it was deleted.
+        created_by:
+          $ref: '#/components/schemas/CommentAuthor'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: When the thread or one of its comments last changed.
+        resolved_by:
+          oneOf:
+            - $ref: '#/components/schemas/CommentAuthor'
+            - type: "null"
+          description: Who resolved the thread; null while it is open.
+        resolved_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+
+    ThreadCreateRequest:
+      type: object
+      required:
+        - path
+        - body
+      properties:
+        path:
+          type: string
+          description: The file the thread is about, e.g. `/requirements/x.yaml`.
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: The first comment in Markdown.
+
+    ThreadUpdateRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/ThreadStatus'
+
+    CommentRequest:
+      type: object
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: The comment in Markdown.

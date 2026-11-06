@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import dependencies
-from app.api import auth, collab, core, file, preview, share, workspace
+from app.api import auth, collab, comment, core, file, preview, share, workspace
 from app.config import settings
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
@@ -76,6 +76,7 @@ app.include_router(auth.router)
 
 app.include_router(core.router)
 app.include_router(collab.router)
+app.include_router(comment.router)
 app.include_router(file.router)
 app.include_router(preview.router)
 app.include_router(share.router)
