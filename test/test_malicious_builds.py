@@ -80,6 +80,8 @@ def workspace(tmp_path):
     shutil.copytree(CHECKOUT, workspace, ignore=shutil.ignore_patterns(".git", "build"))
     (workspace / ".git").mkdir()
     (workspace / ".git" / "config").write_text("token = must-not-leak")
+    # Since CLI 0.7 the templates are built in and a file in templates/ replaces its built-in one
+    (workspace / "templates").mkdir(exist_ok=True)
     with open(workspace / "templates" / "pagebreak.lua", "a") as file:
         file.write(LUA.format(outside=outside))
     with open(workspace / "templates" / "template.md", "a") as file:
