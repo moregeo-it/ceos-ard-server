@@ -7,6 +7,7 @@ import tempfile
 import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -28,15 +29,16 @@ os.environ.update(
 )
 os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))
 
-import pygit2  # noqa: E402
-
 # The server fetches upstream from GitHub; point that URL to the local upstream repository
 (DATA / "home").mkdir()
 # Git for Windows' system config converts line endings on checkout
 (DATA / "home" / ".gitconfig").write_text(
     f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
 )
-pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home")
+# libgit2 reads HOME once, on import; pygit2.settings.search_path crashes pygit2 from conda-forge on macOS.
+# Only for the import: the server needs the real HOME, e.g. for the browsers of the PDF builds.
+with patch.dict(os.environ, HOME=str(DATA / "home")):
+    import pygit2  # noqa: F401
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
