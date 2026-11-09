@@ -17,6 +17,7 @@ from app.models.workspace_share import AccessMode, CollaboratorStatus, Workspace
 from app.schemas.events import EventType
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
+from app.services.comment_service import follow_renames
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
@@ -329,10 +330,12 @@ class WorkspaceService:
         # lock between them would expose the half-repaired state. The retry runs the whole sync
         # again, because the repair only restores the fork and branch.
         async def transaction():
+            before = repo.head.target
             result = await self.with_remote_recovery(db, workspace, user, sync)
             # Files changed on disk beyond what the single-file events describe, so subscribers
             # (read-only collaborators) must reload the tree.
             if result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
+                follow_renames(db, workspace.id, repo, before)
                 self.broker.emit(workspace.id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=result.status.value)
                 self.build_service.prepare(workspace.workspace_type, workspace.abs_path)
             # Like restoring the branch, only for live work: a merged or closed proposal takes no updates

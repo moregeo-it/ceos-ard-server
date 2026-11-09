@@ -1244,6 +1244,14 @@ paths:
                         items:
                           type: string
                         description: Paths of the conflicting files
+        '500':
+          description: |
+            The commit could not be completed, e.g. GitHub's changes were merged but the push failed:
+            the commit stays and is sent with the next commit or sync. `detail` says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/diffs/{filePath}:
     get:
@@ -3366,7 +3374,7 @@ components:
         - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
         - `thread.created`: a comment thread was started via `POST .../threads` (see `thread`).
-        - `thread.updated`: a thread was resolved or reopened, or one of its comments was added, edited or deleted (see `thread`). Threads also follow `file.renamed`, and `file.reverted` with an `old_path`, without an event of their own: clients move them like the file.
+        - `thread.updated`: a thread was resolved or reopened, or one of its comments was added, edited or deleted (see `thread`). Threads also follow `file.renamed`, and `file.reverted` with an `old_path`, without an event of their own: clients move them like the file. Likewise, they follow files renamed on GitHub with `workspace.synced`, which clients answer by reloading the threads.
         - `thread.deleted`: the last comment of a thread was deleted and nothing was left of it (see `thread_id`). Threads can't be deleted as such.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.

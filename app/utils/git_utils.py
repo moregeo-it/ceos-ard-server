@@ -4,6 +4,7 @@ from urllib.parse import urlparse, urlunparse
 
 import pygit2
 from fastapi import HTTPException, status
+from pygit2.enums import DiffFind
 
 from app.schemas.workspace import Commit
 
@@ -65,6 +66,24 @@ def get_file_info(repo: pygit2.Repository, path: Path) -> dict[str, str] | None:
         return None
     except (pygit2.GitError, ValueError):
         return None
+
+
+# Stricter than git's 50%, so a deleted file and an unrelated new one aren't taken for a rename
+RENAME_THRESHOLD = 75
+
+
+def get_renamed_files(repo: pygit2.Repository, old: pygit2.Oid, new: pygit2.Oid) -> list[tuple[str, str]]:
+    """(old path, new path) of the files renamed from one commit to another."""
+    if old == new:
+        return []
+    diff = repo.diff(repo[old], repo[new])
+    # Also when a new, different file took the old name. The rewrite threshold stays at its default:
+    # higher, an edited file would count as rewritten and lose its threads to a copy of it
+    diff.find_similar(
+        flags=DiffFind.FIND_RENAMES | DiffFind.FIND_RENAMES_FROM_REWRITES,
+        rename_threshold=RENAME_THRESHOLD,
+    )
+    return [(delta.old_file.path, delta.new_file.path) for delta in diff.deltas if delta.status == pygit2.GIT_DELTA_RENAMED]
 
 
 def get_file_status(repo: pygit2.Repository, path: Path) -> str | None:

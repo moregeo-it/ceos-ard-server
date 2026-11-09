@@ -14,7 +14,7 @@ from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
 from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
 from app.services.build_service import BuildService
-from app.services.comment_service import move_threads
+from app.services.comment_service import follow_renames, move_threads
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
@@ -686,6 +686,11 @@ class FileService:
             # Set when the recovery sync below also brought remote changes into the working tree
             remote_sync: SyncStatus | None = None
 
+            def notify():
+                self.broker.emit(workspace_id, EventType.FILE_COMMITTED, actor_user_id=user.id, commit=format_commit(commit), changes=changes)
+                if remote_sync:
+                    self.broker.emit(workspace_id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=remote_sync.value)
+
             try:
                 # Recreates the fork first if it has been deleted on GitHub, then retries. Anything
                 # it cannot repair falls through to the rejected-push handling below.
@@ -698,6 +703,7 @@ class FileService:
             except HTTPException as push_error:
                 # The branch on GitHub moved, was rewritten or deleted: sync and push again.
                 # Restoring it is safe, as the checks above exclude deliberate deletions.
+                synced_from = commit.id
                 try:
                     sync_result = await self.git_service.sync_with_origin(
                         repo=repo,
@@ -719,13 +725,18 @@ class FileService:
                     # GitHub already had its changes
                     commit = repo.head.peel()
 
+                if sync_result.status in (SyncStatus.UPDATED, SyncStatus.MERGED):
+                    # Before the push below, which can fail with GitHub's files already in place
+                    follow_renames(db, workspace_id, repo, synced_from)
+
                 if sync_result.status == SyncStatus.MERGED:
                     remote_sync = SyncStatus.MERGED
                     try:
                         await self.git_service.push(repo=repo, branch_name=workspace.branch_name, user=user)
                     except HTTPException:
                         # No revert: the commit already sits on GitHub's changes, and the next
-                        # push or sync delivers it
+                        # push or sync delivers it. So it happened for subscribers too.
+                        notify()
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Your changes were merged with the changes from GitHub but could not be sent yet. "
@@ -752,9 +763,7 @@ class FileService:
                     raise push_error from None
 
             # Not reached by a reverted commit (rejected push, conflict): for subscribers it never happened
-            self.broker.emit(workspace_id, EventType.FILE_COMMITTED, actor_user_id=user.id, commit=format_commit(commit), changes=changes)
-            if remote_sync:
-                self.broker.emit(workspace_id, EventType.WORKSPACE_SYNCED, actor_user_id=user.id, status=remote_sync.value)
+            notify()
             return commit, remote_sync
 
         commit, remote_sync = await run_exclusive(workspace_id, transaction)
