@@ -257,6 +257,11 @@ paths:
                     format: email
                   username:
                     type: string
+                  github_id:
+                    type:
+                      - string
+                      - "null"
+                    description: The GitHub account id, as comment authors carry it; null for other identity providers
                   full_name:
                     type: string
                   created_at:
@@ -2157,14 +2162,13 @@ paths:
       summary: Delete a comment
       description: |
         Deletes one of your own comments; the owner can delete any comment. Not on an archived workspace.
-        Only the first and the last comment of a thread can be deleted; replies in between can only
-        be edited (`409`), so the discussion keeps its context. Threads can't be deleted as such.
+        Threads can't be deleted as such.
 
-        - The last comment is removed. Sends `thread.updated`.
-        - The first comment of a thread that has replies becomes a placeholder
-          (`deleted: true`, `body: null`), and the replies stay. Sends `thread.updated`.
-        - When only deleted comments are left, e.g. after deleting the only comment, the thread
-          goes as well: `204`, and `thread.deleted` is sent.
+        - A comment with replies after it becomes a placeholder (`deleted: true`, `body: null`).
+          Sends `thread.updated`.
+        - The last comment is removed, together with the placeholders directly before it.
+          Sends `thread.updated`, or when nothing is left, deletes the thread: `204`, and
+          `thread.deleted` is sent.
       operationId: deleteComment
       tags:
         - Comments
@@ -2196,12 +2200,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Workspace, thread or comment not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: The comment is a reply in between, which can't be deleted
           content:
             application/json:
               schema:
@@ -2571,6 +2569,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /shares/modes:
+    get:
+      summary: The access modes shares can grant
+      description: The modes the server lets owners grant, in this order; offer only these.
+      operationId: getShareModes
+      tags:
+        - Sharing
+      responses:
+        '200':
+          description: The enabled access modes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccessMode'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /shares/{token}:
     get:
       summary: Preview a share
@@ -2602,7 +2623,7 @@ paths:
       summary: Redeem a share
       description: |
         Grants the logged-in GitHub user access to the shared workspace with
-        the share's mode. Visitors who aren't logged in get a plain `401`; the
+        the share's mode. Someone who already has access keeps a higher mode. Visitors who aren't logged in get a plain `401`; the
         share page shows them `GET /shares/{token}` instead and redeems
         after the login.
       operationId: redeemShare
@@ -3345,7 +3366,7 @@ components:
         - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
         - `thread.created`: a comment thread was started via `POST .../threads` (see `thread`).
         - `thread.updated`: a thread was resolved or reopened, or one of its comments was added, edited or deleted (see `thread`). Threads also follow `file.renamed`, and `file.reverted` with an `old_path`, without an event of their own: clients move them like the file.
-        - `thread.deleted`: the only comment left in a thread was deleted, and the thread with it (see `thread_id`). Threads can't be deleted as such.
+        - `thread.deleted`: the last comment of a thread was deleted and nothing was left of it (see `thread_id`). Threads can't be deleted as such.
         - `workspace.archived`: workspace archived via `PATCH .../{workspaceId}`.
         - `workspace.deleted`: workspace deleted via `DELETE .../{workspaceId}`; closes the connection for everyone.
         - `proposal.updated`: the owner opened, edited, closed or reopened the pull request via `PUT .../proposal`; sent only to the owner (see `proposal`).
@@ -3944,8 +3965,8 @@ components:
         - readonly
         - comment
       description: |
-        Access level granted to a collaborator. Which modes can be granted is configured on the
-        server (`SHARING_MODES_ENABLED`); others are refused with `400`.
+        Access level granted to a collaborator. Only the modes in `GET /shares/modes` can be
+        granted; others are refused with `400`.
 
         - "readonly": Can view the workspace, its files and comments, cannot make
           changes. Equivalent to viewing an archived workspace.

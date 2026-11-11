@@ -4,8 +4,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.database import get_db
 from app.dependencies import get_share_service
+from app.models.workspace_share import AccessMode
 from app.schemas.share import (
     CollaboratorCreateRequest,
     CollaboratorResponse,
@@ -164,6 +166,16 @@ async def delete_workspace_share(
     with internal_errors("delete workspace share", logger):
         await share_service.delete_share(db=db, workspace_id=workspace_id, share_id=share_id, user_id=current_user["user"].id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Before /shares/{token}, which would take "modes" as a token
+@router.get(
+    "/shares/modes",
+    summary="The access modes shares can grant",
+    response_model=list[AccessMode],
+)
+async def get_share_modes(current_user: dict[str, Any] = Depends(require_github_user)):
+    return [mode for mode in AccessMode if mode.value in settings.SHARING_MODES_ENABLED]
 
 
 @router.get(

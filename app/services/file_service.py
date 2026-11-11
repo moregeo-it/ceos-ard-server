@@ -424,12 +424,14 @@ class FileService:
         elif operation_request.operation == "revert":
 
             async def transaction():
-                result = await self._revert_file_changes(workspace.abs_path, file_path, rules=workspace.workspace_type.paths)
+                rules = workspace.workspace_type.paths
+                path = normalize_workspace_path(validate_workspace_path(file_path, workspace.abs_path, rules=rules), workspace.abs_path)
+                result = await self._revert_file_changes(workspace.abs_path, file_path, rules=rules)
                 # old_path is only meaningful when the revert undid a staged rename.
                 reverted_rename = result.get("path") != file_path
                 if reverted_rename:
                     # Comment threads go back with the file
-                    move_threads(db, workspace_id, "/" + file_path.strip().lstrip("/"), result["path"])
+                    move_threads(db, workspace_id, path, result["path"])
                 self.broker.emit(
                     workspace_id,
                     EventType.FILE_REVERTED,

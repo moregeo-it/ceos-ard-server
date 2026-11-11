@@ -1,7 +1,4 @@
-"""Comments: comment_threads and comments
-
-The new access mode "comment" needs no change: SQLite stores the accessmode enum as VARCHAR without a
-constraint, and its name COMMENT fits the column, which is as long as READONLY.
+"""Comments: comment_threads and comments, and the access mode COMMENT
 
 Revision ID: 0005
 Revises: 0004
@@ -18,8 +15,21 @@ down_revision: str | None = "0004"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+MODE_TABLES = ("workspace_shares", "workspace_collaborators")
+OLD_MODE = sa.Enum("READONLY", name="accessmode")
+NEW_MODE = sa.Enum("READONLY", "COMMENT", name="accessmode")
+
 
 def upgrade() -> None:
+    if op.get_context().dialect.name == "postgresql":
+        # A type of its own, shared by both columns; a new value can't be added inside a transaction
+        with op.get_context().autocommit_block():
+            op.execute("ALTER TYPE accessmode ADD VALUE IF NOT EXISTS 'COMMENT'")
+    else:
+        for table in MODE_TABLES:
+            with op.batch_alter_table(table, schema=None) as batch_op:
+                batch_op.alter_column("mode", existing_type=OLD_MODE, type_=NEW_MODE, existing_nullable=False)
+
     op.create_table(
         "comment_threads",
         sa.Column("id", sa.String(), nullable=False),
@@ -65,6 +75,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # The previous version only knows READONLY
+    for table in MODE_TABLES:
+        op.execute(f"UPDATE {table} SET mode = 'READONLY' WHERE mode = 'COMMENT'")
+    # PostgreSQL can't drop a value from a type; the unused COMMENT stays
+    if op.get_context().dialect.name != "postgresql":
+        for table in MODE_TABLES:
+            with op.batch_alter_table(table, schema=None) as batch_op:
+                batch_op.alter_column("mode", existing_type=NEW_MODE, type_=OLD_MODE, existing_nullable=False)
+
     with op.batch_alter_table("comments", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_comments_thread_id"))
 

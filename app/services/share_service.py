@@ -360,15 +360,18 @@ class ShareService:
 
         if workspace.user_id != user.id:
             added = user.id not in workspace_members(workspace)
+            mode = next((c.mode for c in workspace.collaborators if c.invitee_user_id == user.id), None)
             try:
                 collaborator = self._accept_share(db, share, workspace, user)
             except IntegrityError:
                 # Lost a race with a concurrent redemption by the same account: redo on top of its row
                 db.rollback()
                 collaborator = self._accept_share(db, share, workspace, user)
+            # For the user's other tabs
             if added:
-                # For the user's other tabs
                 self._emit_access(workspace.id, EventType.COLLABORATOR_ADDED, collaborator, actor_user_id=user.id)
+            elif collaborator.mode != mode:
+                self._emit_access(workspace.id, EventType.COLLABORATOR_UPDATED, collaborator, actor_user_id=user.id)
 
         workspace.annotate_viewer(resolve_role(db, workspace, user.id))
         return collaborator, workspace
@@ -382,11 +385,16 @@ class ShareService:
             .first()
         )
 
-        if not collaborator or collaborator.status != CollaboratorStatus.ACCEPTED:
+        upgrade = collaborator is not None and ROLE_RANK[share.mode.value] > ROLE_RANK[collaborator.mode.value]
+        if not collaborator or collaborator.status != CollaboratorStatus.ACCEPTED or upgrade:
             now = datetime.now(UTC)
             if collaborator:
-                collaborator.accept(user.id, user.username, now)
-                collaborator.share_id = share.id
+                # A link never lowers the access someone already has
+                if upgrade:
+                    collaborator.mode = share.mode
+                if collaborator.status != CollaboratorStatus.ACCEPTED:
+                    collaborator.accept(user.id, user.username, now)
+                    collaborator.share_id = share.id
             else:
                 collaborator = WorkspaceCollaborator(
                     workspace_id=workspace.id,

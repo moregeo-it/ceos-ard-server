@@ -91,7 +91,7 @@ class Settings:
     # Largest file that can be saved or uploaded
     MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "1"))
 
-    SHARING_MODES_ENABLED: list[str] = os.getenv("SHARING_MODES_ENABLED", "readonly").split(",")
+    SHARING_MODES_ENABLED: list[str] = os.getenv("SHARING_MODES_ENABLED", "readonly,comment").split(",")
 
     CLIENT_URL: str = CLIENT_URL
     AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT", f"{CLIENT_URL}/auth/callback")

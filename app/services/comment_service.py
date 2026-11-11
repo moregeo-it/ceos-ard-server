@@ -2,9 +2,8 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.comment import Comment, CommentThread, ThreadStatus
 from app.models.user import User
@@ -28,15 +27,9 @@ def move_threads(db: Session, workspace_id: str, old_path: str, new_path: str) -
     if old_path == new_path:
         return
     try:
-        threads = (
-            db.query(CommentThread)
-            .filter(
-                CommentThread.workspace_id == workspace_id,
-                or_(CommentThread.path == old_path, CommentThread.path.startswith(f"{old_path}/", autoescape=True)),
-            )
-            .all()
-        )
-        for thread in threads:
+        # Compared in Python: LIKE ignores case in SQLite, while file paths don't
+        threads = db.query(CommentThread).filter(CommentThread.workspace_id == workspace_id).all()
+        for thread in (t for t in threads if t.path == old_path or t.path.startswith(f"{old_path}/")):
             thread.previous_paths = [*thread.previous_paths, thread.path]
             thread.path = new_path + thread.path[len(old_path) :]
         db.commit()
@@ -84,9 +77,8 @@ class CommentService:
     """Comment threads on the files of a workspace.
 
     Everyone with access reads them. Commenters and the owner write, reply, resolve and reopen,
-    and edit and delete their own comments; the owner deletes any comment. Only the first and the
-    last comment of a thread can be deleted, and threads can't be deleted as such. On an archived
-    workspace they are read-only for everyone.
+    and edit and delete their own comments; the owner deletes any comment. Read-only for everyone
+    on an archived workspace.
     """
 
     def __init__(self, workspace_service: WorkspaceService | None = None, broker: EventBroker | None = None):
@@ -119,7 +111,13 @@ class CommentService:
 
     async def list_threads(self, db: Session, workspace_id: str, user: User) -> list[dict]:
         workspace = self._workspace(db, workspace_id, user, write=False)
-        threads = db.query(CommentThread).filter(CommentThread.workspace_id == workspace.id).order_by(CommentThread.created_at.desc()).all()
+        threads = (
+            db.query(CommentThread)
+            .options(selectinload(CommentThread.comments))
+            .filter(CommentThread.workspace_id == workspace.id)
+            .order_by(CommentThread.created_at.desc())
+            .all()
+        )
         return [serialize_thread(thread, workspace) for thread in threads]
 
     async def create_thread(self, db: Session, workspace_id: str, user: User, request: ThreadCreateRequest) -> dict:
@@ -127,6 +125,9 @@ class CommentService:
 
         # Under the workspace lock, so a rename can't move the file away between the check and the insert
         async def transaction():
+            # Again: access may have changed while waiting for the lock, so reload what the session holds
+            db.expire_all()
+            workspace = self._workspace(db, workspace_id, user, write=True)
             target = validate_workspace_path(request.path, workspace.abs_path, exists=True, type="file", rules=workspace.workspace_type.paths)
             now = datetime.now(UTC)
             thread = CommentThread(
@@ -195,32 +196,24 @@ class CommentService:
         return serialize_thread(thread, workspace)
 
     async def delete_comment(self, db: Session, workspace_id: str, thread_id: str, comment_id: str, user: User) -> dict | None:
-        """Delete the first or the last comment of a thread; replies in between stay, so the discussion keeps its context.
-
-        The last comment is removed. The first comment becomes a placeholder while there are replies.
-        Threads can't be deleted as such: a thread only goes when nothing but deleted comments is left,
-        e.g. with its only comment. Returns the thread, or None when it went.
-        """
+        """A comment with replies after it becomes a placeholder. The last one is removed, with the placeholders
+        directly before it. Returns the thread, or None when nothing was left of it."""
         workspace = self._workspace(db, workspace_id, user, write=True)
         thread = self._thread(db, workspace, thread_id)
         comment = self._comment(thread, comment_id)
         if comment.author_github_id != user.external_id and workspace.viewer_role != "owner":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only delete your own comments")
 
-        first = thread.comments[0]
-        if comment is not first and comment is not thread.comments[-1]:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only the last reply of a thread can be deleted")
-
         now = datetime.now(UTC)
-        if comment is first:
-            # The replies stay, under a placeholder for the first comment
+        if comment is thread.comments[-1]:
+            thread.comments.remove(comment)
+            while thread.comments and thread.comments[-1].deleted_at is not None:
+                thread.comments.pop()
+        else:
             comment.body = None
             comment.deleted_at = now
-        else:
-            thread.comments.remove(comment)
 
-        # Nothing left but deleted comments: the thread goes
-        if all(comment.deleted_at is not None for comment in thread.comments):
+        if not thread.comments:
             result = serialize_thread(thread, workspace)
             db.delete(thread)
             db.commit()

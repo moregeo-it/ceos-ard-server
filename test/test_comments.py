@@ -14,6 +14,7 @@ from app.models.comment import CommentThread
 from app.models.user import IdentityProvider, User
 from app.models.workspace import GitWorkspace
 from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator
+from app.services.comment_service import move_threads
 from app.services.events_service import event_broker
 from app.services.jwt_service import JWTService
 
@@ -221,28 +222,39 @@ def test_delete_comments(client, user, workspace, commenter, events):
     assert events[-1] == ("thread.deleted", {"actor_user_id": user.id, "path": FILE, "thread_id": thread["id"]})
 
 
-def test_only_the_first_and_the_last_comment_can_be_deleted(client, workspace, events):
+def test_comments_with_replies_after_them_become_placeholders(client, workspace, events):
     thread = start_thread(client, workspace)
     for body in ["First reply", "Second reply"]:
         response = client.post(threads_url(workspace, thread["id"], "comments"), json={"body": body})
     first, middle, last = [comment["id"] for comment in response.json()["comments"]]
 
-    # A reply in between keeps the discussion readable
     response = client.delete(threads_url(workspace, thread["id"], "comments", middle))
-    assert response.status_code == 409, response.text
+    assert response.status_code == 200, response.text
+    assert [comment["deleted"] for comment in response.json()["comments"]] == [False, True, False]
 
-    # The last reply is removed, which makes the one before it the last
+    # The last one goes with the placeholders directly before it
     response = client.delete(threads_url(workspace, thread["id"], "comments", last))
     assert response.status_code == 200, response.text
-    assert [comment["id"] for comment in response.json()["comments"]] == [first, middle]
-    response = client.delete(threads_url(workspace, thread["id"], "comments", middle))
-    assert response.status_code == 200, response.text
+    assert [comment["id"] for comment in response.json()["comments"]] == [first]
 
-    # The only comment goes with its thread
     response = client.delete(threads_url(workspace, thread["id"], "comments", first))
     assert response.status_code == 204, response.text
     assert threads(client, workspace) == []
     assert events[-1][0] == "thread.deleted"
+
+
+def test_threads_follow_renames_case_sensitively(workspace):
+    with SessionLocal() as db:
+        for path in ["/requirements/Foo/a.yaml", "/requirements/foo/b.yaml"]:
+            db.add(
+                CommentThread(
+                    workspace_id=workspace["id"], repository="ceos-org/ceos-ard", path=path, created_by_github_id="1", created_by_username="x"
+                )
+            )
+        db.commit()
+        move_threads(db, workspace["id"], "/requirements/Foo", "/requirements/Bar")
+        paths = sorted(thread.path for thread in db.query(CommentThread).filter(CommentThread.workspace_id == workspace["id"]))
+    assert paths == ["/requirements/Bar/a.yaml", "/requirements/foo/b.yaml"]
 
 
 def test_threads_follow_renames(client, workspace, events):
@@ -272,6 +284,15 @@ def test_threads_follow_a_reverted_rename(client, workspace):
     assert threads(client, workspace)[0]["path"] == FILE
 
 
+def test_threads_follow_a_rename_reverted_through_another_spelling(client, workspace):
+    start_thread(client, workspace)
+    client.patch(file_url(workspace, "files", FILE), json={"operation": "rename", "target": "precision.yaml"})
+
+    response = client.patch(file_url(workspace, "files", "/glossary//precision.yaml"), json={"operation": "revert"})
+    assert response.status_code == 200, response.text
+    assert threads(client, workspace)[0]["path"] == FILE
+
+
 def test_threads_on_deleted_files_are_outdated(client, workspace):
     start_thread(client, workspace)
 
@@ -292,6 +313,26 @@ def test_comments_are_read_only_when_archived(client, workspace):
     assert response.status_code == 403, response.text
     response = client.patch(threads_url(workspace, thread["id"]), json={"status": "resolved"})
     assert response.status_code == 403, response.text
+
+
+def test_no_thread_on_a_workspace_archived_while_waiting_for_the_lock(client, workspace, monkeypatch):
+    from app.db.database import SessionLocal
+    from app.models.workspace import GitWorkspace, WorkspaceStatus
+    from app.services import comment_service
+
+    run_exclusive = comment_service.run_exclusive
+
+    # The owner archives the workspace, in a request of its own, while this one waits
+    async def archive_first(workspace_id, transaction):
+        with SessionLocal() as db:
+            db.get(GitWorkspace, workspace_id).status = WorkspaceStatus.ARCHIVED
+            db.commit()
+        return await run_exclusive(workspace_id, transaction)
+
+    monkeypatch.setattr(comment_service, "run_exclusive", archive_first)
+    response = client.post(threads_url(workspace), json={"path": FILE, "body": "Comment"})
+    assert response.status_code == 403, response.text
+    assert threads(client, workspace) == []
 
 
 def test_comments_outlive_the_workspace(client, workspace):
@@ -326,3 +367,30 @@ def test_share_links_grant_comment_mode(client, workspace, stranger, monkeypatch
     assert response.status_code == 200, response.text
     assert response.json()["workspace"]["viewer_role"] == "comment"
     start_thread(joining, workspace)
+
+
+def test_share_modes(client, monkeypatch):
+    monkeypatch.setattr(settings, "SHARING_MODES_ENABLED", ["readonly"])
+    assert client.get("/shares/modes").json() == ["readonly"]
+    monkeypatch.setattr(settings, "SHARING_MODES_ENABLED", ["comment", "readonly"])
+    assert client.get("/shares/modes").json() == ["readonly", "comment"]
+
+
+def test_the_user_has_a_github_id(client, user):
+    assert client.get("/auth/user").json()["github_id"] == user.external_id
+
+
+def test_links_never_lower_access(client, user, workspace, stranger, events, monkeypatch):
+    monkeypatch.setattr(settings, "SHARING_MODES_ENABLED", ["readonly", "comment"])
+    joining = share(workspace, user, stranger, AccessMode.READONLY)
+    links = {
+        mode: client.post(f"/workspaces/{workspace['id']}/shares", json={"mode": mode}).json()["url"].rsplit("/", 1)[-1]
+        for mode in ["readonly", "comment"]
+    }
+
+    response = joining.post(f"/shares/{links['comment']}/redeem")
+    assert response.json()["workspace"]["viewer_role"] == "comment"
+    assert events[-1][0] == "collaborator.updated"
+
+    response = joining.post(f"/shares/{links['readonly']}/redeem")
+    assert response.json()["workspace"]["viewer_role"] == "comment"

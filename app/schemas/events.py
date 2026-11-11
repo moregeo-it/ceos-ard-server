@@ -33,7 +33,7 @@ class EventType(str, Enum):
     # A comment thread was started, or changed (reply, edit, deletion, resolved, reopened); carries the thread
     THREAD_CREATED = "thread.created"
     THREAD_UPDATED = "thread.updated"
-    # The only comment left in a thread was deleted, and the thread with it; carries `thread_id`
+    # The last comment was deleted and nothing was left of the thread; carries `thread_id`
     THREAD_DELETED = "thread.deleted"
     WORKSPACE_ARCHIVED = "workspace.archived"
     WORKSPACE_DELETED = "workspace.deleted"
