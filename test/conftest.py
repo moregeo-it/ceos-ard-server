@@ -36,8 +36,9 @@ os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))
 (DATA / "home" / ".gitconfig").write_text(
     f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
 )
-# libgit2 reads HOME once, on import; pygit2.settings.search_path crashes pygit2 from conda-forge on macOS.
-# Only for the import: the server needs the real HOME, e.g. for the browsers of the PDF builds.
+# Not pygit2.settings.search_path, which breaks with conda-forge's cffi on Apple Silicon:
+# https://github.com/python-cffi/cffi/issues/264 (back to it once a cffi release has the fix).
+# libgit2 reads HOME on import; only then, as the server needs the real HOME, e.g. for the PDF builds' browsers.
 with patch.dict(os.environ, HOME=str(DATA / "home")):
     import pygit2  # noqa: F401
 
