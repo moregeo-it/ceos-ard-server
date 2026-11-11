@@ -59,7 +59,7 @@ JINJA[~{{ cycler.__init__.__globals__.os.popen('cat /etc/passwd {outside}/secret
 <img src="http://169.254.169.254/latest/meta-data/"><iframe src="file:///etc/passwd"></iframe>
 """
 
-LEAKS = (b"root:x:0", b"must-not-leak", b"test-secret")
+LEAKS = (b"root:x:0", b"must-not-leak", os.environ["SECRET_KEY"].encode())
 
 
 @pytest.fixture(scope="module", autouse=True)

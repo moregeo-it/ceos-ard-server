@@ -18,7 +18,8 @@ os.environ.update(
     {
         "DATABASE_URL": f"sqlite:///{(DATA / 'test.db').as_posix()}",
         "WORKSPACES_ROOT": str(DATA / "workspaces"),
-        "SECRET_KEY": "test-secret",
+        # At least 32 bytes, as PyJWT recommends for HS256
+        "SECRET_KEY": "test-secret-long-enough-for-hs256",
         "SESSION_COOKIE_SECURE": "false",
         "ENVIRONMENT": "development",
         "CEOS_ARD_ORG": "ceos-org",
