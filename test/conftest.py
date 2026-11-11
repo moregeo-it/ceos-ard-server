@@ -7,7 +7,6 @@ import tempfile
 import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -30,17 +29,15 @@ os.environ.update(
 )
 os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))
 
+import pygit2  # noqa: E402
+
 # The server fetches upstream from GitHub; point that URL to the local upstream repository
 (DATA / "home").mkdir()
 # Git for Windows' system config converts line endings on checkout
 (DATA / "home" / ".gitconfig").write_text(
     f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
 )
-# Not pygit2.settings.search_path, which breaks with conda-forge's cffi on Apple Silicon:
-# https://github.com/python-cffi/cffi/issues/264 (back to it once a cffi release has the fix).
-# libgit2 reads HOME on import; only then, as the server needs the real HOME, e.g. for the PDF builds' browsers.
-with patch.dict(os.environ, HOME=str(DATA / "home")):
-    import pygit2  # noqa: F401
+pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home")
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
