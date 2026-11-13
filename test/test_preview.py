@@ -23,7 +23,7 @@ def builds(monkeypatch):
         prefix = Path(dependencies.build_service.output_prefix(workspace_path, pfs, build_dir))
         prefix.parent.mkdir(parents=True, exist_ok=True)
         prefix.with_suffix(".html").write_text(
-            "<h1>Preview</h1><!-- edit: pfs/NRB/document.yaml --><p>Text</p>",
+            "<h1>Preview</h1><!-- edit: pfs/NRB/document.yaml --><p>Text</p><h2><!-- edit:pfs/NRB/document.yaml#/background -->Background</h2>",
             encoding="utf-8",
         )
         for suffix in (".pdf", ".docx"):
@@ -39,6 +39,8 @@ def test_preview_builds_the_selected_pfs(client, workspace, builds):
     assert response.status_code == 200, response.text
     assert builds == [{"pfs": ["NRB"], "include_format": None}]
     assert '<button class="edit" value="/pfs/NRB/document.yaml">Edit</button>' in response.text
+    assert '<a name="/pfs/NRB/document.yaml"></a><button class="edit" value="/pfs/NRB/document.yaml#/background">Edit</button>' in response.text
+    assert "<!--" not in response.text
 
     response = client.get(f"/workspaces/{workspace['id']}/previews/current")
     assert response.status_code == 200, response.text
