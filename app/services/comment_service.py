@@ -1,6 +1,11 @@
-import logging
-from datetime import UTC, datetime
+from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+import pygit2
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
@@ -12,30 +17,47 @@ from app.models.workspace_share import AccessMode
 from app.schemas.comment import CommentRequest, ThreadCreateRequest, ThreadResponse, ThreadUpdateRequest
 from app.schemas.events import EventType
 from app.services.events_service import EventBroker, event_broker
-from app.services.workspace_service import WorkspaceService
+from app.utils.git_utils import get_renamed_files
 from app.utils.locks import run_exclusive
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
+
+if TYPE_CHECKING:
+    from app.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
 
-def move_threads(db: Session, workspace_id: str, old_path: str, new_path: str) -> None:
-    """Let the threads follow a renamed file, or the files of a renamed folder. Paths as the file API names them.
-
-    A failure is logged, not raised: the rename itself has happened, and the threads only show as outdated.
-    """
-    if old_path == new_path:
-        return
+def _move_threads(db: Session, workspace_id: str, new_path_of: Callable[[str], str | None]) -> None:
+    """A failure is logged, not raised: the rename itself has happened, and the threads only show as outdated."""
     try:
-        # Compared in Python: LIKE ignores case in SQLite, while file paths don't
-        threads = db.query(CommentThread).filter(CommentThread.workspace_id == workspace_id).all()
-        for thread in (t for t in threads if t.path == old_path or t.path.startswith(f"{old_path}/")):
-            thread.previous_paths = [*thread.previous_paths, thread.path]
-            thread.path = new_path + thread.path[len(old_path) :]
+        for thread in db.query(CommentThread).filter(CommentThread.workspace_id == workspace_id):
+            if new_path := new_path_of(thread.path):
+                thread.previous_paths = [*thread.previous_paths, thread.path]
+                thread.path = new_path
         db.commit()
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Failed to move the comment threads of {old_path} to {new_path} in workspace {workspace_id}: {e}")
+        logger.error(f"Failed to move the comment threads of renamed files in workspace {workspace_id}: {e}")
+
+
+def move_threads(db: Session, workspace_id: str, old_path: str, new_path: str) -> None:
+    """Let the threads follow a renamed file, or the files of a renamed folder. Paths as the file API names them."""
+    if old_path == new_path:
+        return
+
+    # Compared in Python: LIKE ignores case in SQLite, while file paths don't
+    def new_path_of(path: str) -> str | None:
+        return new_path + path[len(old_path) :] if path == old_path or path.startswith(f"{old_path}/") else None
+
+    _move_threads(db, workspace_id, new_path_of)
+
+
+def follow_renames(db: Session, workspace_id: str, repo: pygit2.Repository, before: pygit2.Oid) -> None:
+    """Let the threads follow the files that a sync with GitHub renamed."""
+    # Per file, also for a renamed folder
+    renames = {f"/{old}": f"/{new}" for old, new in get_renamed_files(repo, before, repo.head.target)}
+    if renames:
+        _move_threads(db, workspace_id, renames.get)
 
 
 def _author(user_id: str | None, github_id: str | None, username: str | None) -> dict | None:
@@ -81,8 +103,8 @@ class CommentService:
     on an archived workspace.
     """
 
-    def __init__(self, workspace_service: WorkspaceService | None = None, broker: EventBroker | None = None):
-        self.workspace_service = workspace_service or WorkspaceService()
+    def __init__(self, workspace_service: WorkspaceService, broker: EventBroker | None = None):
+        self.workspace_service = workspace_service
         self.broker = broker or event_broker
 
     def _workspace(self, db: Session, workspace_id: str, user: User, write: bool) -> GitWorkspace:

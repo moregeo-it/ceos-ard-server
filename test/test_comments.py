@@ -1,12 +1,16 @@
 """Comment threads on the files of a workspace: roles, threads and replies, deletion, renames, events."""
 
+import tempfile
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
-from conftest import file_url
+from conftest import DATA, FORK, file_url, git
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from openapi_validation import validate_response
 
+from app import dependencies
 from app.config import settings
 from app.db.database import SessionLocal
 from app.main import app
@@ -291,6 +295,154 @@ def test_threads_follow_a_rename_reverted_through_another_spelling(client, works
     response = client.patch(file_url(workspace, "files", "/glossary//precision.yaml"), json={"operation": "revert"})
     assert response.status_code == 200, response.text
     assert threads(client, workspace)[0]["path"] == FILE
+
+
+def rename_on_github(workspace: dict, old: str, new: str, recreate: str | None = None):
+    """A rename on the workspace's branch of the fork, as made on GitHub; `recreate` adds a new file at `old` in a second commit."""
+    clone = Path(tempfile.mkdtemp(dir=DATA))
+    commit = ("-c", "user.name=jdoe", "-c", "user.email=jdoe@example.org", "commit", "-q", "-m")
+    git("clone", "-q", "-b", workspace["branch_name"], str(FORK), str(clone))
+    git("mv", old, new, cwd=clone)
+    git(*commit, "Rename", cwd=clone)
+    if recreate is not None:
+        (clone / old).write_text(recreate)
+        git("add", old, cwd=clone)
+        git(*commit, "Recreate", cwd=clone)
+    git("push", "-q", "origin", workspace["branch_name"], cwd=clone)
+
+
+def commit_on_github(workspace: dict, files: dict[str, str | None]):
+    """One commit on the workspace's branch of the fork, as made on GitHub; None deletes a file."""
+    clone = Path(tempfile.mkdtemp(dir=DATA))
+    git("clone", "-q", "-b", workspace["branch_name"], str(FORK), str(clone))
+    for path, content in files.items():
+        if content is None:
+            git("rm", "-q", path, cwd=clone)
+        else:
+            (clone / path).parent.mkdir(parents=True, exist_ok=True)
+            (clone / path).write_text(content)
+            git("add", path, cwd=clone)
+    git("-c", "user.name=jdoe", "-c", "user.email=jdoe@example.org", "commit", "-q", "-m", "Change", cwd=clone)
+    git("push", "-q", "origin", workspace["branch_name"], cwd=clone)
+
+
+def test_threads_follow_renames_from_github(client, workspace):
+    client.post(f"/workspaces/{workspace['id']}/sync")  # puts the branch on the fork
+    thread = start_thread(client, workspace)
+    rename_on_github(workspace, "glossary/accuracy.yaml", "glossary/precision.yaml")
+
+    response = client.post(f"/workspaces/{workspace['id']}/sync")
+    assert response.json()["status"] == "updated", response.text
+
+    [moved] = threads(client, workspace)
+    assert moved["id"] == thread["id"]
+    assert moved["path"] == "/glossary/precision.yaml"
+    assert moved["previous_paths"] == [FILE]
+    assert moved["outdated"] is False
+
+
+def test_threads_stay_when_github_replaces_a_file_with_a_different_one(client, workspace):
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    start_thread(client, workspace)
+    # About 66% similar: a rename for git's default threshold, not for ours
+    content = "term: Accuracy\ndescription: Closeness of agreement.\nremarks0: A note.\nremarks1: Another note.\n"
+    commit_on_github(workspace, {"glossary/accuracy.yaml": None, "glossary/precision.yaml": content})
+
+    response = client.post(f"/workspaces/{workspace['id']}/sync")
+    assert response.json()["status"] == "updated", response.text
+
+    [stayed] = threads(client, workspace)
+    assert stayed["path"] == FILE
+    assert stayed["outdated"] is True
+
+
+def test_threads_stay_on_an_edited_file_when_github_adds_a_copy_of_it(client, workspace):
+    original = "".join(f"line{i}: The text number {i}.\n" for i in range(40))
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    commit_on_github(workspace, {"glossary/accuracy.yaml": original})
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    start_thread(client, workspace)
+    # A quarter edited: still the same file, not a rename to the copy
+    edited = "".join(f"line{i}: Reworded {i}.\n" if i < 12 else line for i, line in enumerate(original.splitlines(keepends=True)))
+    commit_on_github(workspace, {"glossary/accuracy.yaml": edited, "glossary/precision.yaml": original})
+
+    response = client.post(f"/workspaces/{workspace['id']}/sync")
+    assert response.json()["status"] == "updated", response.text
+
+    [stayed] = threads(client, workspace)
+    assert stayed["path"] == FILE
+    assert stayed["outdated"] is False
+
+
+def test_threads_follow_renames_from_github_when_the_old_name_is_reused(client, workspace):
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    start_thread(client, workspace)
+    # A new file under the old name, which only keeps the term
+    recreated = "term: Accuracy\ndescription: A new definition.\nsource: ISO 5725\nnote: Replaces the moved term.\n"
+    rename_on_github(workspace, "glossary/accuracy.yaml", "glossary/precision.yaml", recreate=recreated)
+
+    response = client.post(f"/workspaces/{workspace['id']}/sync")
+    assert response.json()["status"] == "updated", response.text
+    assert threads(client, workspace)[0]["path"] == "/glossary/precision.yaml"
+
+
+def test_threads_follow_renames_from_github_on_commit(client, workspace, monkeypatch):
+    # After the rejected push, the server checks that the fork still exists
+    async def authenticated_user(token):
+        return {"login": "jdoe"}
+
+    async def repository(owner, name, token):
+        return {"full_name": f"{owner}/{name}", "permissions": {"push": True}}
+
+    monkeypatch.setattr(dependencies.github_service, "get_authenticated_user", authenticated_user)
+    monkeypatch.setattr(dependencies.github_service, "get_repository", repository)
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    start_thread(client, workspace)
+    rename_on_github(workspace, "glossary/accuracy.yaml", "glossary/precision.yaml")
+
+    # The push is rejected, so the commit is replayed on top of the rename
+    client.put(file_url(workspace, "files", "/README.md"), content="# Changed\n")
+    response = client.put(f"/workspaces/{workspace['id']}/diffs", json={"message": "Change README"})
+    assert response.status_code == 200, response.text
+
+    assert threads(client, workspace)[0]["path"] == "/glossary/precision.yaml"
+
+
+def test_threads_follow_renames_from_github_when_the_push_after_merging_fails(client, workspace, monkeypatch, events):
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    start_thread(client, workspace)
+    rename_on_github(workspace, "glossary/accuracy.yaml", "glossary/precision.yaml")
+
+    async def push(*args, **kwargs):
+        raise HTTPException(status_code=409, detail="Rejected")
+
+    # Rejected before and after merging GitHub's changes
+    monkeypatch.setattr(dependencies.git_service, "push", push)
+    client.put(file_url(workspace, "files", "/README.md"), content="# Changed\n")
+    response = client.put(f"/workspaces/{workspace['id']}/diffs", json={"message": "Change README"})
+    assert response.status_code == 500, response.text
+
+    assert threads(client, workspace)[0]["path"] == "/glossary/precision.yaml"
+    # The commit stays, and the files changed: other clients reload
+    assert [event for event, _ in events][-2:] == ["file.committed", "workspace.synced"]
+    assert events[-1][1]["status"] == "merged"
+
+
+def test_threads_follow_folders_renamed_on_github(client, workspace):
+    client.post(f"/workspaces/{workspace['id']}/sync")
+    start_thread(client, workspace, "/requirements/general/metadata-machine-readable.yaml")
+    start_thread(client, workspace, "/requirements/general/unused.yaml")
+    start_thread(client, workspace)
+    rename_on_github(workspace, "requirements/general", "requirements/common")
+
+    response = client.post(f"/workspaces/{workspace['id']}/sync")
+    assert response.json()["status"] == "updated", response.text
+
+    assert sorted(thread["path"] for thread in threads(client, workspace)) == [
+        FILE,
+        "/requirements/common/metadata-machine-readable.yaml",
+        "/requirements/common/unused.yaml",
+    ]
 
 
 def test_threads_on_deleted_files_are_outdated(client, workspace):
