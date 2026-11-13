@@ -20,4 +20,6 @@
     group: "{{ app_group }}"
     mode: "0600"
     backup: true
+  # The file holds the secrets, which --diff would print
+  diff: false
   notify: Restart app

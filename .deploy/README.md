@@ -19,6 +19,7 @@ migrate-data.yml  ONE-TIME: move database and workspaces out of the checkout.
 4. Point `ANSIBLE_VAULT_PASSWORD_FILE` at a file holding the vault password, kept out of git
 5. Dry run: `ansible-playbook setup.yml --check --diff`
 6. Apply: `ansible-playbook setup.yml`
+7. Remove the old jobs from the crontab of the server user (`sudo crontab -u server -e`), as the timers replace them
 
 ## Deploying a new version
 
