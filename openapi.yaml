@@ -1430,8 +1430,9 @@ paths:
       description: |
         The owner's last generated preview for the workspace's PFS list, without building anything.
         For any user with access. Its source buttons read "Edit" for the owner of an active workspace
-        and "View source" for everyone else. Clients call it on `preview.generated` and when
-        `workspace.updated` changes `pfs`.
+        and "View source" for everyone else. A button's `value` is the file path, optionally followed by
+        `#` and a JSON pointer (RFC 6901) to the field of the file, e.g. `/pfs/SR/document.yaml#/background`.
+        Clients call it on `preview.generated` and when `workspace.updated` changes `pfs`.
       operationId: getCurrentPreview
       tags:
         - Previews

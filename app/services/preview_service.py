@@ -116,10 +116,11 @@ class PreviewService:
             if not path.is_absolute():
                 path = workspace_path / path
             file_path = normalize_workspace_path(path, workspace_path)
-            return f'<a name="{file_path}"></a><button class="edit" value="{file_path}">{label}</button>'
+            pointer = match.group(2) or ""
+            return f'<a name="{file_path}"></a><button class="edit" value="{file_path}{pointer}">{label}</button>'
 
-        # \ and : are needed for Windows compatibility
-        html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\:]+)\s*-->", replace_edit_tags, html_content)
+        # \ and : are needed for Windows compatibility; the optional #/... is a JSON pointer to a field of the file
+        html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\:]+)(#[\w\-.~/]*)?\s*-->", replace_edit_tags, html_content)
 
         return html_content
 
