@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.utils.toolchains import Toolchain
 
@@ -35,6 +35,7 @@ class FileMenuRule(GlobRule):
 
 
 class EditorRule(GlobRule):
+    codec: Literal["yaml", "glossary-term"] = Field("yaml", description="How the editor turns the file into the form data and back")
     json_schema: dict[str, Any] = Field(alias="schema", description="JSON Schema of the form data")
     ui_schema: dict[str, Any] | None = Field(None, description="JSON Forms UI schema")
 
@@ -43,8 +44,21 @@ class Action(Rule):
     id: str
     title: str
     folder: str = Field(description="The folder whose file menu offers the action")
+    json_schema: dict[str, Any] | None = Field(None, alias="schema", description="JSON Schema of the input, asked for in a generic dialog")
     # Only the dialogs the editor runs as actions (FileContextMenu.vue)
-    dialog: Literal["CreatePfsDialog"] = Field(description="The editor dialog that runs the action")
+    dialog: Literal["CreatePfsDialog"] | None = Field(None, description="An editor dialog that runs the action instead")
+
+    @model_validator(mode="after")
+    def schema_or_dialog(self) -> "Action":
+        if (self.json_schema is None) == (self.dialog is None):
+            raise ValueError("An action has either a schema or a dialog")
+        return self
+
+
+class SearchFilter(Rule):
+    id: str
+    title: str
+    values: list[str]
 
 
 class Labels(Rule):
@@ -80,9 +94,13 @@ def match_glob(path: str, glob: str) -> bool:
 @dataclass(frozen=True)
 class PathRules:
     hidden: frozenset[str] = DEFAULT_HIDDEN_PATHS
+    # Only these root entries are shown when set, e.g. only the content folder of a site repository
+    visible: frozenset[str] | None = None
 
     def is_hidden(self, root_entry: str) -> bool:
-        return root_entry in self.hidden
+        if root_entry in self.hidden:
+            return True
+        return self.visible is not None and root_entry not in self.visible
 
 
 @dataclass(frozen=True)
@@ -105,12 +123,17 @@ class WorkspaceType:
     paths: PathRules
     # Distinguishes the workspaces of this type in the editor, e.g. in headers and badges
     color: str = "#3e5265"
-    # Whether workspaces select PFS for the document preview
+    # Whether workspaces select PFS for the document preview, see `preview`
     pfs: bool = False
+    # "pfs": a document built from the selected PFS; "file": the file open in the editor
+    preview: Literal["pfs", "file"] = "pfs"
+    # Folders the file tree shows opened, e.g. when all content is in one folder
+    expanded_folders: list[str] = field(default_factory=list)
     searchable_extensions: frozenset[str] = frozenset({".txt", ".md", ".json", ".yaml", ".yml", ".xml"})
     labels: Labels = field(default_factory=Labels)
     # The first rule whose glob matches a file decides its form editor
     editors: list[EditorRule] = field(default_factory=list)
+    search_filters: list[SearchFilter] = field(default_factory=list)
     actions: list[Action] = field(default_factory=list)
     # Added to DEFAULT_FILE_MENU; the last rule matching a path decides
     file_menu: list[FileMenuRule] = field(default_factory=list)
@@ -139,6 +162,15 @@ class WorkspaceType:
         """The build command, run with the programs of the toolchain."""
         raise NotImplementedError(f"Workspaces of type {self.id} can't be built")
 
+    def matches_search_filters(self, workspace_path: Path, file_path: str, filters: dict[str, set[str]]) -> bool:
+        return False
+
+    async def run_action(self, workspace_path: Path, action: str, data: dict[str, Any]) -> Path:
+        raise NotImplementedError
+
+    async def render_file(self, workspace_path: Path, file_path: str) -> str | None:
+        return None
+
     def to_public(self, available: bool) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -148,8 +180,11 @@ class WorkspaceType:
             "color": self.color,
             "upstream": {"owner": self.upstream.owner, "repo": self.upstream.repo, "branch": self.upstream.branch, "url": self.upstream.url},
             "pfs": self.pfs,
+            "preview": self.preview,
+            "expanded_folders": self.expanded_folders,
             "labels": self.labels,
             "editors": self.editors,
+            "search_filters": self.search_filters,
             "actions": self.actions,
             "file_menu": DEFAULT_FILE_MENU + self.file_menu,
         }

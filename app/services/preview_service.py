@@ -17,6 +17,7 @@ from app.services.events_service import EventBroker, event_broker
 from app.services.workspace_service import WorkspaceService
 from app.utils.limits import FileTooLarge
 from app.utils.locks import build_locks, user_build_locks
+from app.utils.sandbox import BuildOutOfMemory
 from app.utils.toolchains import ToolchainError, toolchains
 from app.utils.validation import normalize_workspace_path, validate_workspace_path
 
@@ -64,7 +65,9 @@ class PreviewService:
     @staticmethod
     def _require_pfs(workspace: GitWorkspace) -> None:
         if not workspace.workspace_type.pfs:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS to preview")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type previews single files, see GET .../render/{path}"
+            )
 
     async def generate_preview(self, db: Session, workspace_id: str, user_id: str):
         # Owner only: a build writes into the workspace, and this build is what everyone else sees.
@@ -123,6 +126,24 @@ class PreviewService:
         html_content = re.sub(r"<!--\s*edit:\s*([\w\-.~/\\:]+)(#[\w\-.~/]*)?\s*-->", replace_edit_tags, html_content)
 
         return html_content
+
+    async def render_file(self, db: Session, file_path: str, workspace_id: str, user_id: str) -> str:
+        """Render one file, without writing anything, so every role can do it."""
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        target = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file", rules=workspace.workspace_type.paths)
+        rel_path = normalize_workspace_path(target, workspace.abs_path)
+        try:
+            async with user_build_locks(user_id):
+                html = await workspace.workspace_type.render_file(workspace.abs_path, rel_path)
+        except (TimeoutError, BuildOutOfMemory) as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Rendering the file took too long or needed too much memory"
+            ) from e
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The file could not be rendered") from e
+        if html is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="There is no preview for this file")
+        return html
 
     async def open_preview_static_file(self, db: Session, file_path: str, workspace_id: str, user_id: str) -> tuple[BinaryIO, Path]:
         """

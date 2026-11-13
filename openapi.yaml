@@ -1040,10 +1040,24 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - name: query
           in: query
-          required: true
-          description: Search query
+          required: false
+          description: Search query, at least 3 characters. Required unless filters are given.
           schema:
             type: string
+        - name: filter
+          in: query
+          required: false
+          description: |-
+            Search filters of the workspace type as `filter:value`, see `search_filters` in `GET /types`.
+            Values of the same filter are combined with OR, different filters with AND.
+            Without a query, all files matching the filters are returned.
+          schema:
+            type: array
+            items:
+              type: string
+              example: 'status:to be approved'
+          style: form
+          explode: true
       responses:
         '200':
           description: Search results
@@ -1070,11 +1084,17 @@ paths:
                       enum:
                         - filename
                         - content
+                        - filter
                   oneOf:
                     - type: object
                       properties:
                         type:
                           const: filename
+                    - type: object
+                      description: Matches the search filters, without a search query
+                      properties:
+                        type:
+                          const: filter
                     - type: object
                       required:
                         - line
@@ -1300,7 +1320,7 @@ paths:
         Retrieves the context for a specific file, if available.
 
         This is currently a list of files that use the specified file, e.g. the PFS that include a
-        requirement.
+        requirement or the glossary terms that link to a term.
 
         The endoint shall only return files that are made available through
         `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
@@ -1448,6 +1468,102 @@ paths:
                 description: HTML content of the preview
         '404':
           description: Workspace not found, or the owner has not generated a preview for the workspace's PFS list yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/render/{filePath}:
+    get:
+      summary: Render a file
+      description: |-
+        Renders a single file of the workspace as HTML, for workspace types that preview the open
+        file (`preview: file`). Writes nothing, so all roles can use it.
+        Links with a `data-open-file` attribute point to files of the workspace.
+        Rendered in the build sandbox, with the same time and memory limits as a build.
+      operationId: renderFile
+      tags:
+        - Previews
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '200':
+          description: The rendered file
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: Workspace or file not found, or the file type has no preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The file could not be rendered, or rendering took too long or needed too much memory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/actions/{action}:
+    post:
+      summary: Run an action of the workspace type
+      description: |-
+        Runs an action the workspace type offers, see `actions` in `GET /types`, e.g. creating a
+        glossary term. The request body follows the action's JSON Schema. Owner only.
+      operationId: runAction
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ClientId'
+        - name: action
+          in: path
+          required: true
+          description: ID of the action
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: The file the action created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileItem'
+        '400':
+          description: Invalid input for the action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace or action not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The file to create exists already
           content:
             application/json:
               schema:
@@ -2691,17 +2807,20 @@ components:
         - color
         - upstream
         - pfs
+        - preview
+        - expanded_folders
         - labels
         - editors
+        - search_filters
         - actions
         - file_menu
       properties:
         id:
           type: string
-          example: ceos-ard
+          example: eo-glossary
         title:
           type: string
-          example: CEOS-ARD
+          example: CEOS EO Glossary
         description:
           type: string
         available:
@@ -2710,7 +2829,7 @@ components:
         color:
           type: string
           description: Color that distinguishes the workspaces of this type in the editor
-          example: '#3e5265'
+          example: '#00796b'
         upstream:
           type: object
           description: The repository new workspaces fork and propose changes to
@@ -2733,6 +2852,20 @@ components:
         pfs:
           type: boolean
           description: Whether workspaces select PFS for the document preview
+        preview:
+          type: string
+          enum:
+            - pfs
+            - file
+          description: |-
+            - "pfs": the owner builds a document from the selected PFS (`POST .../previews`)
+            - "file": everyone renders the open file (`GET .../render/{filePath}`)
+        expanded_folders:
+          type: array
+          description: Folders the file tree shows opened initially
+          items:
+            type: string
+            example: /docs/terms
         labels:
           type: object
           additionalProperties: false
@@ -2754,16 +2887,42 @@ components:
               match:
                 type: string
                 description: Glob of the workspace paths, without leading slash
-                example: glossary/*.yaml
+                example: docs/terms/*.md
+              codec:
+                type: string
+                description: How the editor turns the file into the form data and back, `yaml` if omitted
+                enum:
+                  - yaml
+                  - glossary-term
               schema:
                 type: object
                 description: JSON Schema of the form data
               ui_schema:
                 type: object
                 description: JSON Forms UI schema
+        search_filters:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - id
+              - title
+              - values
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              values:
+                type: array
+                items:
+                  type: string
         actions:
           type: array
-          description: Actions offered in the file menu of a folder
+          description: |-
+            Actions offered in the file menu of a folder, see `POST .../actions/{action}`. An action has
+            either a `schema` for its input, asked for in a generic dialog, or a `dialog` of the editor.
           items:
             type: object
             additionalProperties: false
@@ -2771,7 +2930,6 @@ components:
               - id
               - title
               - folder
-              - dialog
             properties:
               id:
                 type: string
@@ -2780,9 +2938,12 @@ components:
               folder:
                 type: string
                 description: The folder whose menu offers the action
+              schema:
+                type: object
+                description: JSON Schema of the action's input
               dialog:
                 type: string
-                description: The dialog of the editor that handles the action
+                description: A dialog of the editor that handles the action instead
                 enum:
                   - CreatePfsDialog
         file_menu:

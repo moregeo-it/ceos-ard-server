@@ -13,6 +13,8 @@ import pytest
 DATA = Path(tempfile.mkdtemp(prefix="ceos-ard-server-test-"))
 UPSTREAM = DATA / "upstream.git"
 FORK = DATA / "fork.git"
+GLOSSARY_UPSTREAM = DATA / "glossary-upstream.git"
+GLOSSARY_FORK = DATA / "glossary-fork.git"
 
 os.environ.update(
     {
@@ -25,17 +27,23 @@ os.environ.update(
         "CEOS_ARD_ORG": "ceos-org",
         "CEOS_ARD_REPO": "ceos-ard",
         "CEOS_ARD_BRANCH": "main",
+        "EO_GLOSSARY_ORG": "ceos-org",
+        "EO_GLOSSARY_REPO": "eo-glossary",
+        "EO_GLOSSARY_BRANCH": "main",
+        "WORKSPACE_TYPES": "ceos-ard,eo-glossary",
     }
 )
 os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))
 
 import pygit2  # noqa: E402
 
-# The server fetches upstream from GitHub; point that URL to the local upstream repository
+# The server fetches upstream from GitHub; point those URLs to the local upstream repositories
 (DATA / "home").mkdir()
 # Git for Windows' system config converts line endings on checkout
 (DATA / "home" / ".gitconfig").write_text(
-    f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
+    f"[core]\n\tautocrlf = false\n"
+    f'[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
+    f'[url "{GLOSSARY_UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/eo-glossary\n'
 )
 pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home")
 
@@ -75,6 +83,22 @@ REPOSITORY = {
     "sections/requirement-categories/general.yaml": "id: meta\ntitle: General Metadata\ndescription: General requirements.\n",
 }
 
+GLOSSARY_REPOSITORY = {
+    "README.md": "# EO Glossary\n",
+    "package.json": "{}\n",
+    "docs/intro.md": "---\ntitle: Introduction\n---\n\nThe glossary.\n",
+    "docs/terms/accuracy.md": (
+        "---\ntitle: Accuracy\ndescription: Closeness of agreement.\ntags:\n  - core\n  - approved\n  - WGCV\n---\n\n"
+        "# Accuracy\n\n## 1 Definition\n\nCloseness of agreement between a measured value and the true value.\n\n"
+        "### Notes\n\n### Examples\n\n### Sources\n"
+    ),
+    "docs/terms/precision.md": (
+        "---\ntitle: Precision\ndescription: Closeness of repeated measurements.\ntags:\n  - base\n  - to be approved\n  - WGCV\n---\n\n"
+        "# Precision\n\n## 1 Definition\n\nCloseness of repeated measurements, unlike accuracy.\n\n"
+        "### Notes\n\n### Examples\n\n### Sources\n"
+    ),
+}
+
 
 def file_url(workspace: dict, endpoint: str, path: str) -> str:
     """A file endpoint with the path as one segment, as the editor sends it (encodeURIComponent)."""
@@ -97,17 +121,22 @@ def commit_upstream(files: dict[str, str], message: str):
     git("push", "-q", "origin", "main", cwd=clone)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def repositories():
-    source = DATA / "source"
-    for path, content in REPOSITORY.items():
+def create_repository(files: dict[str, str], upstream: Path, fork: Path):
+    source = Path(tempfile.mkdtemp(dir=DATA))
+    for path, content in files.items():
         (source / path).parent.mkdir(parents=True, exist_ok=True)
         (source / path).write_text(content, encoding="utf-8", newline="\n")
     git("init", "-q", "-b", "main", cwd=source)
     git("add", "-A", cwd=source)
     git("-c", "user.name=Upstream", "-c", "user.email=upstream@example.org", "commit", "-q", "-m", "Initial", cwd=source)
-    git("clone", "-q", "--bare", str(source), str(UPSTREAM))
-    git("clone", "-q", "--bare", str(UPSTREAM), str(FORK))
+    git("clone", "-q", "--bare", str(source), str(upstream))
+    git("clone", "-q", "--bare", str(upstream), str(fork))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def repositories():
+    create_repository(REPOSITORY, UPSTREAM, FORK)
+    create_repository(GLOSSARY_REPOSITORY, GLOSSARY_UPSTREAM, GLOSSARY_FORK)
 
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
@@ -161,7 +190,8 @@ class FakeGitHub:
 
     async def fork(self, user, upstream_owner, upstream_repo):
         self.calls.append(("fork", upstream_owner, upstream_repo))
-        return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(FORK)}
+        fork = {"ceos-ard": FORK, "eo-glossary": GLOSSARY_FORK}[upstream_repo]
+        return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(fork)}
 
     async def get_pfs_types(self, owner, repo, token, branch):
         self.calls.append(("get_pfs_types", owner, repo, branch))
@@ -214,5 +244,12 @@ def client(user, github):
 @pytest.fixture
 def workspace(client):
     response = client.post("/workspaces", json={"title": "NRB review", "pfs": ["NRB"]})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def glossary_workspace(client):
+    response = client.post("/workspaces", json={"title": "Glossary review", "type": "eo-glossary"})
     assert response.status_code == 201, response.text
     return response.json()

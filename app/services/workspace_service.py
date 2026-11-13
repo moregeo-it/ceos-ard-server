@@ -22,7 +22,7 @@ from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
 from app.services.share_service import ROLE_RANK, resolve_role, workspace_members
 from app.utils.file_utils import create_folder
-from app.utils.git_utils import get_repo
+from app.utils.git_utils import get_file_status, get_repo
 from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
@@ -775,6 +775,36 @@ class WorkspaceService:
 
             self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details)
             return folder_details
+
+        return await run_exclusive(workspace_id, transaction)
+
+    async def run_action(self, db: Session, workspace_id: str, user: User, action: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Run an action of the workspace type that creates a file, e.g. a new glossary term."""
+        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
+        workspace_type = workspace.workspace_type
+        # Actions with a dialog of their own, e.g. "Add New PFS", have their own endpoints
+        if not any(item.id == action and item.json_schema is not None for item in workspace_type.actions):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown action: {action}")
+
+        async def transaction():
+            try:
+                target = await workspace_type.run_action(workspace.abs_path, action, data)
+            except FileExistsError as e:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+            repo = get_repo(workspace.abs_path)
+            relative_path = str(target.relative_to(workspace.abs_path)).replace("\\", "/")
+            try:
+                repo.index.add(relative_path)
+                repo.index.write()
+            except pygit2.GitError as e:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
+
+            result = {"name": target.name, "is_directory": False, "status": get_file_status(repo, target), "path": "/" + relative_path}
+            self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=result["path"], file=result)
+            return result
 
         return await run_exclusive(workspace_id, transaction)
 

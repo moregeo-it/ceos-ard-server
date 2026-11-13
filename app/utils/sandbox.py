@@ -248,6 +248,20 @@ async def run_limited(*args: str, timeout: float, env: dict[str, str]) -> subpro
             await asyncio.to_thread(Cgroups.remove, cgroup)
 
 
+async def run_python(script: Path, *args: str, workspace: Path, timeout: float) -> subprocess.CompletedProcess:
+    """Run a script of the server that reads workspace content, isolated like a build with the workspace read-only."""
+    python = Path(sys.executable)
+    return await run_build(
+        [python.name, "-I", "-B", str(script), *args],
+        path=[python.parent],
+        read_only=list(dict.fromkeys([Path(sys.prefix), Path(sys.base_prefix), script])) + [workspace],
+        writable=[],
+        hidden=[workspace / ".git"],
+        cwd=workspace,
+        timeout=timeout,
+    )
+
+
 async def run_build(
     command: list[str], *, path: list[Path], read_only: list[Path], writable: list[Path], hidden: list[Path], cwd: Path, timeout: float
 ) -> subprocess.CompletedProcess:

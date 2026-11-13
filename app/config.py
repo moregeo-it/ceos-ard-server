@@ -65,6 +65,10 @@ class Settings:
     CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
     CEOS_ARD_BRANCH: str = os.getenv("CEOS_ARD_BRANCH", "main")
 
+    EO_GLOSSARY_ORG: str = os.getenv("EO_GLOSSARY_ORG", "ceos-org")
+    EO_GLOSSARY_REPO: str = os.getenv("EO_GLOSSARY_REPO", "eo-glossary")
+    EO_GLOSSARY_BRANCH: str = os.getenv("EO_GLOSSARY_BRANCH", "main")
+
     # Workspace types users can choose from, separated by commas; the first one is the default
     WORKSPACE_TYPES: list[str] = [item.strip() for item in os.getenv("WORKSPACE_TYPES", "ceos-ard").split(",") if item.strip()]
 
