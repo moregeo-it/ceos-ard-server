@@ -40,7 +40,7 @@ app_hardening_strict: false
 app_memory_max: 3G
 
 # --- Application ------------------------------------------------------------
-app_sharing_modes_enabled: readonly   # comma-separated
+app_sharing_modes_enabled: readonly,comment   # comma-separated
 # Builds: how many run at once, after how many seconds they are stopped, and
 # the CPU cores and memory of all builds together and of each build
 app_build_concurrency: 3
