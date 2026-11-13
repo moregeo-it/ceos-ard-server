@@ -6,8 +6,6 @@
 #   1. set app_data_relocated: true in host_vars/<host>/vars.yml
 #   2. have an off-box backup already (this playbook makes one too)
 #   3. the service should be stopped; this playbook stops it anyway
-#
-#   ansible-playbook migrate-data.yml --check --diff   # dry run first
 - name: Move application data out of the checkout
   hosts: ceos_ard_servers
   gather_facts: true
@@ -22,22 +20,6 @@
           new location.
 
   tasks:
-    - name: Stop the maintenance timers
-      become: true
-      ansible.builtin.systemd_service:
-        name: "{{ app_name }}-{{ item.name }}.timer"
-        state: stopped
-      loop: "{{ app_timers }}"
-      loop_control:
-        label: "{{ item.name }}"
-      failed_when: false
-
-    - name: Stop the service
-      become: true
-      ansible.builtin.systemd_service:
-        name: "{{ app_name }}"
-        state: stopped
-
     - name: Locate the current data
       become: true
       ansible.builtin.stat:
@@ -58,6 +40,21 @@
         path: "{{ app_data_dir }}/ceos_ard_server.db"
       register: target_db
       failed_when: target_db.stat.exists
+
+    - name: Stop the maintenance timers
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}-{{ item.name }}.timer"
+        state: stopped
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Stop the service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ app_name }}"
+        state: stopped
 
     # --- Record the before state, to compare against afterwards -------------
     - name: Count workspace directories before
@@ -160,6 +157,11 @@
       ansible.builtin.import_role:
         name: ceos_ard_server
         tasks_from: config.yml
+
+    - name: Rewrite the backup script for the new paths
+      ansible.builtin.import_role:
+        name: ceos_ard_server
+        tasks_from: backup.yml
 
     - name: Start the service
       become: true

@@ -39,15 +39,3 @@
   loop: "{{ app_timers }}"
   loop_control:
     label: "{{ item.name }}"
-
-- name: Remove the superseded crontab
-  become: true
-  ansible.builtin.cron:
-    user: "{{ app_user }}"
-    name: "{{ item }}"
-    state: absent
-  loop:
-    - Check PR status daily at midnight
-    - Cleanup archived workspaces daily at 2 AM
-    - Check token expiration weekly on Monday at 9 AM
-  when: remove_legacy_crontab | default(false)

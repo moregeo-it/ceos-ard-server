@@ -35,7 +35,7 @@
       vars:
         tls_enabled: true
 
-    - name: Render the per-job templates
+    - name: Render the per-job services
       ansible.builtin.template:
         src: "{{ role_templates }}/{{ tpl }}"
         dest: "{{ render_dir }}/{{ item.name }}-{{ tpl | regex_replace('[.]j2$', '') }}"
@@ -45,6 +45,17 @@
         label: "{{ item.name }}"
       vars:
         tpl: job.service.j2
+
+    - name: Render the per-job timers
+      ansible.builtin.template:
+        src: "{{ role_templates }}/{{ tpl }}"
+        dest: "{{ render_dir }}/{{ item.name }}-{{ tpl | regex_replace('[.]j2$', '') }}"
+        mode: "0600"
+      loop: "{{ app_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        tpl: job.timer.j2
 
     - name: Show what was rendered
       # env.j2 renders to 'env' here; on the host the template task names it .env
