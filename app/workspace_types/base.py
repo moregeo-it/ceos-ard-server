@@ -139,6 +139,9 @@ class WorkspaceType:
         """The build command, run with the programs of the toolchain."""
         raise NotImplementedError(f"Workspaces of type {self.id} can't be built")
 
+    # Environment variables for the build command
+    build_env: ClassVar[dict[str, str]] = {}
+
     def to_public(self, available: bool) -> dict[str, Any]:
         return {
             "id": self.id,

@@ -122,6 +122,8 @@ async def cli_toolchain_spec(version: str) -> ToolchainSpec:
 
 class CeosArdType(WorkspaceType):
     toolchain_files = frozenset({REQUIREMENTS_FILE})
+    # The toolchain is installed from the CLI's own pins, so the CLI (from 0.8.0) needn't check it on every build
+    build_env = {"CEOS_ARD_SKIP_TOOL_CHECK": "1"}
 
     def toolchain(self, workspace_path: Path) -> Toolchain:
         version = cli_version(workspace_path, toolchains.installed())

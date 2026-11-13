@@ -249,13 +249,21 @@ async def run_limited(*args: str, timeout: float, env: dict[str, str]) -> subpro
 
 
 async def run_build(
-    command: list[str], *, path: list[Path], read_only: list[Path], writable: list[Path], hidden: list[Path], cwd: Path, timeout: float
+    command: list[str],
+    *,
+    path: list[Path],
+    read_only: list[Path],
+    writable: list[Path],
+    hidden: list[Path],
+    cwd: Path,
+    timeout: float,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """
     Run a build with the programs in `path`, isolated as far as `setup()` allowed.
 
     The build sees the system's libraries, `read_only`, `writable` and an empty `/tmp`, which is also
-    its HOME, but no network, other processes or environment variables beyond its PATH and locale.
+    its HOME, but no network, other processes or environment variables beyond its PATH, locale and `env`.
     `hidden` paths are replaced by empty folders. Raises TimeoutError or BuildOutOfMemory.
     """
     executable = shutil.which(command[0], path=os.pathsep.join(map(str, path)))
@@ -263,9 +271,11 @@ async def run_build(
         raise FileNotFoundError(f"{command[0]} isn't installed in the toolchain")
     command = [executable, *command[1:]]
     browsers = settings.PLAYWRIGHT_BROWSERS_PATH
+    extra_env = env or {}
 
     if isolation.sandbox:
         env = {
+            **extra_env,
             "PATH": os.pathsep.join([*map(str, path), "/usr/bin", "/bin"]),
             "HOME": "/tmp",
             "LANG": "C.UTF-8",
@@ -273,7 +283,7 @@ async def run_build(
         }
         command = ["bwrap", *_bwrap_args([*read_only, browsers], writable, hidden, cwd), "--", *command]
     else:
-        env = command_env()
+        env = {**command_env(), **extra_env}
         env["PATH"] = os.pathsep.join([*map(str, path), env.get("PATH", "")])
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
 

@@ -98,7 +98,7 @@ def workspace(tmp_path):
     return workspace
 
 
-def build(workspace: Path, script: str, *args: str, timeout: float = 30):
+def build(workspace: Path, script: str, *args: str, timeout: float = 30, env: dict[str, str] | None = None):
     (workspace / "script.py").write_text(script)
     python = Path(sys.executable)
     return asyncio.run(
@@ -110,6 +110,7 @@ def build(workspace: Path, script: str, *args: str, timeout: float = 30):
             hidden=[workspace / ".git"],
             cwd=workspace,
             timeout=timeout,
+            env=env,
         )
     )
 
@@ -124,13 +125,13 @@ def requires_cgroups():
 def test_a_build_reaches_nothing_but_its_files(workspace, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "must-not-leak")
     outside = workspace.parent / "server"
-    result = build(workspace, PROBE, str(outside), str(workspace / "build"))
+    result = build(workspace, PROBE, str(outside), str(workspace / "build"), env={"EXAMPLE": "1"})
     assert result.returncode == 0, result.stderr
     assert b"must-not-leak" not in result.stdout
     probe = json.loads(result.stdout)
 
     # The shell that enters the cgroup may add its own variables
-    assert set(probe["environment"]) - {"PWD", "OLDPWD", "SHLVL", "_"} == {"HOME", "LANG", "PATH", "PLAYWRIGHT_BROWSERS_PATH"}
+    assert set(probe["environment"]) - {"PWD", "OLDPWD", "SHLVL", "_"} == {"EXAMPLE", "HOME", "LANG", "PATH", "PLAYWRIGHT_BROWSERS_PATH"}
     assert probe["secret"] == "FileNotFoundError"
     assert probe["git"] == []
     assert probe["passwd"] == "FileNotFoundError"
