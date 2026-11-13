@@ -600,7 +600,7 @@ ceos-ard-server.service   Delegate=yes, MemoryMax
     └── <build>/          BUILD_MEMORY_MAX_PER_BUILD, stopped as a whole after BUILD_TIMEOUT
 ```
 
-`setup.yml` installs bubblewrap and Chromium's libraries, allows user namespaces for bubblewrap where the kernel
+`setup.yml` installs bubblewrap, Chromium's libraries and the font of the documents, allows user namespaces for bubblewrap where the kernel
 restricts them (an AppArmor profile, or `kernel.unprivileged_userns_clone`), checks that the service user can create
 a sandbox, and sets `Delegate=yes` and `MemoryMax` in the unit. The limits are `app_build_*` in `host_vars`.
 After a deploy, `systemd-cgls -u ceos-ard-server.service` shows `main/` and `builds/`. At startup, the server

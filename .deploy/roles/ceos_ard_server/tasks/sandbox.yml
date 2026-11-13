@@ -14,6 +14,13 @@
   register: chromium_deps
   changed_when: "' 0 newly installed' not in chromium_deps.stdout"
 
+# The header and footer of the PDFs can't use the fonts that the documents embed
+- name: Install the font of the documents
+  become: true
+  ansible.builtin.apt:
+    name: fonts-crosextra-carlito
+    state: present
+
 - name: Read whether AppArmor restricts user namespaces
   ansible.builtin.slurp:
     src: /proc/sys/kernel/apparmor_restrict_unprivileged_userns
