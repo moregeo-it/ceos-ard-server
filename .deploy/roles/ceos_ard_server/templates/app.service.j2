@@ -1,0 +1,53 @@
+# Managed by Ansible ({{ app_name }} role).
+[Unit]
+Description=CEOS-ARD FastAPI Server
+After=network-online.target
+Wants=network-online.target
+# Without a start limit, a bad config (or an unmigrated database, which newer
+# versions treat as fatal) crash-loops every 3s forever instead of failing.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User={{ app_user }}
+Group={{ app_group }}
+WorkingDirectory={{ app_dir }}
+EnvironmentFile={{ app_dir }}/.env
+Environment="PATH={{ app_home }}/.pixi/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart={{ pixi_bin }} run uvicorn app.main:app \
+    --host 127.0.0.1 --port {{ app_port }} \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 \
+    --ws-max-size 4096
+
+# A single worker is mandatory: the realtime EventBroker is in-memory and
+# per-process, so a second worker silently drops cross-worker events.
+
+Restart=always
+RestartSec=3
+
+# The server splits its cgroup into main/ and builds/, and limits the builds.
+# ProtectControlGroups= would hide the cgroup from it.
+Delegate=yes
+MemoryMax={{ app_memory_max }}
+# Builds raise their own score, so the OOM killer picks them before the server.
+OOMScoreAdjust=-500
+
+PrivateTmp=yes
+ProtectKernelModules=yes
+{% if app_hardening_strict %}
+# Verify previews and PDF downloads still work before leaving these on.
+NoNewPrivileges=yes
+ProtectSystem=strict
+# The pixi cache: the server installs the toolchains of the builds
+ReadWritePaths={{ app_dir }} {{ app_data_dir }} {{ app_home }}/.cache
+{% else %}
+ProtectSystem=full
+{% endif %}
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{ app_name }}
+
+[Install]
+WantedBy=multi-user.target

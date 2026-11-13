@@ -1,0 +1,10 @@
+# Managed by Ansible ({{ app_name }} role).
+[Unit]
+Description=Back up the {{ app_name }} database and workspaces
+
+[Service]
+Type=oneshot
+User={{ app_user }}
+Group={{ app_group }}
+ExecStart=/usr/local/bin/{{ app_name }}-backup
+SyslogIdentifier={{ app_name }}-backup
