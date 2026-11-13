@@ -14,6 +14,7 @@ from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
 from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
 from app.services.build_service import BuildService
+from app.services.comment_service import move_threads
 from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService
 from app.services.workspace_service import WorkspaceService
@@ -411,18 +412,26 @@ class FileService:
             async def transaction():
                 source_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, rules=workspace.workspace_type.paths)
                 self._require_operation(workspace, source_path, "rename", "folder" if source_path.is_dir() else "file")
+                old_path = normalize_workspace_path(source_path, workspace.abs_path)
                 result = await self._update_file_name(
                     workspace.abs_path, file_path, new_name=operation_request.target, rules=workspace.workspace_type.paths
                 )
+                # Comment threads follow the file; clients move them on file.renamed as well
+                move_threads(db, workspace_id, old_path, result["path"])
                 self.broker.emit(workspace_id, EventType.FILE_RENAMED, actor_user_id=user_id, path=file_path, file=result, old_path=file_path)
                 return result
 
         elif operation_request.operation == "revert":
 
             async def transaction():
-                result = await self._revert_file_changes(workspace.abs_path, file_path, rules=workspace.workspace_type.paths)
+                rules = workspace.workspace_type.paths
+                path = normalize_workspace_path(validate_workspace_path(file_path, workspace.abs_path, rules=rules), workspace.abs_path)
+                result = await self._revert_file_changes(workspace.abs_path, file_path, rules=rules)
                 # old_path is only meaningful when the revert undid a staged rename.
                 reverted_rename = result.get("path") != file_path
+                if reverted_rename:
+                    # Comment threads go back with the file
+                    move_threads(db, workspace_id, path, result["path"])
                 self.broker.emit(
                     workspace_id,
                     EventType.FILE_REVERTED,

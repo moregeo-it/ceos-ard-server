@@ -99,6 +99,7 @@ async def current_user(current_user=Depends(get_current_user), token: str = Depe
             "id": user.id,
             "email": user.email,
             "username": user.username,
+            "github_id": user.external_id if user.identity_provider == IdentityProvider.github else None,
             "full_name": user.full_name,
             "created_at": user.created_at,
             "updated_at": user.updated_at,

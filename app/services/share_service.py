@@ -30,17 +30,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Effective-role ranking used to gate access. Owner is the sole writer.
-ROLE_RANK = {AccessMode.READONLY.value: 0, "owner": 1}
+# Effective-role ranking used to gate access. Owner is the sole writer of files; commenters also write comments.
+ROLE_RANK = {AccessMode.READONLY.value: 0, AccessMode.COMMENT.value: 1, "owner": 2}
 # GitHub login syntax: alphanumerics and single hyphens, up to 39 characters. Checked before the
 # name goes into the API URL path, where e.g. "octocat/repos" would hit another endpoint.
 GITHUB_USERNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 
 
 def resolve_role(db: Session, workspace: GitWorkspace, user_id: str) -> str | None:
-    """The effective role of a user on a workspace: "owner", "readonly", or None without access.
+    """The effective role of a user on a workspace: "owner", "comment", "readonly", or None without access.
 
-    The owner is the sole writer; collaborators are readonly, as is everyone on an archived workspace.
+    The owner is the sole writer of files; collaborators have their mode, and are readonly on an archived workspace.
     """
     if not user_id:
         return None
@@ -360,15 +360,18 @@ class ShareService:
 
         if workspace.user_id != user.id:
             added = user.id not in workspace_members(workspace)
+            mode = next((c.mode for c in workspace.collaborators if c.invitee_user_id == user.id), None)
             try:
                 collaborator = self._accept_share(db, share, workspace, user)
             except IntegrityError:
                 # Lost a race with a concurrent redemption by the same account: redo on top of its row
                 db.rollback()
                 collaborator = self._accept_share(db, share, workspace, user)
+            # For the user's other tabs
             if added:
-                # For the user's other tabs
                 self._emit_access(workspace.id, EventType.COLLABORATOR_ADDED, collaborator, actor_user_id=user.id)
+            elif collaborator.mode != mode:
+                self._emit_access(workspace.id, EventType.COLLABORATOR_UPDATED, collaborator, actor_user_id=user.id)
 
         workspace.annotate_viewer(resolve_role(db, workspace, user.id))
         return collaborator, workspace
@@ -382,11 +385,16 @@ class ShareService:
             .first()
         )
 
-        if not collaborator or collaborator.status != CollaboratorStatus.ACCEPTED:
+        upgrade = collaborator is not None and ROLE_RANK[share.mode.value] > ROLE_RANK[collaborator.mode.value]
+        if not collaborator or collaborator.status != CollaboratorStatus.ACCEPTED or upgrade:
             now = datetime.now(UTC)
             if collaborator:
-                collaborator.accept(user.id, user.username, now)
-                collaborator.share_id = share.id
+                # A link never lowers the access someone already has
+                if upgrade:
+                    collaborator.mode = share.mode
+                if collaborator.status != CollaboratorStatus.ACCEPTED:
+                    collaborator.accept(user.id, user.username, now)
+                    collaborator.share_id = share.id
             else:
                 collaborator = WorkspaceCollaborator(
                     workspace_id=workspace.id,

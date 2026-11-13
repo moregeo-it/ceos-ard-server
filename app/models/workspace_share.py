@@ -14,6 +14,8 @@ from app.db.types import UTCDateTime
 
 class AccessMode(str, Enum):
     READONLY = "readonly"
+    # Reads like readonly, and writes, resolves and edits its own comments
+    COMMENT = "comment"
 
 
 class CollaboratorStatus(str, Enum):
