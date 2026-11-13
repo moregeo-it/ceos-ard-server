@@ -2043,13 +2043,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Workspace, thread or comment not found
+          description: Workspace or thread not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: Invalid request data, e.g. an empty comment
+          description: Invalid request data, e.g. an unknown status
           content:
             application/json:
               schema:
@@ -2094,7 +2094,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Workspace, thread or comment not found
+          description: Workspace or thread not found
           content:
             application/json:
               schema:
@@ -4236,7 +4236,7 @@ components:
           description: The comment in Markdown; null when `deleted`.
         deleted:
           type: boolean
-          description: A deleted first comment of a thread that has replies, kept as a placeholder.
+          description: A deleted comment that has replies after it, kept as a placeholder.
         created_at:
           type: string
           format: date-time

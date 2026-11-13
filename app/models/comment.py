@@ -53,7 +53,7 @@ class CommentThread(Base):
 
 
 class Comment(Base):
-    """A comment in a thread. Markdown. A deleted first comment of a thread with replies stays as a placeholder (`deleted_at`)."""
+    """A comment in a thread. Markdown. A deleted comment with replies after it stays as a placeholder (`deleted_at`)."""
 
     __tablename__ = "comments"
 

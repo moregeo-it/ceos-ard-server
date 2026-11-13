@@ -18,7 +18,7 @@ class CommentAuthor(BaseModel):
 class CommentResponse(BaseModel):
     id: str
     author: CommentAuthor
-    body: str | None = Field(description="Markdown; null for a deleted first comment of a thread with replies")
+    body: str | None = Field(description="Markdown; null for a deleted comment that has replies after it")
     deleted: bool
     created_at: datetime
     edited_at: datetime | None = None
