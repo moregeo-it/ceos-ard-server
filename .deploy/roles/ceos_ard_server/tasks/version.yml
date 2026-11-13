@@ -1,0 +1,9 @@
+---
+- name: Fail early when the deployed revision is not pinned
+  ansible.builtin.assert:
+    that:
+      - app_version is defined
+      - app_version | length >= 7
+    fail_msg: >-
+      app_version must name the exact commit this host runs. setup.yml never
+      changes the checkout, but deploy.yml uses this value.
