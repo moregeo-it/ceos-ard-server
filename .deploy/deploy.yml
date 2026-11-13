@@ -6,6 +6,13 @@
   gather_facts: true
   serial: 1
 
+  pre_tasks:
+    # Also loads the role's defaults, which this playbook relies on
+    - name: Check the deployed revision
+      ansible.builtin.import_role:
+        name: ceos_ard_server
+        tasks_from: version.yml
+
   tasks:
     - name: Stop the maintenance timers
       become: true

@@ -573,7 +573,8 @@ cd .deploy && ansible-playbook deploy.yml
 
 The playbook stops the service and its timers, takes a WAL-safe database backup, checks out the
 new revision, installs dependencies, migrates the schema, restarts and waits for the server to
-answer. Rolling back is the same command with the previous commit.
+answer. Rolling back is the same command with the previous commit; if the deploy migrated the
+database, also restore the backup it took.
 
 ### What is still manual
 

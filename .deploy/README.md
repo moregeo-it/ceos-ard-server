@@ -28,9 +28,10 @@ migrate-data.yml  ONE-TIME: move database and workspaces out of the checkout.
 ansible-playbook deploy.yml
 ```
 
-Rollback is the same thing with the previous commit. The deploy stops the
-service and timers, backs up, checks out, installs dependencies, migrates,
-restarts and waits for a response.
+Rollback is the same thing with the previous commit. If the deploy migrated
+the database, the old code can't use it: restore the backup the deploy took.
+The deploy stops the service and timers, backs up, checks out, installs
+dependencies, migrates, restarts and waits for a response.
 
 ## Where the data lives
 

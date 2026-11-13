@@ -66,6 +66,13 @@
     enabled: true
     state: started
 
+- name: Install the firewall
+  become: true
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+  when: manage_firewall
+
 - name: Allow SSH through the firewall
   become: true
   community.general.ufw:
