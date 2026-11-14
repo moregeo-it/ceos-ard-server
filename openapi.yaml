@@ -1878,7 +1878,7 @@ paths:
                 version:
                   type: string
                   description: Version of the new PFS
-                  default: "1.0.0-draft"
+                  default: "1.0.0"
                 type:
                   type: string
                   description: Type of the new PFS

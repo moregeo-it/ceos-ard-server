@@ -27,9 +27,13 @@ while True:
     pathlib.Path(sys.argv[1], f"{i}.txt").write_text("x")
     i += 1
 """
+ENV = """
+import os, pathlib, sys
+pathlib.Path(sys.argv[1], "env.txt").write_text(os.environ.get("EXAMPLE", ""))
+"""
 
 
-def build(tmp_path: Path, script: str):
+def build(tmp_path: Path, script: str, **kwargs):
     workspace, output = tmp_path / "workspace", tmp_path / "output"
     workspace.mkdir()
     output.mkdir()
@@ -44,6 +48,7 @@ def build(tmp_path: Path, script: str):
             hidden=[],
             cwd=workspace,
             timeout=30,
+            **kwargs,
         )
     )
 
@@ -59,3 +64,8 @@ def test_a_build_that_writes_too_much_is_stopped(tmp_path, monkeypatch, script):
     written = sum(path.stat().st_size for path in (tmp_path / "output").iterdir())
     time.sleep(0.5)
     assert sum(path.stat().st_size for path in (tmp_path / "output").iterdir()) == written
+
+
+def test_a_build_gets_the_environment_of_its_workspace_type(tmp_path):
+    build(tmp_path, ENV, env={"EXAMPLE": "1"})
+    assert (tmp_path / "output" / "env.txt").read_text() == "1"

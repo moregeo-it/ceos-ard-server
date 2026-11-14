@@ -136,6 +136,7 @@ class BuildService:
                 hidden=[workspace_path / ".git"],
                 cwd=workspace_path,
                 timeout=settings.BUILD_TIMEOUT,
+                env=workspace_type.build_env,
             )
         except TimeoutError:
             return error(f"Generating the document took longer than {settings.BUILD_TIMEOUT} seconds and was stopped.")

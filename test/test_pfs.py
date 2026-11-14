@@ -19,6 +19,7 @@ def test_create_pfs(client, workspace):
     document = yaml.safe_load(client.get(file_url(workspace, "files", "/pfs/ST/document.yaml")).text)
     assert document["title"] == "Surface Temperature"
     assert document["type"] == "Optical"
+    assert document["version"] == "1.0.0"
     assert document["authors"] == ["Jane Doe"]
 
     ids = [item["id"] for item in client.get(f"/workspaces/{workspace['id']}/pfs").json()["pfs_types"]]

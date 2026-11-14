@@ -20,7 +20,8 @@ load_dotenv()
 
 CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5173")
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000")
-PFS_DEFAULT_VERSION = "1.0.0-draft"
+# Without -draft, which the CLI adds to documents that aren't stable
+PFS_DEFAULT_VERSION = "1.0.0"
 PFS_DEFAULT_TYPE = "Optical"
 PFS_DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
 

@@ -592,10 +592,10 @@ ceos-ard-server.service   Delegate=yes, MemoryMax=3G
     └── <build>/          BUILD_MEMORY_MAX_PER_BUILD, stopped as a whole after BUILD_TIMEOUT
 ```
 
-1.  Install bubblewrap and the libraries Chromium needs:
+1.  Install bubblewrap, the libraries Chromium needs, and the font of the documents for the header and footer of the PDFs:
 
     ```bash
-    sudo apt-get install bubblewrap
+    sudo apt-get install bubblewrap fonts-crosextra-carlito
     sudo /home/server/.pixi/bin/pixi exec playwright install-deps chromium
     ```
 
