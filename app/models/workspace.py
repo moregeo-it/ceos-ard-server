@@ -1,3 +1,5 @@
+import re
+import unicodedata
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
@@ -26,6 +28,21 @@ class PullRequestStatus(Enum):
     APPROVED = "approved"
 
 
+BRANCH_NAME_MAX_LENGTH = 46
+
+
+def make_branch_name(title: str, workspace_id: str) -> str:
+    """ws-<title slug>-<first 8 characters of the id>, at most 46 characters."""
+    suffix = f"-{workspace_id[:8]}"
+    ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_title.lower()).strip("-")
+    room = BRANCH_NAME_MAX_LENGTH - len("ws-") - len(suffix)
+    if len(slug) > room:
+        cut = slug[: room + 1].rfind("-")
+        slug = slug[:cut] if cut > 0 else slug[:room]
+    return f"ws-{slug}{suffix}" if slug else f"ws{suffix}"
+
+
 class GitWorkspace(Base):
     __tablename__ = "git_workspaces"
 
@@ -40,6 +57,8 @@ class GitWorkspace(Base):
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)
+    # Fixed at creation: renaming the workspace must not move its branch
+    branch_name = Column(String(BRANCH_NAME_MAX_LENGTH), nullable=False, unique=True, index=True)
     pull_request_number = Column(String, nullable=True)  # Todo: Change from String to Integer when moving to a stricter DB eg. PostgresSQL
     pull_request_status_last_updated_at = Column(UTCDateTime, nullable=True)
     pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
@@ -55,10 +74,6 @@ class GitWorkspace(Base):
     @property
     def abs_path(self) -> Path:
         return settings.WORKSPACES_ROOT / self.id
-
-    @property
-    def branch_name(self) -> str:
-        return f"workspace/{self.id}"
 
     @property
     def workspace_type(self) -> "WorkspaceType":

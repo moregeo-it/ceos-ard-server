@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import shutil
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,7 +13,7 @@ from strictyaml import YAMLValidationError, as_document
 from yaml import load as yaml_load
 
 from app.models.user import User
-from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
+from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus, make_branch_name
 from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator
 from app.schemas.events import EventType
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
@@ -76,7 +77,10 @@ class WorkspaceService:
             fork_repo = await self.github_service.fork(user=user, upstream_owner=upstream.owner, upstream_repo=upstream.repo)
 
             # Create workspace record in database
+            workspace_id = str(uuid.uuid4())
             workspace = GitWorkspace(
+                id=workspace_id,
+                branch_name=make_branch_name(workspace_data.title, workspace_id),
                 user_id=user.id,
                 type=workspace_type.id,
                 upstream_owner=upstream.owner,
