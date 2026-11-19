@@ -466,7 +466,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 #### Workspace (`git_workspaces`)
 
-- A clone of the owner's fork, on the branch `workspace/<id>`
+- A clone of the owner's fork, on the branch `ws-<title slug, or the PFS selection>-<last 8 characters of the id>`, fixed at creation (workspaces created before it keep `workspace/<id>`)
 - The PFS selection (JSON list), which the preview builds
 - Pull Request number and status
 - `ACTIVE` or `ARCHIVED`; an archived workspace is deleted a month after `archived_at`

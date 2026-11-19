@@ -1,6 +1,12 @@
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy.types import DateTime, TypeDecorator
+
+
+def new_id() -> str:
+    """The primary key for a new record."""
+    return str(uuid.uuid4())
 
 
 class UTCDateTime(TypeDecorator):

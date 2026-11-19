@@ -1,4 +1,3 @@
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
@@ -7,7 +6,7 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
-from app.db.types import UTCDateTime
+from app.db.types import UTCDateTime, new_id
 
 
 class IdentityProvider(str, Enum):
@@ -18,7 +17,7 @@ class IdentityProvider(str, Enum):
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     full_name = Column(String, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)

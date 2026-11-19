@@ -1,4 +1,3 @@
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -9,7 +8,8 @@ from sqlalchemy.orm import relationship
 
 from app.config import settings
 from app.db.database import Base
-from app.db.types import UTCDateTime
+from app.db.types import UTCDateTime, new_id
+from app.utils.branch_name import BRANCH_NAME_MAX_LENGTH
 from app.workspace_types import Upstream, WorkspaceType, get_type
 
 
@@ -29,7 +29,7 @@ class PullRequestStatus(Enum):
 class GitWorkspace(Base):
     __tablename__ = "git_workspaces"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     title = Column(String(50), nullable=False)
     description = Column(String(500), nullable=True)
     type = Column(String(50), nullable=False, default="ceos-ard")
@@ -40,6 +40,8 @@ class GitWorkspace(Base):
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)
+    # Fixed at creation: renaming the workspace must not move its branch
+    branch_name = Column(String(BRANCH_NAME_MAX_LENGTH), nullable=False, unique=True, index=True)
     pull_request_number = Column(String, nullable=True)  # Todo: Change from String to Integer when moving to a stricter DB eg. PostgresSQL
     pull_request_status_last_updated_at = Column(UTCDateTime, nullable=True)
     pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
@@ -55,10 +57,6 @@ class GitWorkspace(Base):
     @property
     def abs_path(self) -> Path:
         return settings.WORKSPACES_ROOT / self.id
-
-    @property
-    def branch_name(self) -> str:
-        return f"workspace/{self.id}"
 
     @property
     def workspace_type(self) -> "WorkspaceType":
