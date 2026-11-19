@@ -1,5 +1,4 @@
 import secrets
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
@@ -9,7 +8,7 @@ from sqlalchemy.orm import relationship
 
 from app.config import settings
 from app.db.database import Base
-from app.db.types import UTCDateTime
+from app.db.types import UTCDateTime, new_id
 
 
 class AccessMode(str, Enum):
@@ -26,7 +25,7 @@ class CollaboratorStatus(str, Enum):
 class WorkspaceCollaborator(Base):
     __tablename__ = "workspace_collaborators"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     workspace_id = Column(String, ForeignKey("git_workspaces.id"), nullable=False)
     share_id = Column(String, ForeignKey("workspace_shares.id"), nullable=True, index=True)
 
@@ -62,7 +61,7 @@ class WorkspaceCollaborator(Base):
 class WorkspaceShare(Base):
     __tablename__ = "workspace_shares"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     workspace_id = Column(String, ForeignKey("git_workspaces.id"), nullable=False, index=True)
     created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
     # Random rather than signed, so rotating SECRET_KEY doesn't break every share ever sent

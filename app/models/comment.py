@@ -1,4 +1,3 @@
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
@@ -7,7 +6,7 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
-from app.db.types import UTCDateTime
+from app.db.types import UTCDateTime, new_id
 
 
 class ThreadStatus(str, Enum):
@@ -25,7 +24,7 @@ class CommentThread(Base):
 
     __tablename__ = "comment_threads"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     workspace_id = Column(String, ForeignKey("git_workspaces.id", ondelete="SET NULL"), nullable=True, index=True)
     # The upstream repository the workspace is a fork of, e.g. "ceos-org/ceos-ard"
     repository = Column(String(201), nullable=False)
@@ -57,7 +56,7 @@ class Comment(Base):
 
     __tablename__ = "comments"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     thread_id = Column(String, ForeignKey("comment_threads.id", ondelete="CASCADE"), nullable=False, index=True)
 
     author_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

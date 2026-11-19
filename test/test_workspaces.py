@@ -1,7 +1,7 @@
 from conftest import FORK, commit_upstream, file_url, git
 
-from app.models.workspace import make_branch_name
 from app.services.events_service import event_broker
+from app.utils.branch_name import make_branch_name
 
 
 def test_create_workspace_forks_ceos_ard(client, github, workspace):
@@ -10,28 +10,39 @@ def test_create_workspace_forks_ceos_ard(client, github, workspace):
     assert workspace["fork_repo_name"] == "ceos-ard"
     assert workspace["pfs"] == ["NRB"]
     branch = workspace["branch_name"]
-    assert branch == f"ws-nrb-review-{workspace['id'][:8]}"
+    assert branch == f"ws-nrb-review-{workspace['id'][-8:]}"
     assert git("branch", "--list", branch, cwd=FORK).strip(" *") == branch
 
 
-def test_branch_name_cuts_long_titles_at_a_dash():
+ID = "0190a1b2-c3d4-7e5f-8a6b-00001a2b3c4d"
+
+
+def test_branch_name_cuts_long_titles_at_the_limit():
     title = "Synthetic Aperture Radar Normalised Radar Backscatter Product"
-    assert make_branch_name(title, "1a2b3c4d-0000") == "ws-synthetic-aperture-radar-1a2b3c4d"
-
-
-def test_branch_name_cuts_one_long_word():
-    name = make_branch_name("x" * 60, "1a2b3c4d-0000")
-    assert name == f"ws-{'x' * 34}-1a2b3c4d"
+    name = make_branch_name(title, None, ID)
+    assert name == "ws-synthetic-aperture-radar-normalise-1a2b3c4d"
     assert len(name) == 46
 
 
-def test_branch_name_keeps_letters_digits_and_dashes():
-    assert make_branch_name("Größe: SR v2.0 (Draft)!", "1a2b3c4d") == "ws-groe-sr-v2-0-draft-1a2b3c4d"
-    assert make_branch_name("Ärger über Café", "1a2b3c4d") == "ws-arger-uber-cafe-1a2b3c4d"
+def test_branch_name_drops_a_dash_left_by_the_cut():
+    # The 34th character of the slug is a dash
+    assert make_branch_name("Synthetic Aperture Radar Normalis X", None, ID) == "ws-synthetic-aperture-radar-normalis-1a2b3c4d"
 
 
-def test_branch_name_without_a_slug():
-    assert make_branch_name("日本語 ---", "1a2b3c4d") == "ws-1a2b3c4d"
+def test_branch_name_keeps_the_title_before_a_long_word():
+    assert make_branch_name("Ab " + "y" * 40, None, ID) == f"ws-ab-{'y' * 31}-1a2b3c4d"
+
+
+def test_branch_name_keeps_base_letters():
+    assert make_branch_name("Größe: SR v2.0 (Draft)!", None, ID) == "ws-grosse-sr-v2-0-draft-1a2b3c4d"
+    assert make_branch_name("Ærø Łódź Þór Café", None, ID) == "ws-aero-lodz-thor-cafe-1a2b3c4d"
+
+
+def test_branch_name_falls_back_to_the_pfs():
+    assert make_branch_name("合成孔径雷达", ["NRB", "SAR"], ID) == "ws-nrb-sar-1a2b3c4d"
+    assert make_branch_name("A1", ["NRB"], ID) == "ws-nrb-1a2b3c4d"
+    assert make_branch_name("合成孔径雷达", None, ID) == "ws-1a2b3c4d"
+    assert make_branch_name("合成孔径雷达", [], ID) == "ws-1a2b3c4d"
 
 
 def test_create_workspace_requires_pfs(client):

@@ -1,6 +1,3 @@
-import re
-import unicodedata
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -11,7 +8,8 @@ from sqlalchemy.orm import relationship
 
 from app.config import settings
 from app.db.database import Base
-from app.db.types import UTCDateTime
+from app.db.types import UTCDateTime, new_id
+from app.utils.branch_name import BRANCH_NAME_MAX_LENGTH
 from app.workspace_types import Upstream, WorkspaceType, get_type
 
 
@@ -28,25 +26,10 @@ class PullRequestStatus(Enum):
     APPROVED = "approved"
 
 
-BRANCH_NAME_MAX_LENGTH = 46
-
-
-def make_branch_name(title: str, workspace_id: str) -> str:
-    """ws-<title slug>-<first 8 characters of the id>, at most 46 characters."""
-    suffix = f"-{workspace_id[:8]}"
-    ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^a-z0-9]+", "-", ascii_title.lower()).strip("-")
-    room = BRANCH_NAME_MAX_LENGTH - len("ws-") - len(suffix)
-    if len(slug) > room:
-        cut = slug[: room + 1].rfind("-")
-        slug = slug[:cut] if cut > 0 else slug[:room]
-    return f"ws-{slug}{suffix}" if slug else f"ws{suffix}"
-
-
 class GitWorkspace(Base):
     __tablename__ = "git_workspaces"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=new_id)
     title = Column(String(50), nullable=False)
     description = Column(String(500), nullable=True)
     type = Column(String(50), nullable=False, default="ceos-ard")

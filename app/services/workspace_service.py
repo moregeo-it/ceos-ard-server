@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import shutil
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,8 +11,9 @@ from sqlalchemy.orm import Session, joinedload
 from strictyaml import YAMLValidationError, as_document
 from yaml import load as yaml_load
 
+from app.db.types import new_id
 from app.models.user import User
-from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus, make_branch_name
+from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator
 from app.schemas.events import EventType
 from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
@@ -23,6 +23,7 @@ from app.services.events_service import EventBroker, event_broker
 from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
 from app.services.share_service import ROLE_RANK, resolve_role, workspace_members
+from app.utils.branch_name import make_branch_name
 from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_repo
 from app.utils.limits import FileTooLarge, check_read_size
@@ -77,16 +78,17 @@ class WorkspaceService:
             fork_repo = await self.github_service.fork(user=user, upstream_owner=upstream.owner, upstream_repo=upstream.repo)
 
             # Create workspace record in database
-            workspace_id = str(uuid.uuid4())
+            workspace_id = new_id()
+            pfs = workspace_data.pfs if workspace_type.pfs else None
             workspace = GitWorkspace(
                 id=workspace_id,
-                branch_name=make_branch_name(workspace_data.title, workspace_id),
+                branch_name=make_branch_name(workspace_data.title, pfs, workspace_id),
                 user_id=user.id,
                 type=workspace_type.id,
                 upstream_owner=upstream.owner,
                 upstream_repo=upstream.repo,
                 upstream_branch=upstream.branch,
-                pfs=workspace_data.pfs if workspace_type.pfs else None,
+                pfs=pfs,
                 title=workspace_data.title,
                 description=workspace_data.description,
                 fork_repo_owner=fork_repo["owner"]["login"],
