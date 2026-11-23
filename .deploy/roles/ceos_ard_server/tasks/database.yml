@@ -1,0 +1,48 @@
+---
+# The distribution's PostgreSQL on the host. The service user connects over the
+# local socket as the role of the same name: Debian's default pg_hba.conf allows
+# that with peer authentication, so there is no password to manage.
+- name: Install PostgreSQL
+  become: true
+  ansible.builtin.apt:
+    name:
+      - postgresql
+      - python3-psycopg2   # for the community.postgresql modules
+    state: present
+
+- name: Run PostgreSQL
+  become: true
+  ansible.builtin.systemd_service:
+    name: postgresql
+    enabled: true
+    state: started
+
+- name: Read the PostgreSQL version
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_info:
+    filter: version
+  register: postgresql
+
+- name: Fail when PostgreSQL is too old
+  ansible.builtin.assert:
+    that: postgresql.version.major >= postgresql_min_version
+    fail_msg: >-
+      The server needs PostgreSQL {{ postgresql_min_version }} or newer, the host
+      has {{ postgresql.version.major }}.
+
+- name: Create the role of the service user
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ app_user }}"
+
+# The migrations of deploy.yml create the tables, owned by the same role
+- name: Create the database
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ app_database_name }}"
+    owner: "{{ app_user }}"
+    encoding: UTF-8
+    template: template0

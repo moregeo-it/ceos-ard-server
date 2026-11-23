@@ -2,7 +2,6 @@
 # Dummy values mirroring host_vars/<host>/vars.yml, so the playbooks parse with
 # every variable defined. Keep the key set in sync with the real host_vars.
 app_version: 0000000000000000000000000000000000000000
-app_data_relocated: false
 app_server_url: https://api.example.invalid
 app_client_url: https://editor.example.invalid
 app_cors_origins: https://editor.example.invalid

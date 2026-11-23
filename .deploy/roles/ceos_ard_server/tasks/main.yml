@@ -6,6 +6,10 @@
   ansible.builtin.import_tasks: packages.yml
   tags: [packages]
 
+- name: Set up the database
+  ansible.builtin.import_tasks: database.yml
+  tags: [database]
+
 - name: Provide swap
   ansible.builtin.import_tasks: swap.yml
   when: manage_swap
@@ -18,6 +22,10 @@
 - name: Create the data directories
   ansible.builtin.import_tasks: directories.yml
   tags: [directories]
+
+- name: Clone the code on a new host
+  ansible.builtin.import_tasks: checkout.yml
+  tags: [checkout]
 
 - name: Write the application configuration
   ansible.builtin.import_tasks: config.yml

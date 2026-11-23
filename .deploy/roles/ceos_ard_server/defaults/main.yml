@@ -12,15 +12,14 @@ app_port: 8000
 # --- Data -------------------------------------------------------------------
 app_data_dir: /var/lib/ceos-ard-server
 app_backup_dir: /var/backups/ceos-ard-server
-app_data_relocated: false
+app_workspaces_root: "{{ app_data_dir }}/workspaces"
 
-# Derived: where the data actually is right now. Everything else reads these,
-# so flipping app_data_relocated moves the whole configuration consistently.
-app_workspaces_root: "{{ (app_data_dir ~ '/workspaces') if app_data_relocated else (app_dir ~ '/workspaces') }}"
-app_db_path: "{{ (app_data_dir ~ '/ceos_ard_server.db') if app_data_relocated else (app_dir ~ '/ceos_ard_server.db') }}"
-app_database_url: >-
-  {{ ('sqlite:////' ~ app_db_path.lstrip('/')) if app_data_relocated
-     else 'sqlite:///./ceos_ard_server.db' }}
+# The host's PostgreSQL, over the local socket with peer authentication: the
+# service user connects as the PostgreSQL role of the same name, without a password
+app_database_name: ceos_ard_server
+app_database_url: postgresql+psycopg:///{{ app_database_name }}
+# The server needs 16 or newer
+postgresql_min_version: 16
 
 # Installed by the server on demand: one toolchain per CEOS-ARD CLI version,
 # and the Chromium they share for PDFs
@@ -28,8 +27,8 @@ app_toolchains_root: "{{ app_data_dir }}/toolchains"
 app_playwright_browsers_path: "{{ app_data_dir }}/playwright-browsers"
 
 # --- Service ----------------------------------------------------------------
-# Both default to true: the service is currently down only because it was never
-# enabled when the host rebooted. Set false to converge without touching it.
+# Set app_service_started false to converge without starting the service, e.g.
+# on a new host, where deploy.yml migrates the database and starts it
 app_service_enabled: true
 app_service_started: true
 

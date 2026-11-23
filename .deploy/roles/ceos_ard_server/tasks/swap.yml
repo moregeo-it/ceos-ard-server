@@ -1,6 +1,6 @@
 ---
-# 3.8 GiB RAM with no swap: `pixi install` and Chromium previews can push the
-# box into the OOM killer, whose likeliest victim is the long-lived server.
+# Without swap, `pixi install` and Chromium previews can push a small host into
+# the OOM killer, whose likeliest victim is the long-lived server.
 - name: Check for existing swap
   become: true
   ansible.builtin.stat:

@@ -2,3 +2,4 @@
 collections:
   - name: community.general   # ufw
   - name: ansible.posix       # mount (swap)
+  - name: community.postgresql  # role and database

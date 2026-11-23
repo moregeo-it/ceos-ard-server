@@ -63,12 +63,10 @@
       register: rendered_env
       changed_when: false
 
-    - name: The database URL must match the relocation state
+    - name: The data must be in PostgreSQL and the data directory
       ansible.builtin.assert:
         that:
-          - "'DATABASE_URL=sqlite:///./ceos_ard_server.db' in rendered_env.stdout"
-          - "'WORKSPACES_ROOT=' in rendered_env.stdout"
-          - "'TOOLCHAINS_ROOT=' in rendered_env.stdout"
-        fail_msg: >-
-          .env rendered with unexpected data paths. With app_data_relocated
-          false the database URL must stay relative to the checkout.
+          - "'DATABASE_URL=postgresql+psycopg:///ceos_ard_server' in rendered_env.stdout"
+          - "'WORKSPACES_ROOT=/var/lib/ceos-ard-server/workspaces' in rendered_env.stdout"
+          - "'TOOLCHAINS_ROOT=/var/lib/ceos-ard-server/toolchains' in rendered_env.stdout"
+        fail_msg: .env rendered with unexpected data locations.

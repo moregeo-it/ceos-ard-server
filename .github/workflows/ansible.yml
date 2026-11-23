@@ -39,7 +39,7 @@ jobs:
       # needed and CI can never reach production.
       - name: Check playbook syntax
         run: |
-          for playbook in setup.yml deploy.yml migrate-data.yml; do
+          for playbook in setup.yml deploy.yml; do
             echo "::group::$playbook"
             ansible-playbook -i ci/inventory.yml "$playbook" --syntax-check
             echo "::endgroup::"

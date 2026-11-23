@@ -1,9 +1,9 @@
 ---
-# Converges everything AROUND the code: service, timers, Caddy, TLS, data
-# directories, backups, swap. It never touches the git checkout, so running it
-# cannot change which version is deployed.
+# Converges everything AROUND the code: PostgreSQL, service, timers, Caddy, TLS,
+# data directories, backups, swap. It only clones the code on a new host and never
+# moves an existing checkout, so running it cannot change which version is deployed.
 #
-# First run:  ansible-playbook setup.yml --check --diff
+# Dry run:  ansible-playbook setup.yml --check --diff
 - name: Configure the CEOS-ARD server host
   hosts: ceos_ard_servers
   gather_facts: true

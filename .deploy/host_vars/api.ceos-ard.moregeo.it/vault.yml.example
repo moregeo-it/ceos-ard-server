@@ -3,7 +3,8 @@
 # Edit later with:
 #   ansible-vault edit host_vars/api.ceos-ard.moregeo.it/vault.yml
 #
-# Take the current values straight from the server's existing .env.
+# Take the GitHub, Google and SMTP values from the current production .env. The
+# secret key is new: python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 vault_secret_key: ""
 vault_github_client_id: ""
 vault_github_client_secret: ""

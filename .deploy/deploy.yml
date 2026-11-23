@@ -48,8 +48,7 @@
         repo: "{{ app_repo }}"
         dest: "{{ app_dir }}"
         version: "{{ app_version }}"
-        # Never force: the checkout holds .env, .pixi and (until relocation)
-        # the database and every workspace.
+        # Never force: the checkout holds .env and .pixi
         force: false
       register: checkout
 

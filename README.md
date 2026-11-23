@@ -567,16 +567,15 @@ Users authenticated with Google **cannot access workspace features**:
 ## 🚧 Deployment
 
 Production is configured with Ansible from [`.deploy/`](.deploy/) — not by hand. The playbooks
-manage the systemd service, the maintenance timers, Caddy, TLS, the data directories and the
-backups, so the documented state and the running state cannot drift apart.
+manage PostgreSQL, the systemd service, the maintenance timers, Caddy, TLS, the data directories
+and the backups, so the documented state and the running state cannot drift apart.
 
 | Playbook | Purpose |
 | --- | --- |
-| `setup.yml` | Converge the host around the code. Never touches the git checkout, so it cannot change the deployed version. |
+| `setup.yml` | Converge the host around the code. It only clones the code on a new host, so it cannot change the deployed version. |
 | `deploy.yml` | Move the code to `app_version`, migrate the database, restart. |
-| `migrate-data.yml` | One-time: move the database and workspaces out of the checkout. |
 
-See [`.deploy/README.md`](.deploy/README.md) for prerequisites, the vault and the first run.
+See [`.deploy/README.md`](.deploy/README.md) for setting up a new host, the vault and restoring backups.
 
 ### Updating an existing deployment
 
@@ -586,20 +585,24 @@ Bump `app_version` in `.deploy/host_vars/<host>/vars.yml` to the commit you want
 cd .deploy && ansible-playbook deploy.yml
 ```
 
-The playbook stops the service and its timers, takes a WAL-safe database backup, checks out the
+The playbook stops the service and its timers, dumps the database, checks out the
 new revision, installs dependencies, migrates the schema, restarts and waits for the server to
 answer. Rolling back is the same command with the previous commit; if the deploy migrated the
 database, also restore the backup it took.
 
 ### What is still manual
 
-- Installing `pixi` on a brand-new host (`curl -fsSL https://pixi.sh/install.sh | bash`)
+- Preparing a new host: the service user with sudo and SSH access, and `pixi` for it
+  (`curl -fsSL https://pixi.sh/install.sh | bash`)
 - Copying backups off the host; the automated copies live on the same disk as the originals
 
 ### How production is wired
 
 Caddy terminates TLS on ports 80/443 and reverse-proxies to `uvicorn` on `127.0.0.1:8000`, which
-is not reachable from outside. Certificates are issued and renewed by Caddy itself. Application
+is not reachable from outside. Certificates are issued and renewed by Caddy itself. The database is
+the host's PostgreSQL, which the service reaches over the local socket as the PostgreSQL role of the
+same name, without a password. The workspaces and the build toolchains are in
+`/var/lib/ceos-ard-server`, outside the checkout. Application
 configuration is templated to `.env` from `host_vars`, with secrets held in an `ansible-vault`
 file; edit those rather than the file on the server, which is overwritten on every run.
 
