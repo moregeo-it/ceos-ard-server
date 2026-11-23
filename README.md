@@ -67,7 +67,7 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 ## 🛠️ Technology Stack
 
 - **Backend Framework**: FastAPI 0.138+ on Uvicorn (WebSockets via `websockets`)
-- **Database**: SQLite in WAL mode (file-based, zero-config)
+- **Database**: PostgreSQL 16 or newer, through psycopg
 - **ORM**: SQLAlchemy 2.0+
 - **Migrations**: Alembic
 - **Authentication**: Authlib + OAuth2
@@ -84,7 +84,7 @@ A FastAPI-based server application for managing CEOS-ARD (Committee on Earth Obs
 - **Git** (for repository operations)
 - **Linux** in production, with systemd, cgroup v2 and bubblewrap (see [Isolated Builds](#isolated-builds)); development
   also works on Windows and macOS, without isolated builds
-- **sqlite3** command-line tool (for backups)
+- **PostgreSQL** 16 or newer (see [Database](#-database)); the tests start their own
 - **GitHub OAuth App** (for authentication; a Google OAuth App is optional)
 
 ## 🔧 Installation
@@ -203,7 +203,10 @@ The PR status checker needs a GitHub service token:
 ### Development Mode
 
 ```bash
-# Create the database or bring it to the newest schema
+# Once: create the database (see Database)
+createdb ceos_ard_server
+
+# Create the tables or bring them to the newest schema
 pixi run migrate
 
 # Start the development server with auto-reload
@@ -331,15 +334,16 @@ them between runs).
 
 ## 🐳 Database
 
-The application uses SQLite as the database backend:
+The server stores its data in PostgreSQL, 16 or newer:
 
-- **File Location**: `./ceos_ard_server.db` (in project root)
-- **Creation**: `pixi run migrate` creates the database and its tables
-- **No Installation Required**: SQLite is built into Python
-- **Git Ignored**: Database files are automatically ignored by git
-- **WAL Mode**: The server and the maintenance scripts write concurrently; this leaves `-wal`/`-shm` files next to
-  the database. Back it up with `sqlite3 ceos_ard_server.db ".backup <dest>"`, never with `cp`
-- **Schema changes**: every change is an [Alembic](https://alembic.sqlalchemy.org) revision in `migrations/versions`, and the server refuses to start until the database is at the newest one. After pulling, run `pixi run migrate`. To change the schema, edit the model, run `pixi run alembic revision --autogenerate --rev-id 0004 -m "<short name>"` with the next number, review the generated file and commit it.
+- **Connection**: `DATABASE_URL`, by default `postgresql+psycopg:///ceos_ard_server`, i.e. the database
+  `ceos_ard_server` over the local socket as the current OS user, without a password. Any PostgreSQL works for
+  development, e.g. one from your system's package manager, or the dev environment's:
+  `pixi run -e dev initdb -D .postgres`, then `pixi run -e dev pg_ctl -D .postgres -l .postgres/log start`
+- **Creation**: `createdb ceos_ard_server` once, then `pixi run migrate` creates the tables
+- **Tests**: `pixi run -e dev test` starts a throwaway PostgreSQL from the dev environment, so it needs no setup
+- **Backups**: `pg_dump -Fc ceos_ard_server > <dest>` while the server runs; restore with `pg_restore`
+- **Schema changes**: every change is an [Alembic](https://alembic.sqlalchemy.org) revision in `migrations/versions`, and the server refuses to start until the database is at the newest one. After pulling, run `pixi run migrate`. To change the schema, edit the model, run `pixi run alembic revision --autogenerate --rev-id 0002 -m "<short name>"` with the next number, review the generated file and commit it.
 
 ### Maintenance Tasks
 
@@ -461,7 +465,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 **How it works:**
 - Cron just needs to `cd` to project directory and run the script.
 - Install the crontab for the user the server runs as (e.g. `server`), not root: the scripts create the
-  database's `-wal`/`-shm` files and the `workspaces/.locks` files, and the server can't use them if root owns them.
+  `workspaces/.locks` files, and the server can't use them if root owns them. The scripts connect to the database
+  as that user too.
 - Ensure `.env` file exists in project root with `GITHUB_SERVICE_TOKEN` and `GITHUB_SERVICE_TOKEN_EXPIRES_AT` set.
 - Token checker sends email alerts if configured (see above).
 
@@ -476,7 +481,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 #### Workspace (`git_workspaces`)
 
-- A clone of the owner's fork, on the branch `ws-<title slug, or the selection>-<last 8 characters of the id>`, fixed at creation (workspaces created before it keep `workspace/<id>`)
+- A clone of the owner's fork, on the branch `ws-<title slug, or the selection>-<last 8 characters of the id>`, fixed at creation
 - The selection (JSON list), e.g. PFS ids, which the preview builds
 - Pull Request number and status
 - `ACTIVE` or `ARCHIVED`; an archived workspace is deleted a month after `archived_at`
@@ -579,8 +584,8 @@ SECRET_KEY=your-production-secret-key
 # The exact editor origin, on the same site as SERVER_URL (see Environment Configuration)
 CORS_ORIGINS=https://yourdomain.com
 
-# Use absolute path for database in production
-DATABASE_URL=sqlite:////app/data/ceos_ard_server.db
+# The local database, over the socket as the service user (a PostgreSQL role of the same name)
+DATABASE_URL=postgresql+psycopg:///ceos_ard_server
 
 # Toolchains of the builds and their Chromium, writable by the service user
 TOOLCHAINS_ROOT=/home/server/toolchains
@@ -730,7 +735,7 @@ To deploy new changes to an already-running server:
 cd /home/server/ceos-ard-server
 sudo systemctl stop ceos-ard-server
 mkdir -p ~/backups
-sqlite3 ceos_ard_server.db ".backup $HOME/backups/ceos_ard_server-$(date +%F).db"
+pg_dump -Fc ceos_ard_server > ~/backups/ceos_ard_server-$(date +%F).dump
 git pull
 pixi install          # only strictly needed if pixi.toml/pixi.lock changed.
 pixi run migrate      # brings the database to the newest schema; does nothing if it already is
@@ -738,8 +743,6 @@ sudo systemctl start ceos-ard-server
 ```
 
 The server is stopped first, so nothing writes to the database while it is backed up and migrated.
-
-**First deploy with migrations (once):** a database from before migrations has no revision yet. After the backup, mark it as the baseline with `pixi run alembic stamp 0001`, then run `pixi run migrate`.
 
 After starting, confirm it came back up cleanly:
 

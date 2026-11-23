@@ -95,8 +95,8 @@ class WorkspaceService:
                 fork_repo_name=fork_repo["name"],
                 status=WorkspaceStatus.ACTIVE,
             )
-            # Committing before the clone is deliberate: a write transaction held across a
-            # multi-second clone would block every other SQLite writer.
+            # Committing before the clone is deliberate: a transaction held across a
+            # multi-second clone would keep a pooled connection for its duration.
             db.add(workspace)
             db.commit()
             workspace.annotate_viewer("owner", owner=user)
@@ -461,7 +461,7 @@ class WorkspaceService:
             return workspace
 
         # Don't hold the read transaction open across the GitHub round trip:
-        # an open transaction blocks every SQLite writer for the duration.
+        # an open transaction keeps a pooled connection for the duration.
         db.commit()
 
         try:
@@ -730,7 +730,7 @@ class WorkspaceService:
             return None
 
         # Don't hold the read transaction open across the GitHub round trip:
-        # an open transaction blocks every SQLite writer for the duration.
+        # an open transaction keeps a pooled connection for the duration.
         db.commit()
 
         try:

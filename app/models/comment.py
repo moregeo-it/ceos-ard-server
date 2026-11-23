@@ -2,11 +2,10 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from sqlalchemy import JSON, Column, ForeignKey, String, Text
-from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
-from app.db.types import UTCDateTime, new_id
+from app.db.types import UTCDateTime, enum_type, new_id
 
 
 class ThreadStatus(str, Enum):
@@ -32,7 +31,7 @@ class CommentThread(Base):
     path = Column(String, nullable=False)
     # Earlier paths of the file, oldest first, from renames
     previous_paths = Column(JSON, nullable=False, default=list)
-    status = Column(SQLAlchemyEnum(ThreadStatus), nullable=False, default=ThreadStatus.OPEN)
+    status = Column(enum_type(ThreadStatus), nullable=False, default=ThreadStatus.OPEN)
 
     created_by_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_by_github_id = Column(String, nullable=False)

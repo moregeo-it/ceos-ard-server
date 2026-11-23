@@ -1,37 +1,24 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
 
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
+# PostgreSQL ends a transaction left open this long without a statement, so a forgotten commit can't hold
+# a connection and its row locks indefinitely. Above the longest intended gap: the cleanup script waits
+# up to a minute for a workspace lock inside its transaction
+IDLE_TRANSACTION_TIMEOUT = "5min"
 
 
 def create_db_engine(url: str) -> Engine:
-    """Engine factory shared by the app and the test fixtures, so both run the same pragmas.
+    """Engine factory shared by the app and the test fixtures.
 
-    check_same_thread=False allows the threadpooled get_db and the event loop to share
-    connections; the pragmas below do the actual hardening.
+    pool_pre_ping replaces connections the database closed, e.g. after a restart.
     """
-    engine = create_engine(url, connect_args={"check_same_thread": False}, echo=False)
-
-    if url.startswith("sqlite"):
-
-        @event.listens_for(engine, "connect")
-        def _set_sqlite_pragmas(dbapi_connection, _connection_record):
-            cursor = dbapi_connection.cursor()
-            # WAL lets readers and the writer coexist; without it a request holding a read
-            # transaction blocks every writer (requests and cron scripts) file-wide.
-            cursor.execute("PRAGMA journal_mode=WAL")
-            # SQLite does not enforce foreign keys unless asked, per connection.
-            cursor.execute("PRAGMA foreign_keys=ON")
-            # Retry instead of raising "database is locked" when another process writes.
-            cursor.execute("PRAGMA busy_timeout=5000")
-            # Safe with WAL: the log is synced, checkpoints are batched.
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.close()
-
-    return engine
+    return create_engine(
+        url, pool_pre_ping=True, echo=False, connect_args={"options": f"-c idle_in_transaction_session_timeout={IDLE_TRANSACTION_TIMEOUT}"}
+    )
 
 
 engine = create_db_engine(SQLALCHEMY_DATABASE_URL)
@@ -40,7 +27,16 @@ engine = create_db_engine(SQLALCHEMY_DATABASE_URL)
 # pattern in the services) does not turn every loaded attribute into a fresh SELECT.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
-Base = declarative_base()
+# The same constraint names on every database, so migrations can refer to them
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
 
 def get_db():

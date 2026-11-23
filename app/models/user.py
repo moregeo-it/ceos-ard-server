@@ -2,11 +2,10 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from sqlalchemy import Column, Integer, String, UniqueConstraint
-from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
-from app.db.types import UTCDateTime, new_id
+from app.db.types import UTCDateTime, enum_type, new_id
 
 
 class IdentityProvider(str, Enum):
@@ -23,7 +22,7 @@ class User(Base):
     email = Column(String, nullable=False)
     username = Column(String, nullable=False)
     external_id = Column(String, nullable=False)
-    identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
+    identity_provider = Column(enum_type(IdentityProvider), nullable=False)
     access_token = Column(String, nullable=True)  # Provider's access token (stored server-side)
     refresh_token = Column(String, nullable=True)  # Provider's refresh token (stored server-side)
     token_expiry = Column(UTCDateTime, nullable=True)  # Access token expiry
@@ -35,7 +34,7 @@ class User(Base):
     workspaces = relationship("GitWorkspace", back_populates="user")
 
     # A user is the account at its provider
-    __table_args__ = (UniqueConstraint("identity_provider", "external_id", name="uq_users_identity_provider_external_id"),)
+    __table_args__ = (UniqueConstraint("identity_provider", "external_id"),)
 
     def __repr__(self):
         return f"<User id={self.id} username={self.username} email={self.email} provider={self.identity_provider} external_id={self.external_id}>"

@@ -63,7 +63,7 @@ class Settings:
     WORKSPACE_TYPES_CONFIG_REQUIRED: bool = "WORKSPACE_TYPES_CONFIG" in os.environ
 
     SECRET_KEY: str = os.getenv("SECRET_KEY")
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ceos_ard_server.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+psycopg:///ceos_ard_server")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     CALLBACK_BASE_URI: str = os.getenv("CALLBACK_BASE_URI", f"{SERVER_URL}/auth/callback")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
