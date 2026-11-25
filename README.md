@@ -272,7 +272,8 @@ configuration and the rules are checked when the server starts, so a typo stops 
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
 | `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`) |
 | `search_filters` | Filters of the file search, answered by `matches_search_filters()` |
-| `actions` | Entries in the file menu of a folder: with a `schema`, a generic dialog asks for the input and `run_action()` creates the file; with a `dialog`, an editor dialog does the work, e.g. "Add New PFS" |
+| `actions` | Entries in the file menu of a folder, e.g. "Add New PFS": a generic dialog asks for the input with the action's `schema`, or the form `action_form()` derives from it, e.g. with options from the workspace; `run_action()` creates the file or folder, which is staged, and names the file the editor opens |
+| `names` | Names new and renamed files and folders must have, e.g. PFS folders named by their id |
 | `file_menu` | Which operations the file menu offers, see below |
 | `file_usage()` | Which files use a file, for "Used in" and the delete dialog |
 

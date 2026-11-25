@@ -8,9 +8,8 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.dependencies import get_workspace_service
 from app.schemas.workspace import (
+    ActionResponse,
     Commit,
-    CreatePFSRequest,
-    FileResponse,
     Proposal,
     ProposalRequest,
     SelectionOptionsResponse,
@@ -221,32 +220,27 @@ async def list_selection_options(
         return {"options": options}
 
 
-@router.post(
-    "/{workspace_id}/pfs",
-    summary="Create a PFS",
-    description="Create a PFS of a workspace",
-    tags=["PFS"],
-    response_model=FileResponse,
-    status_code=status.HTTP_201_CREATED,
+@router.get(
+    "/{workspace_id}/actions/{action}",
+    summary="Get the form of an action",
+    description="The JSON Schema and UI schema of an action's input, e.g. with options from the workspace. Owner only.",
 )
-async def create_workspace_pfs(
+async def get_workspace_action_form(
     workspace_id: str,
-    create_pfs_request: CreatePFSRequest,
+    action: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
-):
-    with internal_errors("create PFS", logger):
-        return await workspace_service.create_workspace_pfs(
-            db=db, workspace_id=workspace_id, user=current_user["user"], request_data=create_pfs_request
-        )
+) -> dict[str, Any]:
+    with internal_errors("get action form", logger):
+        return await workspace_service.get_action_form(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, action=action)
 
 
 @router.post(
     "/{workspace_id}/actions/{action}",
     summary="Run an action of the workspace type",
     description="Run an action that the workspace type offers, e.g. creating a new glossary term. Returns the created file.",
-    response_model=FileResponse,
+    response_model=ActionResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def run_workspace_action(

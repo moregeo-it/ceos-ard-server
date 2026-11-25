@@ -34,8 +34,6 @@ tags:
     description: File and building block operations
   - name: Previews
     description: Preview generation and management
-  - name: PFS
-    description: Product Family Specification management
   - name: Sharing
     description: Workspace sharing, collaborator management, and invitations
   - name: Comments
@@ -1557,11 +1555,57 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   /workspaces/{workspaceId}/actions/{action}:
+    get:
+      summary: Get the form of an action
+      description: |-
+        The JSON Schema and JSON Forms UI schema the editor asks for the action's input with: the action's own,
+        or with options from the workspace, e.g. the PFS a new PFS can be based on. Owner only.
+      operationId: getActionForm
+      tags:
+        - Workspaces
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: action
+          in: path
+          required: true
+          description: ID of the action
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The form
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - schema
+                  - ui_schema
+                properties:
+                  schema:
+                    type: object
+                  ui_schema:
+                    type:
+                      - object
+                      - "null"
+        '404':
+          description: Workspace or action not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     post:
       summary: Run an action of the workspace type
       description: |-
         Runs an action the workspace type offers, see `actions` in `GET /types`, e.g. creating a
-        glossary term. The request body follows the action's JSON Schema. Owner only.
+        glossary term or a PFS. The request body follows the action's form (`GET` this path). Owner only.
+        Everything the action created is staged.
       operationId: runAction
       tags:
         - Workspaces
@@ -1582,11 +1626,19 @@ paths:
               type: object
       responses:
         '201':
-          description: The file the action created
+          description: The file or folder the action created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FileItem'
+                allOf:
+                  - $ref: '#/components/schemas/FileItem'
+                  - type: object
+                    properties:
+                      open:
+                        type:
+                          - string
+                          - "null"
+                        description: The file the editor opens, e.g. the document of a new PFS
         '400':
           description: Invalid input for the action
           content:
@@ -1600,7 +1652,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The file to create exists already
+          description: The file or folder to create exists already
           content:
             application/json:
               schema:
@@ -1968,88 +2020,6 @@ paths:
                 $ref: '#/components/schemas/SelectionOptions'
         '400':
           description: Workspaces of this type select nothing
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Workspace not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /workspaces/{workspaceId}/pfs:
-    post:
-      summary: Create new PFS
-      description: >-
-        Creates a new PFS based on an existing one.
-
-        Validation may take place, e.g. validating against the strictyaml schemas of the corresponding YAML files.
-      operationId: createPFS
-      tags:
-        - PFS
-      parameters:
-        - $ref: '#/components/parameters/ClientId'
-        - $ref: '#/components/parameters/WorkspaceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - id
-                - title
-              properties:
-                base:
-                  anyOf:
-                    - $ref: '#/components/schemas/pfsId'
-                    - type: "null"
-                  description: Existing PFS to base the new one on
-                  default: null
-                id:
-                  $ref: '#/components/schemas/pfsId'
-                  description: ID for the new PFS
-                title:
-                  type: string
-                  description: Title for the new PFS
-                version:
-                  type: string
-                  description: Version of the new PFS
-                  default: "1.0.0"
-                type:
-                  type: string
-                  description: Type of the new PFS
-                  enum:
-                    - Optical
-                    - SAR
-                applies_to:
-                  type: string
-                  description: Description of the new PFS
-                introduction:
-                  type: array
-                  items:
-                    type: string
-                  default:
-                    - what-are-ceos-ard-products
-                    - when-is-a-product-ceos-ard
-                    - difference-threshold-goal
-      responses:
-        '201':
-          description: PFS created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileItem'
-        '400':
-          description: Invalid request data
           content:
             application/json:
               schema:
@@ -3289,10 +3259,10 @@ components:
                 example: docs/terms/*.md
               codec:
                 type: string
-                description: How the editor turns the file into the form data and back, `yaml` if omitted
-                enum:
-                  - yaml
-                  - glossary-term
+                description: |-
+                  How the editor turns the file into the form data and back, `yaml` if omitted. The editor opens
+                  files with a codec it doesn't know in its source editor.
+                pattern: ^[a-z][a-z0-9-]*$
               schema:
                 type: object
                 description: JSON Schema of the form data
@@ -3320,8 +3290,8 @@ components:
         actions:
           type: array
           description: |-
-            Actions offered in the file menu of a folder, see `POST .../actions/{action}`. An action has
-            either a `schema` for its input, asked for in a generic dialog, or a `dialog` of the editor.
+            Actions offered in the file menu of a folder, see `POST .../actions/{action}`. A generic dialog
+            asks for the input with the form of `GET .../actions/{action}`.
           items:
             type: object
             additionalProperties: false
@@ -3329,6 +3299,7 @@ components:
               - id
               - title
               - folder
+              - schema
             properties:
               id:
                 type: string
@@ -3340,11 +3311,9 @@ components:
               schema:
                 type: object
                 description: JSON Schema of the action's input
-              dialog:
-                type: string
-                description: A dialog of the editor that handles the action instead
-                enum:
-                  - CreatePfsDialog
+              ui_schema:
+                type: object
+                description: JSON Forms UI schema
         file_menu:
           type: array
           description: |-
@@ -3575,7 +3544,7 @@ components:
         Kind of `WorkspaceEvent`.
 
         - `file.saved`: existing file overwritten via `PUT .../files/{filePath}`.
-        - `file.created`: file/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or a new PFS via `POST .../pfs`.
+        - `file.created`: file/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or an action via `POST .../actions/{action}`.
         - `file.deleted`: file/folder deleted via `DELETE .../files/{filePath}` (see `tracked`).
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
@@ -3723,7 +3692,7 @@ components:
               $ref: '#/components/schemas/FileItem'
 
     WorkspaceEventFileCreated:
-      description: File/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or a new PFS folder via `POST .../pfs`. `file` equals the REST response body; `path` equals `file.path`.
+      description: File/folder created via `POST .../files`, a file uploaded via `PUT .../files/{filePath}`, or an action via `POST .../actions/{action}`. `file` equals the REST response body; `path` equals `file.path`.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
@@ -4173,14 +4142,6 @@ components:
             example:
               id: NRB
               title: SAR Normalised Radar Backscatter
-
-    pfsId:
-      type: string
-      description: |
-        PFS type identifier, the name of its folder under `pfs/`; other values are rejected.
-        Capital letters and digits only, like every official PFS id; may be widened if CEOS needs it.
-      pattern: ^[A-Z0-9]{2,10}$
-      example: NRB
 
     AccessMode:
       type: string

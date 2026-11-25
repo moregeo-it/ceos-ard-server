@@ -4,13 +4,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
-from app.config import settings
-
-# PFS ids become folder and file names and arguments of the ceos-ard CLI
-# Capital letters and digits only, like every official PFS id: "-" joins ids in build output names
-# (build_service.output_prefix). Widen it if CEOS ever needs other characters.
-PFS_ID_PATTERN = r"^[A-Z0-9]{2,10}$"
-PfsId = Annotated[str, StringConstraints(pattern=PFS_ID_PATTERN)]
 # Checked by the workspace type, see WorkspaceType.output_name()
 SelectionItem = Annotated[str, StringConstraints(min_length=1, max_length=500)]
 
@@ -172,19 +165,6 @@ class RequirementCategory(BaseModel):
     requirements: list[str]
 
 
-class CreatePFSRequest(BaseModel):
-    id: PfsId = Field(..., description="PFS ID")
-    title: str = Field(..., min_length=1, max_length=100, description="PFS title")
-    version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
-    applies_to: str | None = Field(None, description="Description of the PFS")
-    base: PfsId | None = Field(None, description="Base PFS ID")
-    type: str | None = Field(None, description="PFS type")
-    introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
-
-    class ConfigDict:
-        use_enum_values = True
-
-
 class SelectionOption(BaseModel):
     id: str
     title: str
@@ -199,6 +179,10 @@ class FileResponse(BaseModel):
     name: str
     is_directory: bool
     path: str
+
+
+class ActionResponse(FileResponse):
+    open: str | None = Field(None, description="The file the editor opens, if any")
 
 
 class FileUsage(BaseModel):

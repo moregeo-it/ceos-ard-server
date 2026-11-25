@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -12,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
-from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
+from app.schemas.workspace import FilePatchRequest, SyncStatus
 from app.services.build_service import BuildService
 from app.services.comment_service import follow_renames, move_threads
 from app.services.events_service import EventBroker, event_broker
@@ -31,7 +30,7 @@ from app.utils.validation import (
     validate_pathname,
     validate_workspace_path,
 )
-from app.workspace_types import PathRules
+from app.workspace_types import PathRules, WorkspaceType
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +223,7 @@ class FileService:
         self._require_operation(workspace, folder, "create", "folder")
         target_path = folder / name
         self._require_visible(workspace.abs_path, target_path, workspace.workspace_type.paths)
+        self._check_name(workspace.workspace_type, workspace.abs_path, target_path, request_data.type)
 
         async def transaction():
             if target_path.exists():
@@ -260,12 +260,6 @@ class FileService:
         if ignore_file_path(target_path, target_path.relative_to(workspace_path), rules):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The workspace hides {target_path.name}, choose another name")
 
-    @staticmethod
-    def _check_pfs_folder(workspace_path: Path, folder: Path) -> None:
-        # A PFS folder name is its id, which the preview and the CLI only accept in this form
-        if folder.parent == workspace_path / "pfs" and not re.fullmatch(PFS_ID_PATTERN, folder.name):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB")
-
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, read_content: Callable[[], Awaitable[bytes]], user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
 
@@ -286,11 +280,12 @@ class FileService:
                     self._require_operation(workspace, target_path.parent, "create", "folder")
                 validate_new_file_name(Path(file_path).name)  # as sent, before the path check trims it
                 validate_new_file_name(target_path.name)  # as written, after resolving symlinks
+                self._check_name(workspace.workspace_type, workspace.abs_path, target_path, "file")
                 # And the folders it creates
                 folder = target_path.parent
                 while not folder.exists():
                     validate_new_name(folder.name)
-                    self._check_pfs_folder(workspace.abs_path, folder)
+                    self._check_name(workspace.workspace_type, workspace.abs_path, folder, "folder")
                     folder = folder.parent
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
@@ -428,7 +423,7 @@ class FileService:
                 self._require_operation(workspace, source_path, "rename", "folder" if source_path.is_dir() else "file")
                 old_path = normalize_workspace_path(source_path, workspace.abs_path)
                 result = await self._update_file_name(
-                    workspace.abs_path, file_path, new_name=operation_request.target, rules=workspace.workspace_type.paths
+                    workspace.abs_path, file_path, new_name=operation_request.target, workspace_type=workspace.workspace_type
                 )
                 # Comment threads follow the file; clients move them on file.renamed as well
                 move_threads(db, workspace_id, old_path, result["path"])
@@ -460,16 +455,19 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
         return await run_exclusive(workspace_id, transaction)
 
-    async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str, rules: PathRules):
-        source_path = validate_workspace_path(file_path, workspace_path, exists=True, rules=rules)
+    @staticmethod
+    def _check_name(workspace_type: WorkspaceType, workspace_path: Path, target_path: Path, kind: str) -> None:
+        if message := workspace_type.name_error(normalize_workspace_path(target_path, workspace_path, absolute=False), kind):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+    async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str, workspace_type: WorkspaceType):
+        source_path = validate_workspace_path(file_path, workspace_path, exists=True, rules=workspace_type.paths)
         new_name = validate_new_file_name(new_name) if source_path.is_file() else validate_pathname(new_name)
         repo = get_repo(workspace_path)
 
-        if source_path.is_dir():
-            self._check_pfs_folder(workspace_path, source_path.parent / new_name)
-
         target_path = source_path.parent / new_name
-        self._require_visible(workspace_path, target_path, rules)
+        self._require_visible(workspace_path, target_path, workspace_type.paths)
+        self._check_name(workspace_type, workspace_path, target_path, "folder" if source_path.is_dir() else "file")
         if target_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A file/folder with the given name exists already")
 

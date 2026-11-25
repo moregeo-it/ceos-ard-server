@@ -18,3 +18,11 @@ types:
       branch: main
     # Whether new workspaces can be created; existing workspaces keep working either way
     # offered: true
+    # The module's own settings, all optional
+    settings:
+      # The types a new PFS can have
+      pfs_types: [SAR, Optical]
+      # The version of new PFS
+      default_version: 1.0.0
+      # The type of PFS copied from one without a type
+      default_type: Optical

@@ -5,18 +5,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pygit2
-from ceos_ard_cli.schema import PFS_DOCUMENT
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from strictyaml import YAMLValidationError, as_document
-from yaml import load as yaml_load
 
 from app.db.types import new_id
 from app.models.user import User
 from app.models.workspace import GitWorkspace, PullRequestStatus, WorkspaceStatus
 from app.models.workspace_share import AccessMode, CollaboratorStatus, WorkspaceCollaborator
 from app.schemas.events import EventType
-from app.schemas.workspace import CreatePFSRequest, Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
+from app.schemas.workspace import Proposal, ProposalRequest, SyncResult, SyncStatus, WorkspaceCreate, WorkspaceUpdate
 from app.services.build_service import BuildService
 from app.services.comment_service import follow_renames
 from app.services.events_service import EventBroker, event_broker
@@ -24,14 +21,11 @@ from app.services.git_service import GitService, RemoteAccessError
 from app.services.github_service import GitHubAPIError, GitHubService, head_repo_missing, pull_request_is_merged
 from app.services.share_service import ROLE_RANK, resolve_role, workspace_members
 from app.utils.branch_name import make_branch_name
-from app.utils.file_utils import create_folder
 from app.utils.git_utils import get_file_status, get_repo
-from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
-from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
-from app.utils.validation import validate_pathname
+from app.utils.validation import normalize_workspace_path
 from app.workspace_types import Upstream, WorkspaceType, available_types, default_type, get_type
-from app.workspace_types.base import SelectionError
+from app.workspace_types.base import Action, SelectionError
 
 logger = logging.getLogger(__name__)
 
@@ -677,127 +671,54 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace.type} select nothing")
         return await workspace.workspace_type.selection_options(workspace.abs_path)
 
-    async def create_workspace_pfs(self, db: Session, workspace_id: str, user: User, request_data: CreatePFSRequest):
-        if not workspace_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
-        if not request_data.id or not request_data.title:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
+    def _action(self, workspace: GitWorkspace, action: str) -> Action:
+        found = next((item for item in workspace.workspace_type.actions if item.id == action), None)
+        if found is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown action: {action}")
+        return found
 
-        workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
-        if workspace.workspace_type.selection is None or workspace.workspace_type.selection.label != "PFS":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS")
-        pfs_container = workspace.abs_path / "pfs"
-        pfs_id = validate_pathname(request_data.id)
-        pfs_path = pfs_container / pfs_id
-
-        # One transaction under the workspace lock: existence check, tree copy and bulk
-        # staging must not interleave with other mutations of the repository.
-        async def transaction():
-            repo = get_repo(workspace.abs_path)
-            if pfs_path.exists():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS already exists")
-
-            folder_details = create_folder(workspace.abs_path, pfs_id, pfs_path)
-
-            documents_path = pfs_path / "document.yaml"
-            pfs_schema = PFS_DOCUMENT(file=documents_path.name, base_path=workspace.abs_path)
-
-            try:
-                data = None
-                if request_data.base:
-                    base_pfs_path = pfs_container / validate_pathname(request_data.base)
-                    if not base_pfs_path.exists():
-                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Base PFS not found")
-
-                    # In a thread: heavy filesystem work, safe under the workspace lock
-                    await asyncio.to_thread(shutil.copytree, base_pfs_path, pfs_path, dirs_exist_ok=True)
-
-                    if documents_path.exists():
-                        try:
-                            check_read_size(documents_path.stat().st_size, documents_path.name)
-                            data = yaml_load(documents_path.read_text(encoding="utf-8"), Loader=PlainStringSafeLoader)
-                            # Ideally we would load from strictyaml, but it resolves references so we can't write it back.
-                            # This means we will loose e.g. comments in the document.yaml file.
-                            # Until ceos-ard-cli allows us to load unresolved documents, we have to keep it as is.
-                            # data = strict_yaml_load(documents_path.read_text(encoding="utf-8"), pfs_schema).data
-                        except (YAMLValidationError, FileTooLarge) as ye:
-                            raise HTTPException(
-                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to read base PFS document: {str(ye)}"
-                            ) from ye
-
-                        data.update(request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True))
-
-                if not isinstance(data, dict):
-                    data = build_default_pfs_document(
-                        **request_data.model_dump(include={"title", "version", "applies_to", "type"}, exclude_unset=True),
-                        author_username=user.full_name or user.username,
-                    )
-
-                # Set default values if any is None
-                default_document = build_default_pfs_document()
-                for key, value in data.items():
-                    if value is None and key in default_document:
-                        data[key] = default_document[key]
-
-                try:
-                    yaml_content = as_document(data, pfs_schema)
-                    documents_path.write_text(yaml_content.as_yaml(), encoding="utf-8")
-
-                    logger.info(f"Successfully created PFS {pfs_id} for workspace {workspace_id}")
-                except YAMLValidationError as ye:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to write PFS document: {str(ye)}") from ye
-
-                # Add changes to the repository
-                try:
-                    # Add all files in the new PFS directory
-                    for file_path in pfs_path.rglob("*"):
-                        if file_path.is_file():
-                            rel_file = str(file_path.relative_to(workspace.abs_path)).replace("\\", "/")
-                            repo.index.add(rel_file)
-                    repo.index.write()
-                except pygit2.GitError as e:
-                    logger.error(f"Failed to stage changes for workspace {workspace_id}: {e}")
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
-            except HTTPException:
-                await asyncio.to_thread(shutil.rmtree, pfs_path, ignore_errors=True)
-                raise
-            except Exception as e:
-                await asyncio.to_thread(shutil.rmtree, pfs_path, ignore_errors=True)
-                logger.error(f"Error creating PFS {pfs_id} for workspace {workspace_id}: {e}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create PFS: {str(e)}") from e
-
-            self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=folder_details["path"], file=folder_details)
-            return folder_details
-
-        return await run_exclusive(workspace_id, transaction)
+    async def get_action_form(self, db: Session, workspace_id: str, user_id: str, action: str) -> dict[str, Any]:
+        """The form the editor asks for an action's input with, e.g. with options from the workspace."""
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
+        schema, ui_schema = await workspace.workspace_type.action_form(workspace.abs_path, self._action(workspace, action))
+        return {"schema": schema, "ui_schema": ui_schema}
 
     async def run_action(self, db: Session, workspace_id: str, user: User, action: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Run an action of the workspace type that creates a file, e.g. a new glossary term."""
+        """Run an action of the workspace type that creates a file or folder, e.g. a new glossary term or PFS."""
         workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
         workspace_type = workspace.workspace_type
-        # Actions with a dialog of their own, e.g. "Add New PFS", have their own endpoints
-        if not any(item.id == action and item.json_schema is not None for item in workspace_type.actions):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown action: {action}")
+        self._action(workspace, action)
 
         async def transaction():
             try:
-                target = await workspace_type.run_action(workspace.abs_path, action, data)
+                result = await workspace_type.run_action(workspace.abs_path, action, data, author=user.full_name or user.username)
             except FileExistsError as e:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
             repo = get_repo(workspace.abs_path)
-            relative_path = str(target.relative_to(workspace.abs_path)).replace("\\", "/")
+            created = result.created
+            files = [path for path in created.rglob("*") if path.is_file()] if created.is_dir() else [created]
             try:
-                repo.index.add(relative_path)
+                for path in files:
+                    repo.index.add(normalize_workspace_path(path, workspace.abs_path, absolute=False))
                 repo.index.write()
             except pygit2.GitError as e:
+                if created.is_dir():
+                    await asyncio.to_thread(shutil.rmtree, created, ignore_errors=True)
+                else:
+                    created.unlink(missing_ok=True)
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stage changes: {str(e)}") from e
 
-            result = {"name": target.name, "is_directory": False, "status": get_file_status(repo, target), "path": "/" + relative_path}
-            self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=result["path"], file=result)
-            return result
+            entry = {
+                "name": created.name,
+                "is_directory": created.is_dir(),
+                "status": get_file_status(repo, created),
+                "path": normalize_workspace_path(created, workspace.abs_path),
+            }
+            self.broker.emit(workspace_id, EventType.FILE_CREATED, actor_user_id=user.id, path=entry["path"], file=entry)
+            return {**entry, "open": normalize_workspace_path(result.open, workspace.abs_path) if result.open else None}
 
         return await run_exclusive(workspace_id, transaction)
 

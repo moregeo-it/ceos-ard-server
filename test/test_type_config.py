@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app.workspace_types import config, create_type, load_types
@@ -54,7 +56,7 @@ def test_invalid_configuration(types, message):
     [
         ({"id": "a", "module": "unknown"}, "no module unknown"),
         ({"id": "a", "module": "config"}, "has no create()"),
-        ({"id": "a", "module": "ceos_ard", "settings": {"x": 1}}, "has no settings"),
+        ({"id": "a", "module": "ceos_ard", "settings": {"x": 1}}, "invalid settings"),
     ],
 )
 def test_invalid_type(type_config, message):
@@ -74,3 +76,10 @@ def test_load(tmp_path):
     path.write_text("types: [\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid workspace types configuration"):
         config.load(path, required=True)
+
+
+def test_example_configuration():
+    example = config.load(Path(__file__).parent.parent / "workspace-types.example.yaml", required=True)
+    types, offered = load_types(example)
+    assert offered == ["ceos-ard"]
+    assert types["ceos-ard"].pfs_settings.pfs_types == ["SAR", "Optical"]

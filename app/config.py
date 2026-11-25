@@ -20,10 +20,6 @@ load_dotenv()
 
 CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5173")
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000")
-# Without -draft, which the CLI adds to documents that aren't stable
-PFS_DEFAULT_VERSION = "1.0.0"
-PFS_DEFAULT_TYPE = "Optical"
-PFS_DEFAULT_INTRODUCTION = "what-are-ceos-ard-products,when-is-a-product-ceos-ard,difference-threshold-goal"
 
 
 def _playwright_browsers_path() -> Path:
@@ -95,15 +91,6 @@ class Settings:
     AUTH_SUCCESS_CLIENT_REDIRECT: str = os.getenv("AUTH_SUCCESS_CLIENT_REDIRECT", f"{CLIENT_URL}/auth/callback")
 
     WORKSPACES_ROOT: Path = Path(os.getenv("WORKSPACES_ROOT", "workspaces")).resolve()
-
-    # PFS default version for new PFS documents
-    PFS_DEFAULT_VERSION: str = os.getenv("PFS_DEFAULT_VERSION", PFS_DEFAULT_VERSION)
-    # The sections that should be added to the introduction by default for new PFS documents
-    # Separate sections with a comma (,)
-    PFS_DEFAULT_INTRODUCTION: list[str] = [item.strip() for item in os.getenv("PFS_DEFAULT_INTRODUCTION", PFS_DEFAULT_INTRODUCTION).split(",")]
-
-    # PFS default type for new PFS documents
-    PFS_DEFAULT_TYPE: str = os.getenv("PFS_DEFAULT_TYPE", PFS_DEFAULT_TYPE)
 
     # One or more CORS origins separated by commas. Exact origins only: requests carry the session cookie.
     CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", CLIENT_URL).split(",")

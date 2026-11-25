@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.utils.toolchains import Toolchain
 
@@ -38,7 +38,8 @@ class FileMenuRule(GlobRule):
 
 
 class EditorRule(GlobRule):
-    codec: Literal["yaml", "glossary-term"] = Field("yaml", description="How the editor turns the file into the form data and back")
+    # The editor's codecs (src/codecs); it opens files with a codec it doesn't know in the source editor
+    codec: str = Field("yaml", pattern=r"^[a-z][a-z0-9-]*$", description="How the editor turns the file into the form data and back")
     json_schema: dict[str, Any] = Field(alias="schema", description="JSON Schema of the form data")
     ui_schema: dict[str, Any] | None = Field(None, description="JSON Forms UI schema")
 
@@ -47,15 +48,31 @@ class Action(Rule):
     id: str
     title: str
     folder: str = Field(description="The folder whose file menu offers the action")
-    json_schema: dict[str, Any] | None = Field(None, alias="schema", description="JSON Schema of the input, asked for in a generic dialog")
-    # Only the dialogs the editor runs as actions (FileContextMenu.vue)
-    dialog: Literal["CreatePfsDialog"] | None = Field(None, description="An editor dialog that runs the action instead")
+    json_schema: dict[str, Any] = Field(alias="schema", description="JSON Schema of the input, asked for in a generic dialog, see action_form()")
+    ui_schema: dict[str, Any] | None = Field(None, description="JSON Forms UI schema")
 
-    @model_validator(mode="after")
-    def schema_or_dialog(self) -> "Action":
-        if (self.json_schema is None) == (self.dialog is None):
-            raise ValueError("An action has either a schema or a dialog")
-        return self
+
+class NameRule(GlobRule):
+    kind: Literal["file", "folder"] | None = Field(None, description="Only files or only folders; both if omitted")
+    pattern: str = Field(description="Regular expression the whole name must match")
+    message: str = Field(description="Why a name is refused")
+
+    @field_validator("pattern")
+    @classmethod
+    def valid_pattern(cls, value: str) -> str:
+        try:
+            re.compile(value)
+        except re.error as e:
+            raise ValueError(f"Invalid regular expression: {e}") from e
+        return value
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    # The new file or folder, which the file tree shows; everything in it is staged
+    created: Path
+    # The file the editor opens, if any
+    open: Path | None = None
 
 
 class SearchFilter(Rule):
@@ -152,6 +169,16 @@ class WorkspaceType:
     actions: list[Action] = field(default_factory=list)
     # Added to DEFAULT_FILE_MENU; the last rule matching a path decides
     file_menu: list[FileMenuRule] = field(default_factory=list)
+    # Names new and renamed files and folders must have, e.g. PFS folders named by their id
+    names: list[NameRule] = field(default_factory=list)
+
+    def name_error(self, path: str, kind: str) -> str | None:
+        """Why `path` (without leading slash) can't be the name of a new or renamed file or folder, if it can't."""
+        name = path.rstrip("/").rsplit("/", 1)[-1]
+        for rule in self.names:
+            if rule.kind in (None, kind) and match_glob(path, rule.match) and not re.fullmatch(rule.pattern, name):
+                return rule.message
+        return None
 
     def allowed_operations(self, path: str, kind: str, is_new: bool) -> set[str]:
         rule = None
@@ -199,7 +226,12 @@ class WorkspaceType:
     def matches_search_filters(self, workspace_path: Path, file_path: str, filters: dict[str, set[str]]) -> bool:
         return False
 
-    async def run_action(self, workspace_path: Path, action: str, data: dict[str, Any]) -> Path:
+    async def action_form(self, workspace_path: Path, action: Action) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """The JSON Schema and UI schema the editor asks for the input with, e.g. with options from the workspace."""
+        return action.json_schema, action.ui_schema
+
+    async def run_action(self, workspace_path: Path, action: str, data: dict[str, Any], author: str) -> ActionResult:
+        """Run an action, removing what it created if it fails; raises ValueError for invalid input, FileExistsError for existing files."""
         raise NotImplementedError
 
     async def render_file(self, workspace_path: Path, file_path: str) -> str | None:
