@@ -193,6 +193,9 @@ class WorkspaceType:
     async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return None
 
+    # Whether file_usage() runs in the build sandbox, and so waits for the user's running builds
+    usage_in_sandbox: ClassVar[bool] = False
+
     # Files of the workspace that choose its toolchain: saving them prepares the new toolchain
     toolchain_files: ClassVar[frozenset[str]] = frozenset()
 

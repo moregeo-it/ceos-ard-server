@@ -58,8 +58,6 @@ class Settings(BaseModel):
     pfs_types: list[str] = Field(["SAR", "Optical"], min_length=1, description="The types a new PFS can have")
     # Without -draft, which the CLI adds to documents that aren't stable
     default_version: str = Field("1.0.0", min_length=1, description="The version of new PFS")
-    # The CLI (from 0.8.0) refuses an empty version or type
-    default_type: str = Field("Optical", min_length=1, description="The type of PFS copied from one without a type")
 
 
 class NewPfs(BaseModel):
@@ -295,7 +293,7 @@ class CeosArdType(WorkspaceType):
                 title=request.title, version=settings.default_version, type=request.type, applies_to=request.applies_to, author=author
             )
         # The CLI refuses a PFS without authors
-        defaults = default_pfs_document(title="", version=settings.default_version, type=settings.default_type, author=author)
+        defaults = default_pfs_document(title="", version=settings.default_version, type=request.type, author=author)
         for key, value in data.items():
             if (value is None or (key == "authors" and not value)) and key in defaults:
                 data[key] = defaults[key]

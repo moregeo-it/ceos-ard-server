@@ -24,5 +24,3 @@ types:
       pfs_types: [SAR, Optical]
       # The version of new PFS
       default_version: 1.0.0
-      # The type of PFS copied from one without a type
-      default_type: Optical

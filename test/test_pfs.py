@@ -1,6 +1,8 @@
 import yaml
 from conftest import file_url
+from fastapi import HTTPException
 
+from app.services import file_service, workspace_service
 from app.workspace_types import config, create_type
 
 
@@ -113,3 +115,24 @@ def test_pfs_settings():
     )
     assert workspace_type.actions[0].json_schema["properties"]["type"]["enum"] == ["SAR"]
     assert workspace_type.pfs_settings.default_version == "2.0.0"
+
+
+def test_usage_of_pfs_does_not_wait_for_builds(client, workspace, monkeypatch):
+    def locked(user_id):
+        raise AssertionError("CEOS-ARD reads its usage without the build lock")
+
+    monkeypatch.setattr(file_service, "user_build_locks", locked)
+    response = client.get(file_url(workspace, "context", "/requirements/general/metadata-machine-readable.yaml"))
+    assert response.status_code == 200, response.text
+    assert [item["label"] for item in response.json()["usage"]] == ["NRB", "SR"]
+
+
+def test_actions_leave_nothing_behind_without_a_repository(client, workspace, monkeypatch):
+    def broken(path):
+        raise HTTPException(status_code=400, detail="Broken repository")
+
+    monkeypatch.setattr(workspace_service, "get_repo", broken)
+    response = create_pfs(client, workspace, id="ST", title="Surface Temperature")
+    assert response.status_code == 400, response.text
+    monkeypatch.undo()
+    assert [item["name"] for item in client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/pfs"}).json()] == ["NRB", "SR"]

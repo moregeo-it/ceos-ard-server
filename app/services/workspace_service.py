@@ -690,6 +690,8 @@ class WorkspaceService:
         self._action(workspace, action)
 
         async def transaction():
+            # Before the action, so a broken repository leaves nothing behind
+            repo = get_repo(workspace.abs_path)
             try:
                 result = await workspace_type.run_action(workspace.abs_path, action, data, author=user.full_name or user.username)
             except FileExistsError as e:
@@ -697,7 +699,6 @@ class WorkspaceService:
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
-            repo = get_repo(workspace.abs_path)
             created = result.created
             files = [path for path in created.rglob("*") if path.is_file()] if created.is_dir() else [created]
             try:
