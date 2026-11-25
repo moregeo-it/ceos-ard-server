@@ -246,14 +246,20 @@ docs pages of its own.
 A workspace type defines which repository workspaces are created from and how the editor works with its
 files. The server is the only place they are defined; the editor reads them from `GET /types`.
 
-- `WORKSPACE_TYPES` lists the types offered for new workspaces, separated by commas; the first one is the
-  default. Workspaces of a type that isn't listed anymore keep working.
-- Each type has its own settings for the upstream repository, e.g. `CEOS_ARD_ORG`, `CEOS_ARD_REPO` and
-  `CEOS_ARD_BRANCH` for `ceos-ard`. Every workspace stores the upstream it was created from.
+The types of a deployment are configured in `workspace-types.yaml`, see
+[`workspace-types.example.yaml`](workspace-types.example.yaml), or in the file `WORKSPACE_TYPES_CONFIG` points
+to. Without the file, the server offers CEOS-ARD with its defaults.
 
-Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a `create()` function,
-registered in `_FACTORIES` in [`__init__.py`](app/workspace_types/__init__.py). The rules are checked when
-the server starts, so a typo stops it instead of being ignored.
+- Each entry has an `id`, which every workspace stores, and the `module` that implements it. The first offered type
+  is the default.
+- `title`, `description`, `color` and `upstream` replace the module's defaults; `settings` are the module's own,
+  checked by its `Settings` model. Every workspace stores the upstream it was created from.
+- With `offered: false`, no new workspaces can be created; existing ones keep working. Removing a type from the file
+  breaks its workspaces.
+
+Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a function
+`create(type_id, settings)` that returns the type with its defaults, and optionally a Pydantic model `Settings`. The
+configuration and the rules are checked when the server starts, so a typo stops it instead of being ignored.
 
 | Setting | Meaning |
 |---|---|
@@ -286,8 +292,7 @@ file_menu=[
 ]
 ```
 
-To add a type: write the module, register it, add its upstream settings to [`app/config.py`](app/config.py)
-and [`.env.example`](.env.example), and add it to `WORKSPACE_TYPES`. The editor needs no change unless the
+To add a type: write the module and add it to the configuration. The editor needs no change unless the
 type uses a dialog or codec it doesn't have yet. For the editor's tests, export the type with
 `pixi run python scripts/export_types.py <type id>`.
 

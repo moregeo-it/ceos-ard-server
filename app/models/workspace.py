@@ -32,7 +32,7 @@ class GitWorkspace(Base):
     id = Column(String, primary_key=True, default=new_id)
     title = Column(String(100), nullable=False)
     description = Column(String(1000), nullable=True)
-    type = Column(String(50), nullable=False, default="ceos-ard")
+    type = Column(String(50), nullable=False)
     upstream_owner = Column(String(100), nullable=False)
     upstream_repo = Column(String(100), nullable=False)
     upstream_branch = Column(String(255), nullable=False)

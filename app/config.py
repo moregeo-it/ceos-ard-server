@@ -62,12 +62,9 @@ class Settings:
     GOOGLE_DISCOVERY_URL: str = "https://accounts.google.com/.well-known/openid-configuration"
     GOOGLE_REVOKE_URL: str = "https://oauth2.googleapis.com/revoke"
 
-    CEOS_ARD_ORG: str = os.getenv("CEOS_ARD_ORG", "ceos-org")
-    CEOS_ARD_REPO: str = os.getenv("CEOS_ARD_REPO", "ceos-ard")
-    CEOS_ARD_BRANCH: str = os.getenv("CEOS_ARD_BRANCH", "main")
-
-    # Workspace types users can choose from, separated by commas; the first one is the default
-    WORKSPACE_TYPES: list[str] = [item.strip() for item in os.getenv("WORKSPACE_TYPES", "ceos-ard").split(",") if item.strip()]
+    # The workspace types of the deployment, see workspace-types.example.yaml; without the file only CEOS-ARD, unless set explicitly
+    WORKSPACE_TYPES_CONFIG: Path = Path(os.getenv("WORKSPACE_TYPES_CONFIG", "workspace-types.yaml")).resolve()
+    WORKSPACE_TYPES_CONFIG_REQUIRED: bool = "WORKSPACE_TYPES_CONFIG" in os.environ
 
     SECRET_KEY: str = os.getenv("SECRET_KEY")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ceos_ard_server.db")

@@ -1,0 +1,20 @@
+# The workspace types of this deployment. Copy to workspace-types.yaml, or set WORKSPACE_TYPES_CONFIG to its path.
+# Without the file, the server offers CEOS-ARD with its defaults.
+types:
+  # The first offered type is the default
+  - # Stored with every workspace, so it never changes
+    id: ceos-ard
+    # The module of app/workspace_types that implements the type
+    module: ceos_ard
+    # Optional, replace the module's defaults
+    # title: CEOS-ARD
+    # description: Product Family Specifications for CEOS Analysis Ready Data
+    # color: "#3e5265"
+    # The repository new workspaces fork and propose changes to; repo and branch keep the module's default if omitted.
+    # Point it to a fork of ceos-org/ceos-ard when developing.
+    upstream:
+      owner: ceos-org
+      repo: ceos-ard
+      branch: main
+    # Whether new workspaces can be created; existing workspaces keep working either way
+    # offered: true

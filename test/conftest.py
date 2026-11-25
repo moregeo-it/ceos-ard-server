@@ -13,6 +13,16 @@ import pytest
 DATA = Path(tempfile.mkdtemp(prefix="ceos-ard-server-test-"))
 UPSTREAM = DATA / "upstream.git"
 FORK = DATA / "fork.git"
+TYPES_CONFIG = DATA / "workspace-types.yaml"
+TYPES_CONFIG.write_text(
+    """
+types:
+  - id: ceos-ard
+    module: ceos_ard
+    upstream: {owner: ceos-org, repo: ceos-ard, branch: main}
+""",
+    encoding="utf-8",
+)
 
 os.environ.update(
     {
@@ -22,9 +32,7 @@ os.environ.update(
         "SECRET_KEY": "test-secret-long-enough-for-hs256",
         "SESSION_COOKIE_SECURE": "false",
         "ENVIRONMENT": "development",
-        "CEOS_ARD_ORG": "ceos-org",
-        "CEOS_ARD_REPO": "ceos-ard",
-        "CEOS_ARD_BRANCH": "main",
+        "WORKSPACE_TYPES_CONFIG": str(TYPES_CONFIG),
     }
 )
 os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))

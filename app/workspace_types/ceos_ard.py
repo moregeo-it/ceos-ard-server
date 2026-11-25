@@ -10,7 +10,6 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-from app.config import settings
 from app.utils.pfs_utils import PlainStringSafeLoader
 from app.utils.toolchains import Toolchain, ToolchainError, ToolchainSpec, toolchains
 from app.utils.yaml_cache import load_yaml_cached
@@ -181,12 +180,12 @@ class CeosArdType(WorkspaceType):
         return usage
 
 
-def create() -> CeosArdType:
+def create(type_id: str, type_settings: None) -> CeosArdType:
     return CeosArdType(
-        id="ceos-ard",
+        id=type_id,
         title="CEOS-ARD",
         description="Product Family Specifications for CEOS Analysis Ready Data",
-        upstream=Upstream(settings.CEOS_ARD_ORG, settings.CEOS_ARD_REPO, settings.CEOS_ARD_BRANCH),
+        upstream=Upstream("ceos-org", "ceos-ard", "main"),
         paths=PathRules(hidden=DEFAULT_HIDDEN_PATHS | {"build", "templates"}),
         pfs=True,
         editors=[EditorRule(match="glossary/*.yaml", json_schema=GLOSSARY_SCHEMA, ui_schema=GLOSSARY_UI_SCHEMA)],
