@@ -283,3 +283,36 @@ def test_build_errors():
     )
     assert get_type("ogc").build_error("") == "Metanorma couldn't generate the document, e.g. because of an error in the document."
     assert get_type("ceos-ard").build_error(output) is None
+
+
+def test_search_by_block_type(client, ogc_workspace):
+    with SessionLocal() as db:
+        path = db.get(GitWorkspace, ogc_workspace["id"]).abs_path
+    (path / "core/standard/requirements").mkdir()
+    (path / "core/standard/requirements/REQ_a.adoc").write_text("[[req_a]]\n[requirement]\n====\n[%metadata]\nidentifier:: /req/a\n====\n")
+    (path / "core/standard/requirements/ATS_a.adoc").write_text("[abstract_test]\n====\n[%metadata]\nidentifier:: /conf/a\n====\n")
+    search = f"/workspaces/{ogc_workspace['id']}/search"
+
+    response = client.get(search, params={"filter": ["block:requirement"]})
+    assert response.status_code == 200, response.text
+    assert [item["path"] for item in response.json()] == ["/core/standard/requirements/REQ_a.adoc"]
+
+    response = client.get(search, params={"filter": ["block:requirement", "block:abstract test"]})
+    assert [item["path"] for item in response.json()] == ["/core/standard/requirements/ATS_a.adoc", "/core/standard/requirements/REQ_a.adoc"]
+
+
+def test_modspec_form():
+    ogc_type = get_type("ogc")
+    assert [(rule.match, rule.codec) for rule in ogc_type.editors] == [("**/*.adoc", "modspec")]
+    assert ogc_type.search_filters[0].values == [
+        "requirement",
+        "recommendation",
+        "permission",
+        "requirements class",
+        "conformance class",
+        "abstract test",
+        "conformance test",
+    ]
+    # Every field of the form is shown for some kind of block
+    elements = {element["scope"].rsplit("/", 1)[1]: element for element in ogc_type.editors[0].ui_schema["elements"]}
+    assert set(elements) == set(ogc_type.editors[0].json_schema["properties"])

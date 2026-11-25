@@ -7,9 +7,19 @@ from pathlib import Path, PurePosixPath
 
 import httpx
 
+from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.toolchains import Toolchain, ToolchainError, ToolchainSpec, toolchains
 from app.workspace_types import ogc_sources
-from app.workspace_types.base import DEFAULT_HIDDEN_PATHS, PathRules, Selection, SelectionError, Upstream, WorkspaceType
+from app.workspace_types.base import (
+    DEFAULT_HIDDEN_PATHS,
+    EditorRule,
+    PathRules,
+    SearchFilter,
+    Selection,
+    SelectionError,
+    Upstream,
+    WorkspaceType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +41,91 @@ DOCUMENT_PATTERN = r"[\w.\-]+(/[\w.\-]+)*\.adoc"
 # Metanorma's message when it can't parse a document, e.g. `asciidoctor: FAILED: document.adoc: Failed to load AsciiDoc document - ...`
 FAILED = re.compile(r"asciidoctor: FAILED: (.+)")
 INCLUDE = re.compile(r"^(?:include|image)::([^\[\s]+)\[", re.MULTILINE)
+
+# OGC ModSpec blocks, e.g. `[requirement]`, one per file of the requirements, recommendations and tests
+MODSPEC_KINDS = ["requirement", "recommendation", "permission", "requirements_class", "conformance_class", "abstract_test", "conformance_test"]
+MODSPEC_BLOCK = re.compile(rf"^\[({'|'.join(MODSPEC_KINDS)})[,\]]", re.MULTILINE)
+# The editor's modspec codec (src/codecs/modspec.js) knows these fields
+_TEXT = {"type": "string"}
+_KIND_TITLES = [{"const": kind, "title": kind.replace("_", " ").capitalize()} for kind in MODSPEC_KINDS]
+_LIST = {"type": "array", "items": {"type": "string"}}
+MODSPEC_SCHEMA = {
+    "type": "object",
+    "required": ["identifier"],
+    "properties": {
+        "type": {"type": "string", "title": "Type", "oneOf": _KIND_TITLES},
+        "identifier": {**_TEXT, "title": "Identifier", "minLength": 1},
+        "subject": {**_TEXT, "title": "Subject"},
+        "target": {**_TEXT, "title": "Target"},
+        "classification": {**_TEXT, "title": "Classification"},
+        "statement": {**_TEXT, "title": "Statement"},
+        "part": {**_LIST, "title": "Parts"},
+        "condition": {**_LIST, "title": "Conditions"},
+        "inherit": {**_LIST, "title": "Inherits"},
+        "requirement": {**_LIST, "title": "Requirements"},
+        "abstract-test": {**_LIST, "title": "Abstract tests"},
+        "conformance-test": {**_LIST, "title": "Conformance tests"},
+        "test-purpose": {**_TEXT, "title": "Test purpose"},
+        "test-method": {**_TEXT, "title": "Test method"},
+        "include": {**_LIST, "title": "Includes"},
+    },
+}
+# The fields of each kind of block, as the OGC repositories use them
+_STATEMENTS = ["requirement", "recommendation", "permission"]
+_FIELDS = {
+    "statement": _STATEMENTS,
+    "part": _STATEMENTS,
+    "condition": _STATEMENTS,
+    "subject": ["requirements_class"],
+    "requirement": ["requirements_class"],
+    "target": ["conformance_class", "abstract_test", "conformance_test"],
+    "classification": ["conformance_class"],
+    "abstract-test": ["conformance_class"],
+    "conformance-test": ["conformance_class"],
+    "inherit": ["requirements_class", "conformance_class"],
+    "test-purpose": ["abstract_test", "conformance_test"],
+    "test-method": ["abstract_test", "conformance_test"],
+    "include": [*_STATEMENTS, "conformance_class"],
+}
+
+
+def _control(field: str, multi: bool = False) -> dict:
+    control = {"type": "Control", "scope": f"#/properties/{field}"}
+    if multi:
+        control["options"] = {"multi": True}
+    if field in _FIELDS:
+        control["rule"] = {"effect": "SHOW", "condition": {"scope": "#/properties/type", "schema": {"enum": _FIELDS[field]}}}
+    return control
+
+
+MODSPEC_UI_SCHEMA = {
+    "type": "VerticalLayout",
+    "elements": [
+        {"type": "Control", "scope": "#/properties/type", "options": {"readonly": True}},
+        _control("identifier"),
+        *(_control(field) for field in ("subject", "target", "classification")),
+        _control("statement", multi=True),
+        _control("part", multi=True),
+        _control("condition", multi=True),
+        *(_control(field) for field in ("inherit", "requirement", "abstract-test", "conformance-test")),
+        _control("test-purpose", multi=True),
+        _control("test-method", multi=True),
+        _control("include"),
+    ],
+}
+# The search filter's values name the kinds of blocks as people write them
+BLOCK_FILTER = {kind.replace("_", " "): kind for kind in MODSPEC_KINDS}
+
+
+def modspec_kinds(path: Path) -> set[str]:
+    """The kinds of ModSpec blocks in an AsciiDoc file."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return set()
+        check_read_size(path.stat().st_size, path.name)
+        return set(MODSPEC_BLOCK.findall(path.read_text(encoding="utf-8", errors="replace")))
+    except (OSError, FileTooLarge):
+        return set()
 
 
 class _Latest:
@@ -190,6 +285,13 @@ class OgcType(WorkspaceType):
             return f"Metanorma couldn't read the document: {failed.group(1).strip()}"
         return "Metanorma couldn't generate the document, e.g. because of an error in the document."
 
+    def matches_search_filters(self, workspace_path: Path, file_path: str, filters: dict[str, set[str]]) -> bool:
+        if not file_path.endswith(".adoc"):
+            return False
+        kinds = modspec_kinds(workspace_path / file_path.lstrip("/"))
+        # OR within a filter, AND across filters
+        return all(kinds & {BLOCK_FILTER.get(value) for value in values} for values in filters.values())
+
     async def selection_options(self, workspace_path: Path) -> list[dict[str, str]]:
         documents = await asyncio.to_thread(find_documents, workspace_path)
         return [{**document, "path": f"/{document['id']}"} for document in documents]
@@ -207,6 +309,9 @@ def create(type_id: str, type_settings: None) -> OgcType:
         selection=Selection(label="document"),
         choose_repository=True,
         searchable_extensions=frozenset({".adoc", ".txt", ".md", ".json", ".yaml", ".yml", ".xml"}),
+        # Requirements, recommendations, tests and their classes; the editor opens other AsciiDoc files as usual
+        editors=[EditorRule(match="**/*.adoc", codec="modspec", json_schema=MODSPEC_SCHEMA, ui_schema=MODSPEC_UI_SCHEMA)],
+        search_filters=[SearchFilter(id="block", title="Specification element", values=list(BLOCK_FILTER))],
         # Metanorma needs more than the CEOS-ARD CLI: OGC API - Records - Part 1 takes 30 s and 1.1 GB
         build_timeout=180,
         build_memory_max="1536M",
