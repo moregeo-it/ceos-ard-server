@@ -1,21 +1,39 @@
 import asyncio
+import hashlib
 import logging
 import re
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+from app.schemas.workspace import PFS_ID_PATTERN
 from app.utils.pfs_utils import PlainStringSafeLoader
 from app.utils.toolchains import Toolchain, ToolchainError, ToolchainSpec, toolchains
 from app.utils.yaml_cache import load_yaml_cached
-from app.workspace_types.base import DEFAULT_HIDDEN_PATHS, Action, EditorRule, FileMenuRule, PathRules, Upstream, WorkspaceType
+from app.workspace_types.base import (
+    DEFAULT_HIDDEN_PATHS,
+    Action,
+    EditorRule,
+    FileMenuRule,
+    PathRules,
+    Selection,
+    SelectionError,
+    Upstream,
+    WorkspaceType,
+)
+
+if TYPE_CHECKING:
+    from app.services.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
+
+PFS_FOLDER = "pfs"
 
 GLOSSARY_SCHEMA = {
     "type": "object",
@@ -128,10 +146,51 @@ class CeosArdType(WorkspaceType):
         version = cli_version(workspace_path, toolchains.installed())
         return Toolchain(name=f"{CLI_PACKAGE}-{version}", spec=lambda: cli_toolchain_spec(version))
 
-    def build_command(self, workspace_path: Path, pfs: list[str], output_prefix: str, include_format: str | None) -> list[str]:
+    def build_command(self, workspace_path: Path, selection: list[str], output_prefix: str, include_format: str | None) -> list[str]:
         # The flags disable the formats
         disabled = [f"--{format}" for format in ("pdf", "docx") if format != include_format]
-        return ["ceos-ard", "generate", *pfs, "-o", output_prefix, "-i", str(workspace_path), *disabled]
+        return ["ceos-ard", "generate", *selection, "-o", output_prefix, "-i", str(workspace_path), *disabled]
+
+    def output_name(self, selection: list[str]) -> str:
+        if not selection:
+            raise SelectionError("Select at least one PFS for the preview")
+        if not all(re.fullmatch(PFS_ID_PATTERN, pfs_id) for pfs_id in selection):
+            raise SelectionError("Invalid PFS id")
+        name = "-".join(selection)
+        if len(name) > 200:  # a file name holds at most 255 bytes
+            name = hashlib.sha256(name.encode()).hexdigest()
+        return name
+
+    async def selection_options(self, workspace_path: Path) -> list[dict[str, str]]:
+        return await asyncio.to_thread(self._pfs, workspace_path)
+
+    @staticmethod
+    def _pfs(workspace_path: Path) -> list[dict[str, str]]:
+        """The PFS of the workspace: the folders of pfs/ with a document.yaml."""
+        folder = workspace_path / PFS_FOLDER
+        if not folder.is_dir():
+            return []
+        options = []
+        for pfs_dir in sorted(folder.iterdir()):
+            document_path = pfs_dir / "document.yaml"
+            if not pfs_dir.is_dir() or not document_path.is_file():
+                continue
+            try:
+                # Cached (read-only use): parsed on every request
+                document = load_yaml_cached(document_path, PlainStringSafeLoader)
+            except Exception as e:
+                logger.error(f"Error reading PFS document {document_path}: {e}")
+                continue
+            if not isinstance(document, dict):
+                logger.error(f"Invalid PFS document format in {document_path}")
+                continue
+            options.append({"id": pfs_dir.name, "title": document.get("title") or pfs_dir.name})
+        return options
+
+    async def upstream_selection_options(self, github: "GitHubService", token: str) -> list[dict[str, str]]:
+        upstream = self.upstream
+        names = await github.get_folder_names(upstream.owner, upstream.repo, token, PFS_FOLDER, upstream.branch)
+        return [{"id": name, "title": name} for name in names]
 
     async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return await asyncio.to_thread(self._requirement_usage, workspace_path, file_path)
@@ -187,7 +246,8 @@ def create(type_id: str, type_settings: None) -> CeosArdType:
         description="Product Family Specifications for CEOS Analysis Ready Data",
         upstream=Upstream("ceos-org", "ceos-ard", "main"),
         paths=PathRules(hidden=DEFAULT_HIDDEN_PATHS | {"build", "templates"}),
-        pfs=True,
+        selection=Selection(label="PFS", multiple=True, on_create=True),
+        downloads=["pdf", "docx"],
         editors=[EditorRule(match="glossary/*.yaml", json_schema=GLOSSARY_SCHEMA, ui_schema=GLOSSARY_UI_SCHEMA)],
         # PFS are created with their own dialog; only new ones can be renamed or deleted
         actions=[Action(id="create-pfs", title="Add New PFS", folder="/pfs", dialog="CreatePfsDialog")],

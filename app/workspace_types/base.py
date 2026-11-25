@@ -1,11 +1,14 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.utils.toolchains import Toolchain
+
+if TYPE_CHECKING:
+    from app.services.github_service import GitHubService
 
 DEFAULT_HIDDEN_PATHS = frozenset({".git", ".github"})
 
@@ -63,6 +66,16 @@ class SearchFilter(Rule):
 
 class Labels(Rule):
     usage: str | None = Field(None, description='Replaces "Used in", the files that use the open file')
+
+
+class Selection(Rule):
+    label: str = Field(description='What is selected, e.g. "PFS" or "Document"')
+    multiple: bool = Field(False, description="Whether several can be selected")
+    on_create: bool = Field(False, description="Whether new workspaces select from the upstream's options, see upstream_selection_options()")
+
+
+class SelectionError(ValueError):
+    """An invalid selection, with a message for the user."""
 
 
 # The file menu of every type starts with these rules; the last rule matching a path decides
@@ -123,10 +136,12 @@ class WorkspaceType:
     paths: PathRules
     # Distinguishes the workspaces of this type in the editor, e.g. in headers and badges
     color: str = "#3e5265"
-    # Whether workspaces select PFS for the document preview, see `preview`
-    pfs: bool = False
-    # "pfs": a document built from the selected PFS; "file": the file open in the editor
-    preview: Literal["pfs", "file"] = "pfs"
+    # "build": a document built from the workspace's selection, see `selection`; "file": the file open in the editor
+    preview: Literal["build", "file"] = "build"
+    # What workspaces select for the "build" preview, see selection_options()
+    selection: Selection | None = None
+    # The formats the built document can be downloaded in, see build_command()
+    downloads: list[Literal["pdf", "docx"]] = field(default_factory=list)
     # Folders the file tree shows opened, e.g. when all content is in one folder
     expanded_folders: list[str] = field(default_factory=list)
     searchable_extensions: frozenset[str] = frozenset({".txt", ".md", ".json", ".yaml", ".yml", ".xml"})
@@ -158,12 +173,28 @@ class WorkspaceType:
         """The toolchain the workspace builds with; raises ToolchainError if the workspace doesn't name a valid one."""
         return None
 
-    def build_command(self, workspace_path: Path, pfs: list[str], output_prefix: str, include_format: str | None) -> list[str]:
+    def build_command(self, workspace_path: Path, selection: list[str], output_prefix: str, include_format: str | None) -> list[str]:
         """The build command, run with the programs of the toolchain."""
         raise NotImplementedError(f"Workspaces of type {self.id} can't be built")
 
     # Environment variables for the build command
     build_env: ClassVar[dict[str, str]] = {}
+
+    def output_name(self, selection: list[str]) -> str:
+        """The outputs of a selection relative to the build folder, without extension; raises SelectionError for invalid selections.
+
+        Every build and read goes through here, so the selection is checked here too, stored ones included:
+        `../` would reach another workspace, a leading `-` would be an option of the build command.
+        """
+        raise SelectionError(f"Workspaces of type {self.id} can't be built")
+
+    async def selection_options(self, workspace_path: Path) -> list[dict[str, str]]:
+        """What the workspace can select, as `{"id", "title"}`."""
+        return []
+
+    async def upstream_selection_options(self, github: "GitHubService", token: str) -> list[dict[str, str]]:
+        """What new workspaces can select, from the upstream repository, for a `selection` with `on_create`."""
+        return []
 
     def matches_search_filters(self, workspace_path: Path, file_path: str, filters: dict[str, set[str]]) -> bool:
         return False
@@ -182,8 +213,9 @@ class WorkspaceType:
             "available": available,
             "color": self.color,
             "upstream": {"owner": self.upstream.owner, "repo": self.upstream.repo, "branch": self.upstream.branch, "url": self.upstream.url},
-            "pfs": self.pfs,
             "preview": self.preview,
+            "selection": self.selection,
+            "downloads": self.downloads,
             "expanded_folders": self.expanded_folders,
             "labels": self.labels,
             "editors": self.editors,

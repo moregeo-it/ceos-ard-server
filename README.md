@@ -265,8 +265,9 @@ configuration and the rules are checked when the server starts, so a typo stops 
 |---|---|
 | `upstream` | The repository new workspaces fork and propose changes to |
 | `paths` | Root folders the file tree doesn't show and the API refuses, e.g. `build`, or the only ones it shows, e.g. `docs` |
-| `pfs` | Whether workspaces select PFS, for the preview built with the ceos-ard CLI |
-| `preview` | `pfs`: the owner builds a document from the selected PFS; `file`: the preview shows the open file, from `render_file()` |
+| `preview` | `build`: the owner builds a document from the workspace's selection with `build_command()`; `file`: the preview shows the open file, from `render_file()` |
+| `selection` | What workspaces select for the `build` preview: its `label` (e.g. "PFS"), whether `multiple` can be selected, and whether new workspaces select it (`on_create`). The options come from `selection_options()`, before creation from `upstream_selection_options()`; `output_name()` checks a selection and names its outputs |
+| `downloads` | The formats the built document can be downloaded in, `pdf` and `docx` |
 | `expanded_folders` | Folders the file tree shows opened when entering a workspace |
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
 | `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`) |
@@ -474,8 +475,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 #### Workspace (`git_workspaces`)
 
-- A clone of the owner's fork, on the branch `ws-<title slug, or the PFS selection>-<last 8 characters of the id>`, fixed at creation (workspaces created before it keep `workspace/<id>`)
-- The PFS selection (JSON list), which the preview builds
+- A clone of the owner's fork, on the branch `ws-<title slug, or the selection>-<last 8 characters of the id>`, fixed at creation (workspaces created before it keep `workspace/<id>`)
+- The selection (JSON list), e.g. PFS ids, which the preview builds
 - Pull Request number and status
 - `ACTIVE` or `ARCHIVED`; an archived workspace is deleted a month after `archived_at`
 

@@ -23,8 +23,6 @@ from app.utils.validation import normalize_workspace_path, validate_workspace_pa
 
 logger = logging.getLogger(__name__)
 
-DOCUMENT_FORMATS = ("pdf", "docx")
-
 
 class PreviewService:
     def __init__(
@@ -35,7 +33,7 @@ class PreviewService:
         self.broker = broker or event_broker
 
     async def _build(
-        self, workspace: GitWorkspace, user_id: str, pfs: list[str] | None, include_format: str | None = None, build_dir: Path | None = None
+        self, workspace: GitWorkspace, user_id: str, selection: list[str] | None, include_format: str | None = None, build_dir: Path | None = None
     ) -> str:
         """Run the build and return the output prefix; into the workspace's `build/` only under `build_locks`."""
         async with user_build_locks(user_id):
@@ -43,7 +41,7 @@ class PreviewService:
                 workspace_path=workspace.abs_path,
                 workspace_id=workspace.id,
                 workspace_type=workspace.workspace_type,
-                pfs=pfs,
+                selection=selection,
                 include_format=include_format,
                 build_dir=build_dir,
             )
@@ -63,8 +61,8 @@ class PreviewService:
             await toolchains.ensure(toolchain)
 
     @staticmethod
-    def _require_pfs(workspace: GitWorkspace) -> None:
-        if not workspace.workspace_type.pfs:
+    def _require_build(workspace: GitWorkspace) -> None:
+        if workspace.workspace_type.preview != "build":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type previews single files, see GET .../render/{path}"
             )
@@ -73,24 +71,27 @@ class PreviewService:
         # Owner only: a build writes into the workspace, and this build is what everyone else sees.
         # Always the saved selection, which is what GET .../previews/current reads back.
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
-        self._require_pfs(workspace)
+        self._require_build(workspace)
+        # Before installing a toolchain for nothing
+        selection = list(workspace.selection or [])
+        self.build_service.output_prefix(workspace.workspace_type, workspace.abs_path, selection)
 
         await self._prepare(workspace)
         # One lock per workspace: every build writes into the same build/ directory
         async with build_locks(workspace_id):
-            prefix = await self._build(workspace, user_id, workspace.pfs)
+            prefix = await self._build(workspace, user_id, selection)
             html = await self._get_preview_files(workspace, file_prefix=prefix)
 
-        self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, pfs=list(workspace.pfs))
+        self.broker.emit(workspace_id, EventType.PREVIEW_GENERATED, actor_user_id=user_id, selection=selection)
         return html
 
     async def get_current_preview(self, db: Session, workspace_id: str, user_id: str):
-        """The owner's last build for the workspace's PFS list, without building."""
+        """The owner's last build for the workspace's selection, without building."""
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        self._require_pfs(workspace)
-        if not workspace.pfs:
+        self._require_build(workspace)
+        if not workspace.selection:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
-        prefix = self.build_service.output_prefix(workspace.abs_path, workspace.pfs)
+        prefix = self.build_service.output_prefix(workspace.workspace_type, workspace.abs_path, workspace.selection)
 
         async with build_locks(workspace_id):
             if not BuildService.artifact(Path(prefix + ".html"), workspace.abs_path / "build"):
@@ -174,20 +175,25 @@ class PreviewService:
                 detail="An error occurred while retrieving the preview static file. Please try again later." + str(e),
             ) from e
 
-    async def download_preview_document(self, db: Session, pfs: list[str], format: str, workspace_id: str, user_id: str) -> Path:
+    async def download_preview_document(self, db: Session, selection: list[str], format: str, workspace_id: str, user_id: str) -> Path:
         """Build the document for anyone with access and return its path; the caller removes its folder once sent.
 
         Each download builds into its own folder, so it needs no `build_locks`, and no other build can rewrite it while it is sent.
         """
-        # Part of the document's file name, which mustn't lead out of its folder
-        if format not in DOCUMENT_FORMATS:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The format must be one of {', '.join(DOCUMENT_FORMATS)}")
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
-        self._require_pfs(workspace)
+        self._require_build(workspace)
+        # Part of the document's file name, which mustn't lead out of its folder
+        downloads = workspace.workspace_type.downloads
+        if format not in downloads:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"The format must be one of {', '.join(downloads)}" if downloads else "This workspace type has no downloads",
+            )
+        self.build_service.output_prefix(workspace.workspace_type, workspace.abs_path, selection)
         await self._prepare(workspace)
         build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:
-            prefix = await self._build(workspace, user_id, pfs, include_format=format, build_dir=build_dir)
+            prefix = await self._build(workspace, user_id, selection, include_format=format, build_dir=build_dir)
             document = BuildService.artifact(Path(f"{prefix}.{format}"), build_dir)
             if not document:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no document")

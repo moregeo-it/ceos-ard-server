@@ -36,7 +36,8 @@ class GitWorkspace(Base):
     upstream_owner = Column(String(100), nullable=False)
     upstream_repo = Column(String(100), nullable=False)
     upstream_branch = Column(String(255), nullable=False)
-    pfs = Column(JSON, nullable=True)
+    # What the "build" preview builds, e.g. PFS ids or a document; see WorkspaceType.selection
+    selection = Column(JSON, nullable=True)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
     fork_repo_owner = Column(String(50), nullable=False)
     fork_repo_name = Column(String(50), nullable=False)

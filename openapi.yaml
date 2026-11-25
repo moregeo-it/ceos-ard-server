@@ -68,22 +68,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /pfs:
+  /types/{typeId}/selection-options:
     get:
-      summary: List available PFS types
-      description: Retrieves all available PFS types for CEOS-ARD (as available on the main branch of the ceos-ard repository)
-      operationId: listPFSTypes
+      summary: List what new workspaces of a type can select
+      description: |
+        The options in the upstream repository, for workspace types whose `selection` is chosen on creation
+        (`on_create`), e.g. the PFS of CEOS-ARD. GitHub users only.
+      operationId: listTypeSelectionOptions
       tags:
-        - PFS
+        - Workspaces
+      parameters:
+        - name: typeId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: Available PFS types
+          description: The options
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pfsTypes'
+                $ref: '#/components/schemas/SelectionOptions'
+        '400':
+          description: Unknown type, or new workspaces of the type select nothing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not a GitHub user
           content:
             application/json:
               schema:
@@ -410,10 +430,11 @@ paths:
                 description:
                   type: string
                   description: Workspace description
-                pfs:
-                  $ref: '#/components/schemas/pfs'
-                  minItems: 1
-                  description: Required for workspace types with PFS, ignored for others
+                selection:
+                  $ref: '#/components/schemas/selection'
+                  description: |
+                    What the preview builds, required for workspace types that select on creation (`on_create`),
+                    refused for others. See `GET /types/{typeId}/selection-options`.
       responses:
         '201':
           description: Workspace created successfully
@@ -428,7 +449,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: Invalid request body, e.g. no PFS selected
+          description: Invalid request body, e.g. an empty `selection`
         '401':
           description: Unauthorized
           content:
@@ -475,10 +496,11 @@ paths:
     patch:
       summary: Update workspace
       description: |
-        Updates workspace information including title, description, PFS, and status.
+        Updates workspace information including title, description, selection, and status.
 
-        The PFS list doubles as the owner's preview selection: the editor saves it here whenever
-        the owner changes the preview, and viewers follow it. Realtime subscribers get a
+        The selection is what the owner's preview builds, e.g. PFS or a document, one of
+        `GET .../selection-options`: the editor saves it here whenever the owner changes the
+        preview, and viewers follow it. Realtime subscribers get a
         `workspace.updated` event naming the changed fields (`workspace.archived` on archiving).
 
         **Archiving behavior:**
@@ -509,9 +531,8 @@ paths:
                 description:
                   type: string
                   description: Workspace description
-                pfs:
-                  $ref: '#/components/schemas/pfs'
-                  minItems: 1
+                selection:
+                  $ref: '#/components/schemas/selection'
                 status:
                   type: string
                   enum:
@@ -536,7 +557,8 @@ paths:
 
             Possible errors:
             - Cannot reactivate workspace with merged or closed pull request
-            - At least one of title, description, pfs or status must be provided
+            - At least one of title, description, selection or status must be provided
+            - A selection the workspace type can't build, or that isn't one of the workspace's options
             - Invalid workspace status
           content:
             application/json:
@@ -549,7 +571,7 @@ paths:
                     detail: Cannot reactivate an archived workspace with a merged or closed pull request
         '422':
           description: |
-            Invalid request body, e.g. an empty `pfs`. Only `description` can be cleared with null;
+            Invalid request body, e.g. an empty `selection`. Only `description` can be cleared with null;
             omit the other fields to keep them.
         '404':
           description: Workspace not found
@@ -1400,7 +1422,7 @@ paths:
         `preview.generated` event.
 
         Owner only: a build writes into the workspace, and this build is what everyone else sees.
-        Other users fetch it with `GET .../previews/current`. Builds the workspace's saved PFS list.
+        Other users fetch it with `GET .../previews/current`. Builds the workspace's saved selection.
       operationId: generatePreview
       tags:
         - Previews
@@ -1416,7 +1438,7 @@ paths:
                 type: string
                 description: HTML content of the preview
         '400':
-          description: The workspace has no PFS selected
+          description: The workspace has nothing selected, or its type previews single files
           content:
             application/json:
               schema:
@@ -1463,11 +1485,11 @@ paths:
     get:
       summary: Get the current preview
       description: |
-        The owner's last generated preview for the workspace's PFS list, without building anything.
+        The owner's last generated preview for the workspace's selection, without building anything.
         For any user with access. Its source buttons read "Edit" for the owner of an active workspace
         and "View source" for everyone else. A button's `value` is the file path, optionally followed by
         `#` and a JSON pointer (RFC 6901) to the field of the file, e.g. `/pfs/SR/document.yaml#/background`.
-        Clients call it on `preview.generated` and when `workspace.updated` changes `pfs`.
+        Clients call it on `preview.generated` and when `workspace.updated` changes `selection`.
       operationId: getCurrentPreview
       tags:
         - Previews
@@ -1482,7 +1504,7 @@ paths:
                 type: string
                 description: HTML content of the preview
         '404':
-          description: Workspace not found, or the owner has not generated a preview for the workspace's PFS list yet
+          description: Workspace not found, or the owner has not generated a preview for the workspace's selection yet
           content:
             application/json:
               schema:
@@ -1644,14 +1666,14 @@ paths:
       summary: Download preview document
       description: |
         Builds and downloads the document for the current workspace state, for anyone with
-        access and any `pfs` selection. Each download builds on its own, so it doesn't wait for
+        access and any `selection`. Each download builds on its own, so it doesn't wait for
         or change the owner's preview.
       operationId: downloadPreviewDocument
       tags:
         - Previews
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/PfsType'
+        - $ref: '#/components/parameters/Selection'
         - $ref: '#/components/parameters/DocumentFormat'
         - $ref: '#/components/parameters/ClientId'
       responses:
@@ -1661,7 +1683,7 @@ paths:
             application/pdf: {}
             application/vnd.openxmlformats-officedocument.wordprocessingml.document: {}
         '400':
-          description: A format other than `pdf` or `docx`, or no or an invalid PFS
+          description: A format the workspace type doesn't offer (`downloads`), or no or an invalid selection
           content:
             application/json:
               schema:
@@ -1928,22 +1950,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /workspaces/{workspaceId}/pfs:
+  /workspaces/{workspaceId}/selection-options:
     get:
-      summary: List available PFS types
-      description: Retrieves all available PFS types for the workspace
-      operationId: listWorkspacePFSTypes
+      summary: List what the workspace can select
+      description: The options of the workspace's `selection` for the preview, e.g. its PFS or documents
+      operationId: listSelectionOptions
       tags:
-        - PFS
+        - Workspaces
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
       responses:
         '200':
-          description: Available PFS types
+          description: The options
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/pfsTypes'
+                $ref: '#/components/schemas/SelectionOptions'
+        '400':
+          description: Workspaces of this type select nothing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: Workspace not found
           content:
@@ -1957,6 +1985,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /workspaces/{workspaceId}/pfs:
     post:
       summary: Create new PFS
       description: >-
@@ -2838,17 +2867,15 @@ components:
       schema:
         type: string
 
-    PfsType:
-      name: pfs
+    Selection:
+      name: selection
       in: query
       required: true
       style: form
       explode: true
-      description: PFS of the document
+      description: What the document is built from, e.g. PFS ids
       schema:
-        type: array
-        items:
-          $ref: '#/components/schemas/pfsId'
+        $ref: '#/components/schemas/selection'
 
     DocumentFormat:
       name: format
@@ -3154,8 +3181,8 @@ components:
         - available
         - color
         - upstream
-        - pfs
         - preview
+        - downloads
         - expanded_folders
         - labels
         - editors
@@ -3197,17 +3224,41 @@ components:
             url:
               type: string
               format: uri
-        pfs:
-          type: boolean
-          description: Whether workspaces select PFS for the document preview
         preview:
           type: string
           enum:
-            - pfs
+            - build
             - file
           description: |-
-            - "pfs": the owner builds a document from the selected PFS (`POST .../previews`)
+            - "build": the owner builds a document from the workspace's `selection` (`POST .../previews`)
             - "file": everyone renders the open file (`GET .../render/{filePath}`)
+        selection:
+          type: object
+          description: What workspaces select for the "build" preview, see `GET .../selection-options`; absent if nothing
+          additionalProperties: false
+          required:
+            - label
+            - multiple
+            - on_create
+          properties:
+            label:
+              type: string
+              description: What is selected
+              example: PFS
+            multiple:
+              type: boolean
+              description: Whether several can be selected
+            on_create:
+              type: boolean
+              description: Whether new workspaces select it, from `GET /types/{typeId}/selection-options`
+        downloads:
+          type: array
+          description: The formats the built document can be downloaded in (`GET .../download`)
+          items:
+            type: string
+            enum:
+              - pdf
+              - docx
         expanded_folders:
           type: array
           description: Folders the file tree shows opened initially
@@ -3348,7 +3399,7 @@ components:
         - id
         - title
         - user_id
-        - pfs
+        - selection
         - description
         - fork_repo_owner
         - fork_repo_name
@@ -3396,9 +3447,9 @@ components:
         branch_name:
           type: string
           description: Name of the workspace branch in the fork
-        pfs:
+        selection:
           oneOf:
-            - $ref: '#/components/schemas/pfs'
+            - $ref: '#/components/schemas/selection'
             - type: "null"
         created_at:
           type: string
@@ -3529,8 +3580,8 @@ components:
         - `file.renamed`/`file.reverted`: `PATCH .../files/{filePath}` with `operation: rename`/`revert`.
         - `file.committed`: changes committed via `PUT .../diffs`.
         - `workspace.synced`: the owner synced the workspace with GitHub (`POST .../sync`, or the automatic sync on `PUT .../diffs`) and files changed on disk at arbitrary depth; reload the file tree and open files (see `status`).
-        - `workspace.updated`: title, description, PFS list or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
-        - `preview.generated`: the owner generated the preview via `POST .../previews` (see `pfs`); every other client fetches `GET .../previews/current`.
+        - `workspace.updated`: title, description, selection or status changed via `PATCH .../{workspaceId}` (see `fields`); refetch the workspace. Archiving sends `workspace.archived` instead.
+        - `preview.generated`: the owner generated the preview via `POST .../previews` (see `selection`); every other client fetches `GET .../previews/current`.
         - `preview.preparing`: a preview or download waits for the toolchain of the workspace's CLI version to be installed (see `toolchain`), up to a few minutes.
         - `collaborator.revoked`: access revoked via `DELETE .../collaborators/{collaboratorId}`; sent only to the target (see `target_user_id`) and closes their connection.
         - `collaborator.updated`: the owner changed the target's mode via `PATCH .../collaborators/{collaboratorId}`; sent only to the target, who refetches the workspace for its new `viewer_role`.
@@ -3881,10 +3932,10 @@ components:
 
     WorkspaceEventWorkspaceUpdated:
       description: |
-        Workspace metadata changed via `PATCH .../{workspaceId}`: the title, description, PFS list
+        Workspace metadata changed via `PATCH .../{workspaceId}`: the title, description, selection
         or status (a reactivation; archiving sends `workspace.archived`). Carries only the names of
         the changed fields, for the same reason as `workspace.archived`: clients refetch the
-        workspace. A changed PFS list is the owner's preview selection, which every viewer follows.
+        workspace. A changed selection is the owner's preview, which every viewer follows.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
@@ -3901,27 +3952,27 @@ components:
                 enum:
                   - title
                   - description
-                  - pfs
+                  - selection
                   - status
 
     WorkspaceEventPreviewGenerated:
       description: |
-        The owner generated the preview via `POST .../previews` for the PFS list in `pfs` (the
-        workspace's `pfs`). Only the owner builds; viewers, commenters and the owner's other tabs
+        The owner generated the preview via `POST .../previews` for `selection` (the workspace's
+        `selection`). Only the owner builds; viewers, commenters and the owner's other tabs
         fetch the result with `GET .../previews/current` instead of building themselves.
       allOf:
         - $ref: '#/components/schemas/WorkspaceEventBase'
         - type: object
           required:
-            - pfs
+            - selection
           properties:
             type:
               const: preview.generated
-            pfs:
+            selection:
               type: array
               items:
                 type: string
-              description: The PFS list the preview was generated for.
+              description: What the preview was generated for.
 
     WorkspaceEventPreviewPreparing:
       description: |
@@ -4089,34 +4140,36 @@ components:
             - deleted=Deleted
             - renamed=Renamed
 
-    pfs:
-      description: List of PFS types assigned to the workspace, used for preview generation.
+    selection:
+      description: What the preview builds, e.g. PFS ids or a document; checked by the workspace type.
       type: array
+      minItems: 1
+      maxItems: 50
       items:
-        $ref: '#/components/schemas/pfsId'
+        type: string
+        minLength: 1
+        maxLength: 500
       example:
         - NRB
         - POL
 
-    pfsTypes:
+    SelectionOptions:
       type: object
       required:
-        - pfs_types
+        - options
       properties:
-        pfs_types:
+        options:
           type: array
           items:
             type: object
             required:
               - id
+              - title
             properties:
               id:
-                $ref: '#/components/schemas/pfsId'
+                type: string
               title:
-                type:
-                  - string
-                  - "null"
-                description: Human-readable title, null if unknown
+                type: string
             example:
               id: NRB
               title: SAR Normalised Radar Backscatter

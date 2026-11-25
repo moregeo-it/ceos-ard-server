@@ -30,8 +30,8 @@ from app.utils.limits import FileTooLarge, check_read_size
 from app.utils.locks import fork_locks, run_exclusive, workspace_lock_file
 from app.utils.pfs_utils import PlainStringSafeLoader, build_default_pfs_document
 from app.utils.validation import validate_pathname
-from app.utils.yaml_cache import load_yaml_cached
-from app.workspace_types import Upstream, available_types, default_type, get_type
+from app.workspace_types import Upstream, WorkspaceType, available_types, default_type, get_type
+from app.workspace_types.base import SelectionError
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,15 @@ class WorkspaceService:
         workspace_type = get_type(workspace_data.type) if workspace_data.type else default_type()
         if workspace_type not in available_types():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} can't be created")
-        if workspace_type.pfs and not workspace_data.pfs:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one PFS is required")
+        selection = None
+        if workspace_type.selection and workspace_type.selection.on_create:
+            if not workspace_data.selection:
+                label = workspace_type.selection.label
+                detail = f"At least one {label} is required" if workspace_type.selection.multiple else f"A {label} is required"
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+            selection = self._check_selection(workspace_type, workspace_data.selection)
+        elif workspace_data.selection:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} select after creation")
         upstream = workspace_type.upstream
 
         # Bound before the try: the handler below inspects it, and if fork() raises it would
@@ -79,16 +86,15 @@ class WorkspaceService:
 
             # Create workspace record in database
             workspace_id = new_id()
-            pfs = workspace_data.pfs if workspace_type.pfs else None
             workspace = GitWorkspace(
                 id=workspace_id,
-                branch_name=make_branch_name(workspace_data.title, pfs, workspace_id),
+                branch_name=make_branch_name(workspace_data.title, selection, workspace_id),
                 user_id=user.id,
                 type=workspace_type.id,
                 upstream_owner=upstream.owner,
                 upstream_repo=upstream.repo,
                 upstream_branch=upstream.branch,
-                pfs=pfs,
+                selection=selection,
                 title=workspace_data.title,
                 description=workspace_data.description,
                 fork_repo_owner=fork_repo["owner"]["login"],
@@ -553,12 +559,13 @@ class WorkspaceService:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_reason)
 
             update_dict = update_data.model_dump(exclude_unset=True)
-            if "pfs" in update_dict and not workspace.workspace_type.pfs:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS")
+            if "selection" in update_dict:
+                options = await workspace.workspace_type.selection_options(workspace.abs_path)
+                update_dict["selection"] = self._check_selection(workspace.workspace_type, update_dict["selection"], options)
 
             if not update_dict:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of title, description, pfs or status must be provided"
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="At least one of title, description, selection or status must be provided"
                 )
 
             if "status" in update_dict and isinstance(update_dict["status"], str):
@@ -577,7 +584,7 @@ class WorkspaceService:
                     update_dict["archived_at"] = None
                     logger.info(f"Reactivating archived workspace {workspace_id}, clearing archival timestamp")
 
-            previous = {key: getattr(workspace, key) for key in ("title", "description", "pfs", "status")}
+            previous = {key: getattr(workspace, key) for key in ("title", "description", "selection", "status")}
             for key, value in update_dict.items():
                 if hasattr(workspace, key):
                     setattr(workspace, key, value)
@@ -643,55 +650,32 @@ class WorkspaceService:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         return self.git_service.get_commits(workspace.abs_path, upstream_branch=workspace.upstream_branch)
 
-    async def get_workspace_pfs_types(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
-        if not workspace_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace ID is required")
-
-        if not user_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID is required")
-
+    @staticmethod
+    def _check_selection(workspace_type: WorkspaceType, selection: list[str], options: list[dict[str, str]] | None = None) -> list[str]:
+        """The selection if the type can build it, from `options` if given; raises 400 otherwise."""
+        if not workspace_type.selection:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} select nothing")
+        label = workspace_type.selection.label
+        if not workspace_type.selection.multiple and len(selection) != 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Select one {label}")
+        if len(set(selection)) != len(selection):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"A {label} is selected more than once")
         try:
-            workspace = self.get_workspace_by_id(db, workspace_id, user_id)
-            if not workspace.workspace_type.pfs:
-                return []
+            workspace_type.output_name(selection)
+        except SelectionError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        if options is not None:
+            known = {option["id"] for option in options}
+            if unknown := [item for item in selection if item not in known]:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The workspace has no {label} {', '.join(unknown)}")
+        return list(selection)
 
-            pfs_path = workspace.abs_path / "pfs"
-
-            if not pfs_path.exists():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PFS directory not found in workspace")
-
-            pfs_types = []
-
-            for pfs_dir in pfs_path.iterdir():
-                if not pfs_dir.is_dir():
-                    continue
-
-                pfs_document_path = pfs_dir / "document.yaml"
-                if not pfs_document_path.exists():
-                    continue
-
-                try:
-                    # Cached (read-only use): parsed on the loop on every /pfs request
-                    document = load_yaml_cached(pfs_document_path, PlainStringSafeLoader)
-                    if not isinstance(document, dict):
-                        logger.error(f"Invalid PFS document format in {pfs_document_path}")
-                        continue
-                    pfs_types.append(
-                        {
-                            "id": pfs_dir.name,
-                            "title": document.get("title") or pfs_dir.name,
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Error reading PFS document {pfs_document_path}: {e}")
-                    continue
-
-            return pfs_types
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error getting PFS types for workspace {workspace_id}: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get PFS types: {str(e)}") from e
+    async def list_selection_options(self, db: Session, workspace_id: str, user_id: str) -> list[dict[str, str]]:
+        """What the workspace can select for its preview."""
+        workspace = self.get_workspace_by_id(db, workspace_id, user_id)
+        if not workspace.workspace_type.selection:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace.type} select nothing")
+        return await workspace.workspace_type.selection_options(workspace.abs_path)
 
     async def create_workspace_pfs(self, db: Session, workspace_id: str, user: User, request_data: CreatePFSRequest):
         if not workspace_id:
@@ -700,7 +684,7 @@ class WorkspaceService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PFS ID and title are required")
 
         workspace = self.get_workspace_by_id(db, workspace_id, user.id, min_role="owner")
-        if not workspace.workspace_type.pfs:
+        if workspace.workspace_type.selection is None or workspace.workspace_type.selection.label != "PFS":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace type has no PFS")
         pfs_container = workspace.abs_path / "pfs"
         pfs_id = validate_pathname(request_data.id)

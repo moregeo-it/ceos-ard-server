@@ -81,7 +81,7 @@ workspace_locks = KeyedLocks()
 # all of a user's workspaces share it and recreating it is a per-user operation.
 fork_locks = KeyedLocks()
 
-# One lock per build output prefix (workspace id + pfs selection): serializes preview builds
+# One lock per build output prefix (workspace id + selection): serializes preview builds
 # that would clobber each other's output, without blocking file edits behind a 60s build.
 build_locks = KeyedLocks()
 

@@ -13,7 +13,7 @@ from starlette.background import BackgroundTask
 
 from app.db.database import get_db
 from app.dependencies import get_preview_service
-from app.schemas.workspace import PfsId
+from app.schemas.workspace import SelectionItem
 from app.services.auth_service import require_github_user
 from app.services.preview_service import PreviewService
 from app.utils.http_utils import USER_CONTENT_HEADERS, compute_file_etag, if_none_match_matches, internal_errors
@@ -59,7 +59,7 @@ async def generate_preview(
 @router.get(
     "/{workspace_id}/previews/current",
     summary="Get the current preview",
-    description="The owner's last generated preview for the workspace's PFS list, without building",
+    description="The owner's last generated preview for the workspace's selection, without building",
     status_code=status.HTTP_200_OK,
 )
 async def get_current_preview(
@@ -150,7 +150,7 @@ async def download_preview_document(
     current_user: dict[str, Any] = Depends(require_github_user),
     preview_service: PreviewService = Depends(get_preview_service),
     format: str = Query(..., enum=["pdf", "docx"]),
-    pfs: list[PfsId] = Query(min_length=1),
+    selection: list[SelectionItem] = Query(min_length=1, max_length=50),
 ):
     media_types = {
         "pdf": "application/pdf",
@@ -159,7 +159,7 @@ async def download_preview_document(
     media_type = media_types.get(format, "application/octet-stream")
     with internal_errors("download preview document", logger):
         document = await preview_service.download_preview_document(
-            db=db, pfs=pfs, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
+            db=db, selection=selection, format=format, workspace_id=workspace_id, user_id=current_user["user"].id
         )
         # Streamed from disk; the folder goes once sent, also when the client left early.
         return FileResponse(

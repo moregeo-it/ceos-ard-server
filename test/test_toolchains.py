@@ -210,7 +210,7 @@ def test_a_build_reports_problems_with_the_cli_version(client, workspace, fake_t
     assert "may only contain one line" in response.json()["detail"]
 
     save_requirements(client, workspace, "ceos-ard-cli~=0.5.8\n")
-    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "pfs": ["NRB"]})
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "selection": ["NRB"]})
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The toolchain ceos-ard-cli-0.5.8 isn't installed"
 
@@ -222,7 +222,7 @@ def test_documents_left_as_symlinks_are_not_read(client, workspace, fake_toolcha
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "The build produced no preview"
 
-    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "pfs": ["NRB"]})
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "selection": ["NRB"]})
     assert response.status_code == 500, response.text
     assert "must-not-leak" not in response.text
     assert response.json()["detail"] == "The build produced no document"

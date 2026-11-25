@@ -171,8 +171,8 @@ class FakeGitHub:
         self.calls.append(("fork", upstream_owner, upstream_repo))
         return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(FORK)}
 
-    async def get_pfs_types(self, owner, repo, token, branch):
-        self.calls.append(("get_pfs_types", owner, repo, branch))
+    async def get_folder_names(self, owner, repo, token, path, branch):
+        self.calls.append(("get_folder_names", owner, repo, path, branch))
         return ["NRB", "SR"]
 
     async def get_github_user(self, username, access_token):
@@ -221,6 +221,6 @@ def client(user, github):
 
 @pytest.fixture
 def workspace(client):
-    response = client.post("/workspaces", json={"title": "NRB review", "pfs": ["NRB"]})
+    response = client.post("/workspaces", json={"title": "NRB review", "selection": ["NRB"]})
     assert response.status_code == 201, response.text
     return response.json()

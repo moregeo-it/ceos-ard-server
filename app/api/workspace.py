@@ -11,9 +11,9 @@ from app.schemas.workspace import (
     Commit,
     CreatePFSRequest,
     FileResponse,
-    PFSTypesResponse,
     Proposal,
     ProposalRequest,
+    SelectionOptionsResponse,
     SyncResult,
     WorkspaceCreate,
     WorkspaceResponse,
@@ -205,17 +205,20 @@ async def sync_workspace_repository(
 
 
 @router.get(
-    "/{workspace_id}/pfs", response_model=PFSTypesResponse, summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"]
+    "/{workspace_id}/selection-options",
+    response_model=SelectionOptionsResponse,
+    summary="List what the workspace can select",
+    description="The options of the workspace's selection for the preview, e.g. its PFS or documents",
 )
-async def list_workspace_pfs_types(
+async def list_selection_options(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
-) -> PFSTypesResponse:
-    with internal_errors("list PFS types", logger):
-        pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return {"pfs_types": pfs_types}
+) -> dict:
+    with internal_errors("list selection options", logger):
+        options = await workspace_service.list_selection_options(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return {"options": options}
 
 
 @router.post(

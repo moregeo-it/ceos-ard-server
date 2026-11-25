@@ -31,7 +31,9 @@ def test_list_types(client):
     ceos_ard = types[0]
     assert ceos_ard["title"] == "CEOS-ARD"
     assert ceos_ard["available"] is True
-    assert ceos_ard["pfs"] is True
+    assert ceos_ard["preview"] == "build"
+    assert ceos_ard["selection"] == {"label": "PFS", "multiple": True, "on_create": True}
+    assert ceos_ard["downloads"] == ["pdf", "docx"]
     assert ceos_ard["upstream"] == {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main", "url": "https://github.com/ceos-org/ceos-ard"}
     assert [action["id"] for action in ceos_ard["actions"]] == ["create-pfs"]
     assert [editor["match"] for editor in ceos_ard["editors"]] == ["glossary/*.yaml"]
@@ -68,5 +70,5 @@ def test_workspaces_store_their_type_and_upstream(workspace):
 
 
 def test_unknown_types_are_refused(client):
-    response = client.post("/workspaces", json={"title": "Unknown", "type": "unknown", "pfs": ["NRB"]})
+    response = client.post("/workspaces", json={"title": "Unknown", "type": "unknown", "selection": ["NRB"]})
     assert response.status_code == 400, response.text

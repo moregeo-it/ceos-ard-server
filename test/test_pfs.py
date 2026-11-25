@@ -3,9 +3,9 @@ from conftest import file_url
 
 
 def test_list_pfs_of_the_workspace(client, workspace):
-    response = client.get(f"/workspaces/{workspace['id']}/pfs")
+    response = client.get(f"/workspaces/{workspace['id']}/selection-options")
     assert response.status_code == 200, response.text
-    pfs = sorted(response.json()["pfs_types"], key=lambda item: item["id"])
+    pfs = response.json()["options"]
     assert pfs == [{"id": "NRB", "title": "Normalised Radar Backscatter"}, {"id": "SR", "title": "Surface Reflectance"}]
 
 
@@ -22,7 +22,7 @@ def test_create_pfs(client, workspace):
     assert document["version"] == "1.0.0"
     assert document["authors"] == ["Jane Doe"]
 
-    ids = [item["id"] for item in client.get(f"/workspaces/{workspace['id']}/pfs").json()["pfs_types"]]
+    ids = [item["id"] for item in client.get(f"/workspaces/{workspace['id']}/selection-options").json()["options"]]
     assert "ST" in ids
 
 
