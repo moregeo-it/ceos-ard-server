@@ -105,17 +105,22 @@ def commit_upstream(files: dict[str, str], message: str):
     git("push", "-q", "origin", "main", cwd=clone)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def repositories():
-    source = DATA / "source"
-    for path, content in REPOSITORY.items():
+def create_repository(files: dict[str, str], upstream: Path, fork: Path):
+    """A bare upstream repository with `files`, and a bare clone of it as the user's fork."""
+    source = Path(tempfile.mkdtemp(dir=DATA))
+    for path, content in files.items():
         (source / path).parent.mkdir(parents=True, exist_ok=True)
         (source / path).write_text(content, encoding="utf-8", newline="\n")
     git("init", "-q", "-b", "main", cwd=source)
     git("add", "-A", cwd=source)
     git("-c", "user.name=Upstream", "-c", "user.email=upstream@example.org", "commit", "-q", "-m", "Initial", cwd=source)
-    git("clone", "-q", "--bare", str(source), str(UPSTREAM))
-    git("clone", "-q", "--bare", str(UPSTREAM), str(FORK))
+    git("clone", "-q", "--bare", str(source), str(upstream))
+    git("clone", "-q", "--bare", str(upstream), str(fork))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def repositories():
+    create_repository(REPOSITORY, UPSTREAM, FORK)
 
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
@@ -167,9 +172,12 @@ class FakeGitHub:
         # GitHub accounts by login, for invitations
         self.users = {}
 
+    # The local bare repository that stands in for the user's fork of an upstream repository
+    forks = {"ceos-ard": FORK}
+
     async def fork(self, user, upstream_owner, upstream_repo):
         self.calls.append(("fork", upstream_owner, upstream_repo))
-        return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(FORK)}
+        return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(self.forks[upstream_repo])}
 
     async def get_folder_names(self, owner, repo, token, path, branch):
         self.calls.append(("get_folder_names", owner, repo, path, branch))
