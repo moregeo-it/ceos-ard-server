@@ -253,6 +253,12 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
 
+    @staticmethod
+    def _check_pfs_folder(workspace_path: Path, folder: Path) -> None:
+        # A PFS folder name is its id, which the preview and the CLI only accept in this form
+        if folder.parent == workspace_path / "pfs" and not re.fullmatch(PFS_ID_PATTERN, folder.name):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB")
+
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, read_content: Callable[[], Awaitable[bytes]], user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
 
@@ -277,6 +283,7 @@ class FileService:
                 folder = target_path.parent
                 while not folder.exists():
                     validate_new_name(folder.name)
+                    self._check_pfs_folder(workspace.abs_path, folder)
                     folder = folder.parent
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
@@ -451,9 +458,8 @@ class FileService:
         new_name = validate_new_file_name(new_name) if source_path.is_file() else validate_pathname(new_name)
         repo = get_repo(workspace_path)
 
-        # A PFS folder name is its id, which the preview and the CLI only accept in this form
-        if source_path.is_dir() and source_path.parent == workspace_path / "pfs" and not re.fullmatch(PFS_ID_PATTERN, new_name):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB")
+        if source_path.is_dir():
+            self._check_pfs_folder(workspace_path, source_path.parent / new_name)
 
         target_path = source_path.parent / new_name
         if target_path.exists():

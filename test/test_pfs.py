@@ -49,3 +49,11 @@ def test_new_pfs_can_be_renamed_and_deleted(client, workspace):
     assert response.status_code == 200, response.text
     response = client.delete(file_url(workspace, "files", "/pfs/LST"))
     assert response.status_code in (200, 204), response.text
+
+
+def test_uploads_cant_create_invalid_pfs_folders(client, workspace):
+    response = client.put(file_url(workspace, "files", "/pfs/bad-id/nested/file.yaml"), content="a: 1\n")
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB"
+    folders = [item["name"] for item in client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/pfs"}).json()]
+    assert "bad-id" not in folders
