@@ -232,6 +232,11 @@ class WorkspaceType:
     def finish_build(self, sources: Path, output_prefix: str) -> None:
         """For types with `writable_sources`: complete the outputs of a successful build, before `sources` is removed."""
 
+    def build_caches(self, selection: list[str]) -> list[str]:
+        """For types with `writable_sources`: folders of the workspace that previews keep for the next build of the workspace,
+        e.g. caches of downloads, relative to the workspace."""
+        return []
+
     async def refresh_toolchain(self) -> None:
         """Find out what `toolchain()` needs to know but can't find out without waiting, e.g. the latest version."""
 

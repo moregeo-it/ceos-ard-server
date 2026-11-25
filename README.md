@@ -265,7 +265,10 @@ Metanorma needs more than the CEOS-ARD CLI, 180 s and 1536M by default (OGC API 
 1.1 GB), and fetches bibliographic references, so its builds have network access, see
 [Builds with network](#builds-with-network). The preview has Edit buttons where the content of each included file
 starts: `app/workspace_types/ogc_source_map.rb`, loaded into Metanorma with `RUBYOPT`, gives the first block of each
-included file an id in memory, without changing the files.
+included file an id in memory, without changing the files. `app/workspace_types/ogc_preview.rb` skips Metanorma's
+schema validation, as if documents set `:novalid:`, and caches the fetched references next to the document, as if they
+set `:local-cache:`. Previews keep that cache for the next build of the workspace, in `.git/ceos-ard-build-caches/`,
+so references are only fetched again for new documents and references.
 
 Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a function
 `create(type_id, settings)` that returns the type with its defaults, and optionally a Pydantic model `Settings`. The

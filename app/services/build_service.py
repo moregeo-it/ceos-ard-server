@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -19,12 +20,58 @@ from app.workspace_types.base import SelectionError
 
 logger = logging.getLogger(__name__)
 
+MAX_CACHE_SIZE = 16 * limits.MB
+MAX_CACHE_FILES = 5000
+
 
 def _copy_sources(workspace_path: Path, target: Path) -> None:
     # Without what builds never read; clones have no symlinks, and any left are copied as links
     shutil.copytree(
         workspace_path, target, symlinks=True, ignore=lambda folder, names: {".git", "build"} if Path(folder) == workspace_path else set()
     )
+
+
+def _caches_folder(workspace_path: Path) -> Path:
+    # Never in a build's copy of the workspace or in a commit, and removed with the workspace
+    return workspace_path / ".git" / "ceos-ard-build-caches"
+
+
+def _real_folder(path: Path, root: Path) -> bool:
+    """Whether `path` is a folder in `root` that no symlink leads to: the build may have replaced any of them."""
+    try:
+        return path.is_dir() and path.resolve() == root.resolve() / path.relative_to(root)
+    except (OSError, ValueError):
+        return False
+
+
+def _restore_caches(workspace_path: Path, source_path: Path, caches: list[str]) -> None:
+    for cache in caches:
+        saved, target = _caches_folder(workspace_path) / cache, source_path / cache
+        if _real_folder(saved, workspace_path) and not target.is_symlink() and _real_folder(target.parent, source_path):
+            shutil.copytree(saved, target, dirs_exist_ok=True)
+
+
+def _save_caches(workspace_path: Path, source_path: Path, caches: list[str]) -> None:
+    """Keep the caches the build left for the next build: only their regular files, and only if they are small."""
+    if not _real_folder(workspace_path / ".git", workspace_path):
+        return
+    for cache in caches:
+        saved, folder = _caches_folder(workspace_path) / cache, source_path / cache
+        if _real_folder(saved, workspace_path):
+            shutil.rmtree(saved)
+        if not _real_folder(folder, source_path):
+            continue
+        files = []
+        for root, folders, names in os.walk(folder):
+            folders[:] = [name for name in folders if not (Path(root) / name).is_symlink()]
+            files += [path for path in (Path(root) / name for name in names) if not path.is_symlink() and path.is_file()]
+        if len(files) > MAX_CACHE_FILES or sum(path.stat().st_size for path in files) > MAX_CACHE_SIZE:
+            logger.warning(f"Not keeping the build cache {cache} of {workspace_path}: it's too large")
+            continue
+        for path in files:
+            target = saved / path.relative_to(folder)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
 
 
 class BuildService:
@@ -128,6 +175,7 @@ class BuildService:
         output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Building workspace {workspace_id} with {' '.join(selection)} and the toolchain {toolchain.name}")
         sources = None
+        caches = []
         env = {**toolchains.env_vars(toolchain.name), **workspace_type.build_env}
         try:
             if workspace_type.writable_sources:
@@ -135,6 +183,8 @@ class BuildService:
                 source_path = sources / "workspace"
                 await asyncio.to_thread(_copy_sources, workspace_path, source_path)
                 env.update(await asyncio.to_thread(workspace_type.prepare_sources, sources))
+                caches = workspace_type.build_caches(selection)
+                await asyncio.to_thread(_restore_caches, workspace_path, source_path, caches)
                 read_only, writable, hidden = [toolchains.path(toolchain.name)], [output_dir, sources], []
             else:
                 source_path = workspace_path
@@ -152,6 +202,12 @@ class BuildService:
                 network=workspace_type.build_network,
                 memory_max=workspace_type.build_memory_max,
             )
+            # Previews only: they run one at a time per workspace, unlike downloads into their own `build_dir`
+            if caches and build_dir is None:
+                try:
+                    await asyncio.to_thread(_save_caches, workspace_path, source_path, caches)
+                except OSError as e:
+                    logger.warning(f"Can't keep the build caches of workspace {workspace_id}: {e}")
             if sources and process.returncode == 0:
                 try:
                     await asyncio.to_thread(workspace_type.finish_build, sources, output_file)

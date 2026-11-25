@@ -232,9 +232,10 @@ def test_build_adds_edit_buttons(tmp_path, monkeypatch):
     builds = []
 
     async def run_build(command, *, env, cwd, writable, **kwargs):
-        # Metanorma with the source map loaded, see ogc_source_map.rb
+        # Metanorma with the preview settings and the source map loaded, see ogc_preview.rb and ogc_source_map.rb
         sources = Path(env["SOURCE_MAP"]).parent
-        assert env["RUBYOPT"] == f"-r{sources / 'ogc_source_map.rb'}"
+        assert env["RUBYOPT"] == f"-r{sources / 'ogc_preview.rb'} -r{sources / 'ogc_source_map.rb'}"
+        assert (sources / "ogc_preview.rb").is_file()
         assert (sources / "ogc_source_map.rb").is_file()
         assert sources in writable
         builds.append(sources)
@@ -258,6 +259,40 @@ def test_build_adds_edit_buttons(tmp_path, monkeypatch):
     assert "<!-- edit: core/standard/requirements/REQ_a.adoc --><table" in html
     # The copy of the workspace is gone
     assert not builds[0].exists()
+
+
+def test_previews_keep_the_reference_cache(tmp_path, monkeypatch):
+    workspace = _sources(tmp_path)
+    (workspace / ".git").mkdir()
+    found = []
+
+    async def run_build(command, *, cwd, **kwargs):
+        cache = cwd / "relaton" / "cache"
+        found.append(sorted(path.name for path in cache.iterdir()) if cache.is_dir() else [])
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / f"ref{len(found)}.json").write_text("{}", encoding="utf-8")
+        try:
+            (cache / "link.json").symlink_to(workspace / CORE)
+        except OSError:
+            pass  # Symlinks need privileges on Windows
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    async def ensure(toolchain):
+        pass
+
+    monkeypatch.setattr(build_service, "run_build", run_build)
+    monkeypatch.setattr(build_service.toolchains, "ensure", ensure)
+    monkeypatch.setattr(build_service.toolchains, "bin_path", lambda name: [])
+    service, ogc_type = build_service.BuildService(), get_type("ogc")
+    for _ in range(2):
+        asyncio.run(service.build(workspace, "ws", ogc_type, [CORE]))
+    # Not kept from a build into its own folder, which may run at the same time as a preview
+    asyncio.run(service.build(workspace, "ws", ogc_type, [CORE], build_dir=tmp_path / "download"))
+    asyncio.run(service.build(workspace, "ws", ogc_type, [CORE]))
+
+    # Only regular files, outside of what the workspace shows and commits
+    assert found == [[], ["ref1.json"], ["ref1.json", "ref2.json"], ["ref1.json", "ref2.json"]]
+    assert not (workspace / "core" / "standard" / "relaton").exists()
 
 
 def test_finish_ignores_links(tmp_path):

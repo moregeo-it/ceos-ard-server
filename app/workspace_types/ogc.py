@@ -279,6 +279,10 @@ class OgcType(WorkspaceType):
     def finish_build(self, sources: Path, output_prefix: str) -> None:
         ogc_sources.finish(sources, output_prefix)
 
+    def build_caches(self, selection: list[str]) -> list[str]:
+        # The bibliographic references Metanorma fetched, see :local-cache: in ogc_preview.rb
+        return [(PurePosixPath(self.build_folder(selection)) / "relaton").as_posix()]
+
     def build_error(self, output: str) -> str | None:
         failed = FAILED.search(output)
         if failed:

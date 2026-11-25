@@ -8,6 +8,7 @@ from pathlib import Path
 from app.utils import limits
 
 SCRIPT = Path(__file__).with_name("ogc_source_map.rb")
+PREVIEW_SCRIPT = Path(__file__).with_name("ogc_preview.rb")
 MAP_NAME = "source-map.json"
 MAX_MAP_SIZE = 4 * limits.MB
 ELEMENT_ID = re.compile(r"<([a-zA-Z][\w-]*)\b[^>]*?\sid=\"([^\"]+)\"[^>]*>")
@@ -20,10 +21,11 @@ EDIT_PATH = re.compile(r"[\w\-.~/]+")
 
 
 def prepare(sources: Path) -> dict[str, str]:
-    """Load the source map into Metanorma, see ogc_source_map.rb."""
-    script = sources / SCRIPT.name
-    shutil.copyfile(SCRIPT, script)
-    return {"RUBYOPT": f"-r{script}", "SOURCE_MAP": str(sources / MAP_NAME)}
+    """Load the source map and the preview settings into Metanorma, see ogc_source_map.rb and ogc_preview.rb."""
+    scripts = [sources / script.name for script in (PREVIEW_SCRIPT, SCRIPT)]
+    for script in scripts:
+        shutil.copyfile(SCRIPT.with_name(script.name), script)
+    return {"RUBYOPT": " ".join(f"-r{script}" for script in scripts), "SOURCE_MAP": str(sources / MAP_NAME)}
 
 
 def _references(path: Path) -> list[str]:
