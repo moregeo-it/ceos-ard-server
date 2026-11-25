@@ -1,5 +1,6 @@
 """API tests against local git repositories: bare repositories stand in for ceos-org/ceos-ard and the user's fork on GitHub."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -13,16 +14,12 @@ import pytest
 DATA = Path(tempfile.mkdtemp(prefix="ceos-ard-server-test-"))
 UPSTREAM = DATA / "upstream.git"
 FORK = DATA / "fork.git"
+TYPES = [
+    {"id": "ceos-ard", "module": "ceos_ard", "upstream": {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main"}},
+]
 TYPES_CONFIG = DATA / "workspace-types.yaml"
-TYPES_CONFIG.write_text(
-    """
-types:
-  - id: ceos-ard
-    module: ceos_ard
-    upstream: {owner: ceos-org, repo: ceos-ard, branch: main}
-""",
-    encoding="utf-8",
-)
+# JSON is YAML too
+TYPES_CONFIG.write_text(json.dumps({"types": TYPES}), encoding="utf-8")
 
 os.environ.update(
     {
