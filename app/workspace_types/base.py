@@ -136,12 +136,13 @@ class PathRules:
 @dataclass(frozen=True)
 class Upstream:
     owner: str
-    repo: str
-    branch: str
+    # None for types whose workspaces choose a repository of the owner, see `WorkspaceType.choose_repository`
+    repo: str | None
+    branch: str | None
 
     @property
     def url(self) -> str:
-        return f"https://github.com/{self.owner}/{self.repo}"
+        return f"https://github.com/{self.owner}/{self.repo}" if self.repo else f"https://github.com/{self.owner}"
 
 
 @dataclass
@@ -159,6 +160,11 @@ class WorkspaceType:
     selection: Selection | None = None
     # The formats the built document can be downloaded in, see build_command()
     downloads: list[Literal["pdf", "docx"]] = field(default_factory=list)
+    # Whether new workspaces choose one of the repositories of the upstream owner, and optionally a branch
+    choose_repository: bool = False
+    # Limits of each build instead of BUILD_TIMEOUT and BUILD_MEMORY_MAX_PER_BUILD
+    build_timeout: int | None = None
+    build_memory_max: str | None = None
     # Folders the file tree shows opened, e.g. when all content is in one folder
     expanded_folders: list[str] = field(default_factory=list)
     searchable_extensions: frozenset[str] = frozenset({".txt", ".md", ".json", ".yaml", ".yml", ".xml"})
@@ -209,6 +215,29 @@ class WorkspaceType:
 
     # Environment variables for the build command
     build_env: ClassVar[dict[str, str]] = {}
+    # Whether builds can reach the internet, e.g. to fetch bibliographic references
+    build_network: ClassVar[bool] = False
+    # Whether builds get a copy of the workspace they can write to, e.g. for caches next to the document
+    writable_sources: ClassVar[bool] = False
+
+    def build_folder(self, selection: list[str]) -> str:
+        """The folder of the workspace the build runs in."""
+        return ""
+
+    def prepare_sources(self, sources: Path) -> dict[str, str]:
+        """For types with `writable_sources`: prepare the build folder `sources`, which holds the copy of the workspace in
+        `workspace/` and is mounted at the same path. Returns more environment variables for the build."""
+        return {}
+
+    def finish_build(self, sources: Path, output_prefix: str) -> None:
+        """For types with `writable_sources`: complete the outputs of a successful build, before `sources` is removed."""
+
+    async def refresh_toolchain(self) -> None:
+        """Find out what `toolchain()` needs to know but can't find out without waiting, e.g. the latest version."""
+
+    def build_error(self, output: str) -> str | None:
+        """What to tell about a failed build, from what it printed; None for a general message."""
+        return None
 
     def output_name(self, selection: list[str]) -> str:
         """The outputs of a selection relative to the build folder, without extension; raises SelectionError for invalid selections.
@@ -251,6 +280,7 @@ class WorkspaceType:
             "preview": self.preview,
             "selection": self.selection,
             "downloads": self.downloads,
+            "choose_repository": self.choose_repository,
             "expanded_folders": self.expanded_folders,
             "labels": self.labels,
             "editors": self.editors,

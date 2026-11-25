@@ -24,3 +24,12 @@ types:
       pfs_types: [SAR, Optical]
       # The version of new PFS
       default_version: 1.0.0
+
+  # OGC standards written with Metanorma; needs a firewall, see "Builds with network" in the README
+  # - id: ogc
+  #   module: ogc
+  #   # Workspaces choose one of the owner's repositories
+  #   upstream:
+  #     owner: opengeospatial
+  #   build_timeout: 180
+  #   build_memory_max: 1536M

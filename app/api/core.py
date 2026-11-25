@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 
 from app.config import settings
-from app.dependencies import get_github_service
-from app.schemas.workspace import SelectionOptionsResponse
+from app.dependencies import get_github_service, get_workspace_service
+from app.schemas.workspace import Repository, SelectionOptionsResponse
 from app.schemas.workspace_type import WorkspaceTypeResponse
 from app.services.auth_service import get_current_user, require_github_user
 from app.services.github_service import GitHubService
+from app.services.workspace_service import WorkspaceService
 from app.utils.http_utils import internal_errors
 from app.workspace_types import all_types, available_types, get_type
 
@@ -81,3 +82,19 @@ async def list_type_selection_options(
     with internal_errors("list selection options", logger):
         options = await workspace_type.upstream_selection_options(github_service, current_user["user"].access_token)
         return {"options": options}
+
+
+@router.get(
+    "/types/{type_id}/repositories",
+    summary="List the repositories of a workspace type",
+    description="The repositories new workspaces of a type can choose from, for types that choose one",
+    status_code=status.HTTP_200_OK,
+    response_model=list[Repository],
+)
+async def list_type_repositories(
+    type_id: str,
+    current_user=Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> list[dict]:
+    with internal_errors("list repositories", logger):
+        return await workspace_service.list_repositories(get_type(type_id), current_user["user"])

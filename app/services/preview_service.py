@@ -51,6 +51,7 @@ class PreviewService:
 
     async def _prepare(self, workspace: GitWorkspace) -> None:
         """Install the workspace's toolchain before a build takes any lock, so a long install doesn't block e.g. GET .../previews/current."""
+        await workspace.workspace_type.refresh_toolchain()
         toolchain = BuildService.missing_toolchain(workspace.workspace_type, workspace.abs_path)
         if toolchain is None:
             return
@@ -94,18 +95,23 @@ class PreviewService:
         prefix = self.build_service.output_prefix(workspace.workspace_type, workspace.abs_path, workspace.selection)
 
         async with build_locks(workspace_id):
-            if not BuildService.artifact(Path(prefix + ".html"), workspace.abs_path / "build"):
+            if not self._preview_file(workspace, prefix):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview has been generated yet")
             return await self._get_preview_files(workspace, file_prefix=prefix)
 
+    @staticmethod
+    def _preview_file(workspace: GitWorkspace, prefix: str) -> Path | None:
+        build_dir = workspace.abs_path / "build"
+        path = Path(prefix + ".html")
+        # Directly in build/, or in a folder of it for types with a folder per document
+        if path.parent != build_dir and (path.parent.parent != build_dir or build_dir.is_symlink()):
+            return None
+        return BuildService.artifact(path, path.parent)
+
     async def _get_preview_files(self, workspace: GitWorkspace, file_prefix: str):
         workspace_path = workspace.abs_path
-        build_dir = workspace_path / "build"
 
-        if not build_dir.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build directory not found")
-
-        filepath = BuildService.artifact(Path(file_prefix + ".html"), build_dir)
+        filepath = self._preview_file(workspace, file_prefix)
         if not filepath:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The build produced no preview")
         try:

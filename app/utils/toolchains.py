@@ -44,6 +44,8 @@ class ToolchainSpec:
     pypi: dict[str, str] = field(default_factory=dict)
     # Installs Playwright's Chromium into PLAYWRIGHT_BROWSERS_PATH, e.g. for PDFs
     chromium: bool = False
+    # Ruby gems and their versions, installed into the toolchain's Ruby, which a conda package has to provide
+    gems: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -92,8 +94,25 @@ class Toolchains:
         env = self.env(name)
         if sys.platform == "win32":
             library = env / "Library"
-            return [env, library / "mingw-w64" / "bin", library / "usr" / "bin", library / "bin", env / "Scripts", env / "bin"]
-        return [env / "bin"]
+            return [
+                env,
+                library / "mingw-w64" / "bin",
+                library / "usr" / "bin",
+                library / "bin",
+                env / "Scripts",
+                env / "bin",
+                self._gems(name) / "bin",
+            ]
+        return [env / "bin", self._gems(name) / "bin"]
+
+    def _gems(self, name: str) -> Path:
+        # Where conda-forge's Ruby installs gems, see its activation script
+        return self.env(name) / "share" / "rubygems"
+
+    def env_vars(self, name: str) -> dict[str, str]:
+        """What activating the toolchain's environment would set, for the programs that need it."""
+        gems = self._gems(name)
+        return {"GEM_HOME": str(gems)} if gems.is_dir() else {}
 
     def is_installed(self, name: str) -> bool:
         return (self.path(name) / _READY).exists()
@@ -203,6 +222,13 @@ class Toolchains:
             if playwright is None:
                 raise ToolchainError(f"The toolchain {toolchain.name} has no Playwright for PDFs")
             await self._run(toolchain.name, env, playwright, "install", "--only-shell", "chromium")
+        if spec.gems:
+            gem = shutil.which("gem", path=bin_path)
+            if gem is None:
+                raise ToolchainError(f"The toolchain {toolchain.name} has no Ruby for its gems")
+            gems = [f"{name}:{version}" for name, version in spec.gems.items()]
+            gem_env = {**env, "PATH": os.pathsep.join([bin_path, env.get("PATH", "")])}
+            await self._run(toolchain.name, gem_env, gem, "install", "--no-document", *gems)
         (path / _READY).touch()
         logger.info(f"Installed the toolchain {toolchain.name} in {time.monotonic() - start:.1f} s")
 

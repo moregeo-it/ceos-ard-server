@@ -83,3 +83,11 @@ def test_example_configuration():
     types, offered = load_types(example)
     assert offered == ["ceos-ard"]
     assert types["ceos-ard"].pfs_settings.pfs_types == ["SAR", "Optical"]
+
+
+def test_build_limits():
+    workspace_type = create_type(config.TypeConfig(id="ogc", module="ogc", build_timeout=60, build_memory_max="2G"))
+    assert (workspace_type.build_timeout, workspace_type.build_memory_max) == (60, "2G")
+    assert (create_type(config.TypeConfig(id="ogc", module="ogc")).build_timeout) == 180
+    with pytest.raises(ValueError, match="should match pattern"):
+        config.TypeConfig(id="ogc", module="ogc", build_memory_max="lots")

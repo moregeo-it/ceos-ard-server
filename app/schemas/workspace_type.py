@@ -7,8 +7,8 @@ from app.workspace_types.base import Action, EditorRule, FileMenuRule, Labels, S
 
 class UpstreamResponse(BaseModel):
     owner: str
-    repo: str
-    branch: str
+    repo: str | None = Field(description="None for types whose workspaces choose a repository of the owner")
+    branch: str | None
     url: str
 
 
@@ -22,6 +22,7 @@ class WorkspaceTypeResponse(BaseModel):
     preview: Literal["build", "file"]
     selection: Selection | None
     downloads: list[Literal["pdf", "docx"]]
+    choose_repository: bool = Field(description="Whether new workspaces choose one of the repositories of the upstream owner")
     expanded_folders: list[str]
     labels: Labels
     editors: list[EditorRule]

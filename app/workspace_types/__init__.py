@@ -34,7 +34,11 @@ def create_type(type_config: config.TypeConfig) -> WorkspaceType:
             raise ValueError(f"Workspace type {type_config.id}: invalid settings: {e}") from e
 
     workspace_type = module.create(type_config.id, type_settings)
-    changes = {key: getattr(type_config, key) for key in ("title", "description", "color") if getattr(type_config, key) is not None}
+    changes = {
+        key: getattr(type_config, key)
+        for key in ("title", "description", "color", "build_timeout", "build_memory_max")
+        if getattr(type_config, key) is not None
+    }
     if type_config.upstream:
         default = workspace_type.upstream
         changes["upstream"] = Upstream(

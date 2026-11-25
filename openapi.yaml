@@ -66,6 +66,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /types/{typeId}/repositories:
+    get:
+      summary: List the repositories of a workspace type
+      description: |-
+        The public repositories that aren't archived, of the upstream owner of a type whose workspaces
+        choose a repository (`choose_repository`), most recently pushed first.
+      operationId: listTypeRepositories
+      tags:
+        - Workspaces
+      parameters:
+        - name: typeId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: ogc
+      responses:
+        '200':
+          description: The repositories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Repository'
+        '400':
+          description: Unknown type, or a type with a fixed repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /types/{typeId}/selection-options:
     get:
       summary: List what new workspaces of a type can select
@@ -433,6 +471,18 @@ paths:
                   description: |
                     What the preview builds, required for workspace types that select on creation (`on_create`),
                     refused for others. See `GET /types/{typeId}/selection-options`.
+                repository:
+                  type: string
+                  pattern: '^[A-Za-z0-9_.\-]{1,100}$'
+                  description: |-
+                    Required for workspace types whose workspaces choose a repository (`choose_repository`):
+                    one of `GET /types/{typeId}/repositories`. Not allowed for other types.
+                  example: ogcapi-records
+                branch:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  description: The branch of `repository` to start from, its default branch if omitted
       responses:
         '201':
           description: Workspace created successfully
@@ -3153,6 +3203,7 @@ components:
         - upstream
         - preview
         - downloads
+        - choose_repository
         - expanded_folders
         - labels
         - editors
@@ -3177,12 +3228,12 @@ components:
           example: '#00796b'
         upstream:
           type: object
-          description: The repository new workspaces fork and propose changes to
+          description: |-
+            The repository new workspaces fork and propose changes to. Without `repo` and `branch` for
+            types whose workspaces choose one of the owner's repositories, see `choose_repository`.
           additionalProperties: false
           required:
             - owner
-            - repo
-            - branch
             - url
           properties:
             owner:
@@ -3229,6 +3280,11 @@ components:
             enum:
               - pdf
               - docx
+        choose_repository:
+          type: boolean
+          description: |-
+            Whether new workspaces choose one of the public repositories of the upstream owner
+            (`GET /types/{typeId}/repositories`), and optionally its branch
         expanded_folders:
           type: array
           description: Folders the file tree shows opened initially
@@ -4121,6 +4177,25 @@ components:
       example:
         - NRB
         - POL
+
+    Repository:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - default_branch
+      properties:
+        name:
+          type: string
+          example: ogcapi-records
+        description:
+          type:
+            - string
+            - 'null'
+        default_branch:
+          type: string
+          example: master
 
     SelectionOptions:
       type: object

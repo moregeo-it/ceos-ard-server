@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 # Checked by the workspace type, see WorkspaceType.output_name()
 SelectionItem = Annotated[str, StringConstraints(min_length=1, max_length=500)]
+# GitHub's repository names
+RepositoryName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.\-]{1,100}$")]
 
 
 class WorkspaceError(BaseModel):
@@ -58,6 +60,8 @@ class WorkspaceCreate(BaseModel):
         None, min_length=1, max_length=50, description="What the preview builds, for workspace types that select it on creation"
     )
     description: str | None = Field(None, max_length=1000, description="Workspace description")
+    repository: RepositoryName | None = Field(None, description="The repository of the type's upstream owner, for types that choose one")
+    branch: str | None = Field(None, min_length=1, max_length=255, description="Its branch to start from, the default branch if omitted")
 
 
 class WorkspaceUpdate(BaseModel):
@@ -163,6 +167,12 @@ class FilePatchRequest(BaseModel):
 class RequirementCategory(BaseModel):
     category: str
     requirements: list[str]
+
+
+class Repository(BaseModel):
+    name: str
+    description: str | None
+    default_branch: str
 
 
 class SelectionOption(BaseModel):

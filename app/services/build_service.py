@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,13 @@ from app.workspace_types import WorkspaceType
 from app.workspace_types.base import SelectionError
 
 logger = logging.getLogger(__name__)
+
+
+def _copy_sources(workspace_path: Path, target: Path) -> None:
+    # Without what builds never read; clones have no symlinks, and any left are copied as links
+    shutil.copytree(
+        workspace_path, target, symlinks=True, ignore=lambda folder, names: {".git", "build"} if Path(folder) == workspace_path else set()
+    )
 
 
 class BuildService:
@@ -103,6 +111,7 @@ class BuildService:
             return {"status": "error", "message": message, "output_file": output_file}
 
         try:
+            await workspace_type.refresh_toolchain()
             toolchain = workspace_type.toolchain(workspace_path)
             if toolchain is None:
                 return error(f"Workspaces of type {workspace_type.id} can't be built.")
@@ -111,26 +120,46 @@ class BuildService:
         except ToolchainError as e:
             return error(str(e))
 
-        logger.info(f"Building workspace {workspace_id} with {' '.join(selection)} and the toolchain {toolchain.name}")
-        command = workspace_type.build_command(workspace_path, selection, output_file, include_format)
+        timeout = workspace_type.build_timeout or settings.BUILD_TIMEOUT
         output_dir = Path(output_file).parent
         # The build may write there, so not through a symlink, e.g. a committed `build` link
         if output_dir.is_symlink() or not output_dir.resolve().is_relative_to((build_dir or workspace_path).resolve()):
             return error("The build folder of the workspace is not a folder.")
         output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Building workspace {workspace_id} with {' '.join(selection)} and the toolchain {toolchain.name}")
+        sources = None
+        env = {**toolchains.env_vars(toolchain.name), **workspace_type.build_env}
         try:
+            if workspace_type.writable_sources:
+                sources = Path(await asyncio.to_thread(tempfile.mkdtemp, prefix="ceos-ard-sources-"))
+                source_path = sources / "workspace"
+                await asyncio.to_thread(_copy_sources, workspace_path, source_path)
+                env.update(await asyncio.to_thread(workspace_type.prepare_sources, sources))
+                read_only, writable, hidden = [toolchains.path(toolchain.name)], [output_dir, sources], []
+            else:
+                source_path = workspace_path
+                read_only, writable, hidden = [toolchains.path(toolchain.name), workspace_path], [output_dir], [workspace_path / ".git"]
+            command = workspace_type.build_command(source_path, selection, output_file, include_format)
             process = await run_build(
                 command,
                 path=toolchains.bin_path(toolchain.name),
-                read_only=[toolchains.path(toolchain.name), workspace_path],
-                writable=[output_dir],
-                hidden=[workspace_path / ".git"],
-                cwd=workspace_path,
-                timeout=settings.BUILD_TIMEOUT,
-                env=workspace_type.build_env,
+                read_only=read_only,
+                writable=writable,
+                hidden=hidden,
+                cwd=source_path / workspace_type.build_folder(selection),
+                timeout=timeout,
+                env=env,
+                network=workspace_type.build_network,
+                memory_max=workspace_type.build_memory_max,
             )
+            if sources and process.returncode == 0:
+                try:
+                    await asyncio.to_thread(workspace_type.finish_build, sources, output_file)
+                except Exception as e:
+                    # Only adds to a document that is complete without it
+                    logger.warning(f"Can't complete the build of workspace {workspace_id}: {e}")
         except TimeoutError:
-            return error(f"Generating the document took longer than {settings.BUILD_TIMEOUT} seconds and was stopped.")
+            return error(f"Generating the document took longer than {timeout} seconds and was stopped.")
         except BuildOutOfMemory:
             return error("Generating the document needed too much memory and was stopped.")
         except OutputTooLarge:
@@ -139,8 +168,12 @@ class BuildService:
             # Not left on the disk until the next build
             await asyncio.to_thread(shutil.rmtree, output_dir, ignore_errors=True)
             return error("Generating the document wrote too much and was stopped.")
+        finally:
+            if sources:
+                await asyncio.to_thread(shutil.rmtree, sources, ignore_errors=True)
 
         if process.returncode == 0:
             return {"status": "success", "message": "Build completed successfully.", "output_file": output_file}
         logger.error(f"Build failed for workspace {workspace_id} with code {process.returncode}: {process.stderr.decode(errors='replace')[-2000:]}")
-        return error("Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).")
+        message = workspace_type.build_error(process.stderr.decode(errors="replace") + process.stdout.decode(errors="replace"))
+        return error(message or "Generating document failed, likely one of the changes caused an issue (e.g., invalid YAML).")

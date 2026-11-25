@@ -98,7 +98,7 @@ def workspace(tmp_path):
     return workspace
 
 
-def build(workspace: Path, script: str, *args: str, timeout: float = 30, env: dict[str, str] | None = None):
+def build(workspace: Path, script: str, *args: str, timeout: float = 30, env: dict[str, str] | None = None, network: bool = False):
     (workspace / "script.py").write_text(script)
     python = Path(sys.executable)
     return asyncio.run(
@@ -111,6 +111,7 @@ def build(workspace: Path, script: str, *args: str, timeout: float = 30, env: di
             cwd=workspace,
             timeout=timeout,
             env=env,
+            network=network,
         )
     )
 
@@ -148,6 +149,21 @@ def test_a_build_reaches_nothing_but_its_files(workspace, monkeypatch):
     assert probe["metadata_service"] in ("OSError", "TimeoutError")
     assert probe["internet"] in ("OSError", "TimeoutError")
     assert probe["dns"] == "gaierror"
+
+
+def test_a_build_with_network_reaches_nothing_else(workspace):
+    outside = workspace.parent / "server"
+    result = build(workspace, PROBE, str(outside), str(workspace / "build"), network=True)
+    assert result.returncode == 0, result.stderr
+    probe = json.loads(result.stdout)
+
+    assert probe["secret"] == "FileNotFoundError"
+    assert probe["git"] == []
+    assert probe["passwd"] == "FileNotFoundError"
+    assert probe["write_workspace"] == "OSError"
+    assert probe["write_outside"] == "FileNotFoundError"
+    # What it can reach is up to the host's firewall, see the README
+    assert isinstance(probe["dns"], list)
 
 
 def test_an_endless_build_is_stopped_with_everything_it_started(workspace):

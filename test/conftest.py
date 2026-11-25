@@ -14,8 +14,11 @@ import pytest
 DATA = Path(tempfile.mkdtemp(prefix="ceos-ard-server-test-"))
 UPSTREAM = DATA / "upstream.git"
 FORK = DATA / "fork.git"
+OGC_UPSTREAM = DATA / "ogc-upstream.git"
+OGC_FORK = DATA / "ogc-fork.git"
 TYPES = [
     {"id": "ceos-ard", "module": "ceos_ard", "upstream": {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main"}},
+    {"id": "ogc", "module": "ogc", "upstream": {"owner": "opengeospatial"}},
 ]
 TYPES_CONFIG = DATA / "workspace-types.yaml"
 # JSON is YAML too
@@ -41,6 +44,7 @@ import pygit2  # noqa: E402
 # Git for Windows' system config converts line endings on checkout
 (DATA / "home" / ".gitconfig").write_text(
     f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
+    f'[url "{OGC_UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/opengeospatial/ogcapi-records\n'
 )
 pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home")
 
@@ -116,9 +120,25 @@ def create_repository(files: dict[str, str], upstream: Path, fork: Path):
     git("clone", "-q", "--bare", str(upstream), str(fork))
 
 
+# Like opengeospatial/ogcapi-records: a core document and an extension, sharing examples
+OGC_REPOSITORY = {
+    "README.md": "# OGC API - Records\n",
+    "core/standard/20-004.adoc": (
+        "= OGC API - Records - Part 1: Core\n:doctype: standard\n:mn-document-class: ogc\n:mn-output-extensions: xml,html\n\n"
+        "include::clause_1_scope.adoc[]\n"
+    ),
+    "core/standard/clause_1_scope.adoc": "== Scope\n\ninclude::../examples/record.json[]\n",
+    "core/examples/record.json": "{}\n",
+    "core/standard/README.adoc": "= How to build\n",
+    "extensions/facets/document.adoc": "= OGC API - Records - Facets\n:mn-document-class: ogc\n\ninclude::/sections/clause_1.adoc[]\n",
+    "extensions/facets/sections/clause_1.adoc": "== Scope\n",
+}
+
+
 @pytest.fixture(scope="session", autouse=True)
 def repositories():
     create_repository(REPOSITORY, UPSTREAM, FORK)
+    create_repository(OGC_REPOSITORY, OGC_UPSTREAM, OGC_FORK)
 
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
@@ -169,13 +189,45 @@ class FakeGitHub:
         self.calls = []
         # GitHub accounts by login, for invitations
         self.users = {}
+        self.repositories = {
+            ("opengeospatial", "ogcapi-records"): {
+                "name": "ogcapi-records",
+                "full_name": "opengeospatial/ogcapi-records",
+                "owner": {"login": "opengeospatial"},
+                "description": "OGC API - Records",
+                "default_branch": "main",
+                "private": False,
+                "archived": False,
+            },
+            ("opengeospatial", "WFS_FES"): {
+                "name": "WFS_FES",
+                "full_name": "opengeospatial/WFS_FES",
+                "owner": {"login": "opengeospatial"},
+                "description": None,
+                "default_branch": "master",
+                "private": False,
+                "archived": True,
+            },
+        }
 
     # The local bare repository that stands in for the user's fork of an upstream repository
-    forks = {"ceos-ard": FORK}
+    forks = {"ceos-ard": FORK, "ogcapi-records": OGC_FORK}
 
     async def fork(self, user, upstream_owner, upstream_repo):
         self.calls.append(("fork", upstream_owner, upstream_repo))
         return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(self.forks[upstream_repo])}
+
+    async def get_repository(self, owner, repo, token):
+        self.calls.append(("get_repository", owner, repo))
+        return self.repositories.get((owner, repo))
+
+    async def branch_exists(self, owner, repo, branch, token):
+        self.calls.append(("branch_exists", owner, repo, branch))
+        return branch == "main"
+
+    async def get_owner_repositories(self, owner, token):
+        self.calls.append(("get_owner_repositories", owner))
+        return [repository for (repository_owner, _), repository in self.repositories.items() if repository_owner == owner]
 
     async def get_folder_names(self, owner, repo, token, path, branch):
         self.calls.append(("get_folder_names", owner, repo, path, branch))
@@ -228,5 +280,12 @@ def client(user, github):
 @pytest.fixture
 def workspace(client):
     response = client.post("/workspaces", json={"title": "NRB review", "selection": ["NRB"]})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def ogc_workspace(client):
+    response = client.post("/workspaces", json={"title": "Records review", "type": "ogc", "repository": "ogcapi-records"})
     assert response.status_code == 201, response.text
     return response.json()

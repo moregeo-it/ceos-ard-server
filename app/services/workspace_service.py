@@ -69,7 +69,7 @@ class WorkspaceService:
             selection = self._check_selection(workspace_type, workspace_data.selection)
         elif workspace_data.selection:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} select after creation")
-        upstream = workspace_type.upstream
+        upstream = await self._upstream(workspace_type, workspace_data, user)
 
         # Bound before the try: the handler below inspects it, and if fork() raises it would
         # otherwise be unbound and mask the real failure with an UnboundLocalError.
@@ -643,6 +643,36 @@ class WorkspaceService:
         # Commit history is exclusively surfaced in the Propose view, which is owner-only.
         workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         return self.git_service.get_commits(workspace.abs_path, upstream_branch=workspace.upstream_branch)
+
+    async def _upstream(self, workspace_type: WorkspaceType, workspace_data: WorkspaceCreate, user: User) -> Upstream:
+        """The type's upstream, or the repository and branch chosen of the type's upstream owner."""
+        if not workspace_type.choose_repository:
+            if workspace_data.repository or workspace_data.branch:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} have a fixed repository")
+            return workspace_type.upstream
+        if not workspace_data.repository:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A repository is required")
+        owner = workspace_type.upstream.owner
+        repository = await self.github_service.get_repository(owner, workspace_data.repository, user.access_token)
+        # GitHub follows renames and transfers, possibly to another owner
+        if not repository or repository["owner"]["login"].lower() != owner.lower() or repository.get("private"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{owner} has no public repository {workspace_data.repository}")
+        if repository.get("archived"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{repository['full_name']} is archived and can't be changed")
+        branch = workspace_data.branch or repository["default_branch"]
+        if not await self.github_service.branch_exists(owner, repository["name"], branch, user.access_token):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{repository['full_name']} has no branch {branch}")
+        return Upstream(owner, repository["name"], branch)
+
+    async def list_repositories(self, workspace_type: WorkspaceType, user: User) -> list[dict[str, Any]]:
+        if not workspace_type.choose_repository:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} have a fixed repository")
+        repositories = await self.github_service.get_owner_repositories(workspace_type.upstream.owner, user.access_token)
+        return [
+            {"name": repository["name"], "description": repository.get("description"), "default_branch": repository["default_branch"]}
+            for repository in repositories
+            if not repository.get("archived") and not repository.get("private")
+        ]
 
     @staticmethod
     def _check_selection(workspace_type: WorkspaceType, selection: list[str], options: list[dict[str, str]] | None = None) -> list[str]:

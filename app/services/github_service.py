@@ -1,5 +1,6 @@
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException, status
@@ -10,6 +11,8 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 SUPPORTED_METHODS = ("GET", "POST", "PATCH", "PUT", "DELETE")
+# Up to 1000 repositories
+MAX_REPOSITORY_PAGES = 10
 
 
 def head_repo_missing(pull_request: dict[str, Any]) -> bool:
@@ -283,6 +286,27 @@ class GitHubService:
                 logger.info(f"Repository {owner}/{repo} not found")
                 return None
             raise
+
+    async def branch_exists(self, owner: str, repo: str, branch: str, token: str) -> bool:
+        try:
+            await self._make_github_request("GET", f"{self.base_url}/repos/{owner}/{repo}/branches/{quote(branch, safe='')}", token)
+            return True
+        except HTTPException as e:
+            if e.status_code == 404:
+                return False
+            raise
+
+    async def get_owner_repositories(self, owner: str, token: str) -> list[dict[str, Any]]:
+        """The public repositories of an organization, most recently pushed first."""
+        repositories = []
+        for page in range(1, MAX_REPOSITORY_PAGES + 1):
+            batch = await self._make_github_request(
+                "GET", f"{self.base_url}/orgs/{owner}/repos", token, params={"type": "public", "sort": "pushed", "per_page": 100, "page": page}
+            )
+            repositories += batch or []
+            if not batch or len(batch) < 100:
+                break
+        return repositories
 
     async def get_authenticated_user(self, token: str) -> dict[str, Any]:
         """The token's own user. Cheapest way to tell a revoked token from a missing resource."""

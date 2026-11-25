@@ -252,10 +252,20 @@ to. Without the file, the server offers CEOS-ARD with its defaults.
 
 - Each entry has an `id`, which every workspace stores, and the `module` that implements it. The first offered type
   is the default.
-- `title`, `description`, `color` and `upstream` replace the module's defaults; `settings` are the module's own,
-  checked by its `Settings` model. Every workspace stores the upstream it was created from.
+- `title`, `description`, `color`, `upstream`, `build_timeout` and `build_memory_max` replace the module's defaults;
+  `settings` are the module's own, checked by its `Settings` model. Every workspace stores the upstream it was created
+  from.
 - With `offered: false`, no new workspaces can be created; existing ones keep working. Removing a type from the file
   breaks its workspaces.
+
+The type `ogc` (module `ogc`) has workspaces that choose one of the public repositories of the upstream owner,
+`opengeospatial` by default, and optionally a branch. Their preview is a document built with the latest
+[Metanorma](https://www.metanorma.org), as HTML only: any AsciiDoc file with `:mn-document-class:` in its header.
+Metanorma needs more than the CEOS-ARD CLI, 180 s and 1536M by default (OGC API - Records - Part 1 takes 30 s and
+1.1 GB), and fetches bibliographic references, so its builds have network access, see
+[Builds with network](#builds-with-network). The preview has Edit buttons where the content of each included file
+starts: `app/workspace_types/ogc_source_map.rb`, loaded into Metanorma with `RUBYOPT`, gives the first block of each
+included file an id in memory, without changing the files.
 
 Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a function
 `create(type_id, settings)` that returns the type with its defaults, and optionally a Pydantic model `Settings`. The
@@ -268,6 +278,8 @@ configuration and the rules are checked when the server starts, so a typo stops 
 | `preview` | `build`: the owner builds a document from the workspace's selection with `build_command()`; `file`: the preview shows the open file, from `render_file()` |
 | `selection` | What workspaces select for the `build` preview: its `label` (e.g. "PFS"), whether `multiple` can be selected, and whether new workspaces select it (`on_create`). The options come from `selection_options()`, before creation from `upstream_selection_options()`; `output_name()` checks a selection and names its outputs |
 | `downloads` | The formats the built document can be downloaded in, `pdf` and `docx` |
+| `choose_repository` | Whether new workspaces choose one of the repositories of the upstream's owner instead, see `GET /types/{type}/repositories` |
+| `build_timeout`, `build_memory_max` | Limits of each build instead of `BUILD_TIMEOUT` and `BUILD_MEMORY_MAX_PER_BUILD` |
 | `expanded_folders` | Folders the file tree shows opened when entering a workspace |
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
 | `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`). Formatted text declares its format with `contentMediaType`, e.g. `text/markdown` |
@@ -504,7 +516,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
   script in them can't run on the API origin with the session cookie
 - **Isolated Builds**: Builds run content of the workspaces (Lua filters, templates, JavaScript in Chromium), so
   they run in bubblewrap: no network, no environment variables of the server, nothing of the host but the system
-  libraries, their toolchain, the workspace (read-only, without `.git`) and their output folder. Each build has its own
+  libraries, their toolchain, the workspace (read-only, without `.git`) and their output folder. OGC builds get a
+  copy of the workspace they can write to, and the network that the host's firewall allows them. Each build has its own
   cgroup with memory and CPU limits, and is stopped with everything it started after `BUILD_TIMEOUT` or once its
   output exceeds `BUILD_OUTPUT_MAX`
 - **OAuth State**: Signed `__Host-oauth_state` cookie with `itsdangerous` between login and callback; the prefix keeps
@@ -642,10 +655,38 @@ ceos-ard-server.service   Delegate=yes, MemoryMax=3G
     `ProtectControlGroups=yes` must not be set, it hides the cgroup from the server.
 
 4.  Optionally adjust the limits in `.env` (see [.env.example](.env.example)): `BUILD_CONCURRENCY`, `BUILD_TIMEOUT`,
-    `BUILD_CPU_CORES`, `BUILD_MEMORY_MAX`, `BUILD_MEMORY_MAX_PER_BUILD`, `BUILD_OUTPUT_MAX`.
+    `BUILD_CPU_CORES`, `BUILD_MEMORY_MAX`, `BUILD_MEMORY_MAX_PER_BUILD`, `BUILD_OUTPUT_MAX`. With `ogc` workspaces,
+    `BUILD_MEMORY_MAX` should be at least their `build_memory_max` plus what other builds need at the same time.
 
 After a restart, `systemd-cgls -u ceos-ard-server.service` shows `main/` and `builds/`, and the log shows no
 `CHECKS FAILED`. At startup, the server installs the toolchains of all active workspaces in the background.
+
+### Builds with network
+
+Builds of `ogc` workspaces can reach the network: Metanorma fetches bibliographic references. They share the
+network of the host, so without a firewall they could also reach services on `localhost`, the cloud provider's
+metadata service (`169.254.169.254`) and private networks. Before configuring an `ogc` type, only allow the service
+user (`server` here) to open connections to public addresses, e.g. in `/etc/nftables.conf`:
+
+```text
+table inet ceos-ard-server {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    meta skuid "server" jump server
+  }
+  chain server {
+    ct state established,related accept
+    # The name servers of /etc/resolv.conf, here systemd-resolved
+    ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept
+    ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } reject
+    ip6 daddr { ::1, ::ffff:0:0/96, fc00::/7, fe80::/10, ff00::/8 } reject
+  }
+}
+```
+
+The server itself only needs public hosts (GitHub, the package registries), and answers its clients on established
+connections. Load it with `sudo systemctl enable --now nftables`, then check as the service user that
+`curl -m 5 http://169.254.169.254/` fails and `curl -sI https://github.com` succeeds.
 
 ### Running the Production Server Persistently
 

@@ -46,6 +46,11 @@ def _init_repository(path: str, bare: bool) -> pygit2.Repository:
     repo = pygit2.init_repository(path, bare)
     # Symlinks in the repository become plain files: a build or a preview could otherwise read through them
     repo.config["core.symlinks"] = False
+    # Where previews are built, which isn't part of every repository's .gitignore
+    exclude = Path(repo.path) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as handle:
+        handle.write("\n/build/\n")
     return repo
 
 

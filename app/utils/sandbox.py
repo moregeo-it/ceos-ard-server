@@ -39,6 +39,8 @@ _ENTER_CGROUP = 'echo 0 > "$1/cgroup.procs" && echo 500 > /proc/self/oom_score_a
 # What a build sees of the system besides /usr: links or folders, depending on the distribution
 _SYSTEM_DIRS = ("/bin", "/lib", "/lib32", "/lib64", "/libx32", "/sbin")
 _SYSTEM_FILES = ("/etc/fonts", "/etc/ld.so.cache", "/etc/localtime")
+# Name resolution and certificates, for builds with network access
+_NETWORK_FILES = ("/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/ssl", "/etc/ca-certificates", "/etc/pki")
 
 
 class BuildOutOfMemory(Exception):
@@ -210,16 +212,18 @@ async def setup() -> None:
     isolation.cgroups = await asyncio.to_thread(Cgroups.delegate)
 
 
-def _bwrap_args(read_only: list[Path], writable: list[Path], hidden: list[Path], cwd: Path) -> list[str]:
+def _bwrap_args(read_only: list[Path], writable: list[Path], hidden: list[Path], cwd: Path, network: bool = False) -> list[str]:
     # Order matters: later mounts go on top of earlier ones
     args = ["--unshare-all", "--die-with-parent", "--new-session", "--tmpfs", "/tmp"]
+    if network:
+        args.append("--share-net")
     for path in _SYSTEM_DIRS:
         if os.path.islink(path):
             args += ["--symlink", os.readlink(path), path]
         elif os.path.isdir(path):
             args += ["--ro-bind", path, path]
     args += ["--ro-bind", "/usr", "/usr", "--proc", "/proc", "--dev", "/dev"]
-    for path in _SYSTEM_FILES:
+    for path in _SYSTEM_FILES + (_NETWORK_FILES if network else ()):
         args += ["--ro-bind-try", path, path]
     for path in read_only:
         args += ["--ro-bind-try", str(path), str(path)]
@@ -272,12 +276,15 @@ async def run_build(
     cwd: Path,
     timeout: float,
     env: dict[str, str] | None = None,
+    network: bool = False,
+    memory_max: str | None = None,
 ) -> subprocess.CompletedProcess:
     """
     Run a build with the programs in `path`, isolated as far as `setup()` allowed.
 
     The build sees the system's libraries, `read_only`, `writable` and an empty `/tmp`, which is also
-    its HOME, but no network, other processes or environment variables beyond its PATH, locale and `env`.
+    its HOME, but no other processes or environment variables beyond its PATH, locale and `env`, and no
+    network unless `network`. The host's firewall limits what a build with network can reach, see the README.
     `hidden` paths are replaced by empty folders. Raises TimeoutError or BuildOutOfMemory.
     """
     executable = shutil.which(command[0], path=os.pathsep.join(map(str, path)))
@@ -295,14 +302,14 @@ async def run_build(
             "LANG": "C.UTF-8",
             "PLAYWRIGHT_BROWSERS_PATH": str(browsers),
         }
-        command = ["bwrap", *_bwrap_args([*read_only, browsers], writable, hidden, cwd), "--", *command]
+        command = ["bwrap", *_bwrap_args([*read_only, browsers], writable, hidden, cwd, network), "--", *command]
     else:
         env = {**command_env(), **extra_env}
         env["PATH"] = os.pathsep.join([*map(str, path), env.get("PATH", "")])
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
 
     async with _semaphore:
-        cgroup = isolation.cgroups.create(settings.BUILD_MEMORY_MAX_PER_BUILD) if isolation.cgroups else None
+        cgroup = isolation.cgroups.create(memory_max or settings.BUILD_MEMORY_MAX_PER_BUILD) if isolation.cgroups else None
         try:
             if cgroup:
                 command = ["/bin/sh", "-c", _ENTER_CGROUP, "sh", str(cgroup), *command]

@@ -29,6 +29,10 @@ class TypeConfig(_Config):
     description: str | None = None
     color: str | None = Field(None, pattern=r"^#[0-9a-fA-F]{6}$")
     upstream: UpstreamConfig | None = Field(None, description="Replaces the module's default upstream; repo and branch keep the default if omitted")
+    build_timeout: int | None = Field(None, gt=0, description="Seconds a build may take, instead of the module's default or BUILD_TIMEOUT")
+    build_memory_max: str | None = Field(
+        None, pattern=r"^\d+[KMG]?$", description="Memory a build may use, e.g. 1536M, instead of the module's default or BUILD_MEMORY_MAX_PER_BUILD"
+    )
     settings: dict[str, Any] = Field(default_factory=dict, description="Validated by the module's Settings model")
 
 
