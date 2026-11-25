@@ -347,7 +347,7 @@ class CeosArdType(WorkspaceType):
             if not isinstance(document, dict):
                 logger.error(f"Invalid PFS document format in {document_path}")
                 continue
-            options.append({"id": pfs_dir.name, "title": document.get("title") or pfs_dir.name})
+            options.append({"id": pfs_dir.name, "title": document.get("title") or pfs_dir.name, "path": f"/{PFS_FOLDER}/{pfs_dir.name}"})
         return options
 
     async def upstream_selection_options(self, github: "GitHubService", token: str) -> list[dict[str, str]]:

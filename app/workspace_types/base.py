@@ -216,7 +216,7 @@ class WorkspaceType:
         raise SelectionError(f"Workspaces of type {self.id} can't be built")
 
     async def selection_options(self, workspace_path: Path) -> list[dict[str, str]]:
-        """What the workspace can select, as `{"id", "title"}`."""
+        """What the workspace can select, as `{"id", "title"}`, and the `path` of the file or folder that defines it, if any."""
         return []
 
     async def upstream_selection_options(self, github: "GitHubService", token: str) -> list[dict[str, str]]:

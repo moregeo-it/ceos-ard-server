@@ -168,6 +168,7 @@ class RequirementCategory(BaseModel):
 class SelectionOption(BaseModel):
     id: str
     title: str
+    path: str | None = Field(None, description="The file or folder of the workspace that defines the option")
 
 
 class SelectionOptionsResponse(BaseModel):

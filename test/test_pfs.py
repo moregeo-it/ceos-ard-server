@@ -12,7 +12,10 @@ def test_list_pfs_of_the_workspace(client, workspace):
     response = client.get(f"/workspaces/{workspace['id']}/selection-options")
     assert response.status_code == 200, response.text
     pfs = response.json()["options"]
-    assert pfs == [{"id": "NRB", "title": "Normalised Radar Backscatter"}, {"id": "SR", "title": "Surface Reflectance"}]
+    assert pfs == [
+        {"id": "NRB", "title": "Normalised Radar Backscatter", "path": "/pfs/NRB"},
+        {"id": "SR", "title": "Surface Reflectance", "path": "/pfs/SR"},
+    ]
 
 
 def test_the_form_offers_the_pfs_of_the_workspace_as_base(client, workspace):

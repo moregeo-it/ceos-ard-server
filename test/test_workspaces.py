@@ -59,7 +59,7 @@ def test_create_workspace_requires_pfs(client):
 def test_list_pfs_of_ceos_ard(client, github):
     response = client.get("/types/ceos-ard/selection-options")
     assert response.status_code == 200
-    assert response.json() == {"options": [{"id": "NRB", "title": "NRB"}, {"id": "SR", "title": "SR"}]}
+    assert response.json() == {"options": [{"id": "NRB", "title": "NRB", "path": None}, {"id": "SR", "title": "SR", "path": None}]}
     assert ("get_folder_names", "ceos-org", "ceos-ard", "pfs", "main") in github.calls
 
 

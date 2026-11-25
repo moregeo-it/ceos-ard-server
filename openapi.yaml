@@ -4139,9 +4139,15 @@ components:
                 type: string
               title:
                 type: string
+              path:
+                type:
+                  - string
+                  - "null"
+                description: The file or folder of the workspace that defines the option, e.g. the folder of a PFS
             example:
               id: NRB
               title: SAR Normalised Radar Backscatter
+              path: /pfs/NRB
 
     AccessMode:
       type: string
