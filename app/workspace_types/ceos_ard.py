@@ -32,6 +32,7 @@ from app.workspace_types.base import (
     FileMenuRule,
     NameRule,
     PathRules,
+    SearchFilter,
     Selection,
     SelectionError,
     Upstream,
@@ -133,6 +134,8 @@ GLOSSARY_SCHEMA = {
             "contentMediaType": "text/markdown",
             "description": "Markdown is supported for formatting.",
         },
+        "references": {"type": "array", "title": "References", "uniqueItems": True, "items": {"type": "string"}},
+        "deprecated": {"type": "boolean", "title": "Deprecated", "default": False},
     },
 }
 
@@ -141,7 +144,19 @@ GLOSSARY_UI_SCHEMA = {
     "elements": [
         {"type": "Control", "scope": "#/properties/term", "options": {"clearable": False}},
         {"type": "Control", "scope": "#/properties/description", "options": {"clearable": False, "multi": True}},
+        # A reference's id is the name of its file in references/
+        {"type": "Control", "scope": "#/properties/references", "options": {"files": {"folder": "/references", "extension": "bib"}}},
+        {"type": "Control", "scope": "#/properties/deprecated"},
     ],
+}
+
+# The type of a file by its top folder
+FILE_TYPES = {
+    "requirements": "Requirement",
+    "sections": "Section",
+    "glossary": "Glossary term",
+    "references": "Reference",
+    "pfs": "PFS",
 }
 
 
@@ -357,6 +372,10 @@ class CeosArdType(WorkspaceType):
         names = await github.get_folder_names(upstream.owner, upstream.repo, token, PFS_FOLDER, upstream.branch)
         return [{"id": name, "title": name} for name in names]
 
+    def matches_search_filters(self, workspace_path: Path, file_path: str, filters: dict[str, set[str]]) -> bool:
+        file_type = FILE_TYPES.get(file_path.lstrip("/").split("/")[0])
+        return all(file_type in values for values in filters.values())
+
     async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         return await asyncio.to_thread(self._requirement_usage, workspace_path, file_path)
 
@@ -415,6 +434,9 @@ def create(type_id: str, type_settings: Settings) -> CeosArdType:
         selection=Selection(label="PFS", multiple=True, on_create=True),
         downloads=["pdf", "docx"],
         editors=[EditorRule(match="glossary/*.yaml", json_schema=GLOSSARY_SCHEMA, ui_schema=GLOSSARY_UI_SCHEMA)],
+        # References are BibTeX files, which the Reference filter should also find by their text
+        searchable_extensions=WorkspaceType.searchable_extensions | {".bib"},
+        search_filters=[SearchFilter(id="type", title="Type", values=list(FILE_TYPES.values()))],
         # PFS are created with their action; only new ones can be renamed or deleted
         actions=[
             Action(

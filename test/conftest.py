@@ -76,6 +76,7 @@ REPOSITORY = {
         "  threshold:\n    description: Metadata shall be machine readable.\n"
     ),
     "requirements/general/unused.yaml": "title: Unused\ndescription: Not used by any PFS.\n",
+    "references/small2011.bib": "@article{small2011,\n  title = {Flattening Gamma: Radiometric Terrain Correction for SAR Imagery},\n}\n",
     "sections/introduction/what-are-ceos-ard-products.md": "## What are CEOS-ARD products?\n",
     "sections/requirement-categories/general.yaml": "id: meta\ntitle: General Metadata\ndescription: General requirements.\n",
 }
