@@ -34,6 +34,7 @@ from app.workspace_types.eo_glossary_render import tags as term_tags
 
 logger = logging.getLogger(__name__)
 
+_MARKDOWN = {"type": "string", "contentMediaType": "text/markdown"}
 TERM_SCHEMA = {
     "type": "object",
     "required": ["title", "class", "status", "definitions"],
@@ -52,10 +53,10 @@ TERM_SCHEMA = {
                 "type": "object",
                 "title": "Definition",
                 "properties": {
-                    "definition": {"type": "string", "title": "Definition", "description": "Must be substitutable for the term in a sentence."},
-                    "notes": {"type": "string", "title": "Notes"},
-                    "examples": {"type": "string", "title": "Examples"},
-                    "sources": {"type": "string", "title": "Sources"},
+                    "definition": {**_MARKDOWN, "title": "Definition", "description": "Must be substitutable for the term in a sentence."},
+                    "notes": {**_MARKDOWN, "title": "Notes"},
+                    "examples": {**_MARKDOWN, "title": "Examples"},
+                    "sources": {**_MARKDOWN, "title": "Sources"},
                 },
             },
         },
