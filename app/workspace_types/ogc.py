@@ -49,6 +49,7 @@ MODSPEC_BLOCK = re.compile(rf"^\[({'|'.join(MODSPEC_KINDS)})[,\]]", re.MULTILINE
 _TEXT = {"type": "string"}
 _KIND_TITLES = [{"const": kind, "title": kind.replace("_", " ").capitalize()} for kind in MODSPEC_KINDS]
 _LIST = {"type": "array", "items": {"type": "string"}}
+_ASCIIDOC = {"type": "string", "contentMediaType": "text/asciidoc"}
 MODSPEC_SCHEMA = {
     "type": "object",
     "required": ["identifier"],
@@ -58,9 +59,9 @@ MODSPEC_SCHEMA = {
         "subject": {**_TEXT, "title": "Subject"},
         "target": {**_TEXT, "title": "Target"},
         "classification": {**_TEXT, "title": "Classification"},
-        "statement": {**_TEXT, "title": "Statement"},
-        "part": {**_LIST, "title": "Parts"},
-        "condition": {**_LIST, "title": "Conditions"},
+        "statement": {**_ASCIIDOC, "title": "Statement"},
+        "part": {"type": "array", "items": _ASCIIDOC, "title": "Parts"},
+        "condition": {"type": "array", "items": _ASCIIDOC, "title": "Conditions"},
         "inherit": {**_LIST, "title": "Inherits"},
         "requirement": {**_LIST, "title": "Requirements"},
         "abstract-test": {**_LIST, "title": "Abstract tests"},
