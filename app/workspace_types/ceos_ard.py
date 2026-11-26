@@ -127,7 +127,12 @@ GLOSSARY_SCHEMA = {
     "type": "object",
     "properties": {
         "term": {"type": "string", "minLength": 2},
-        "description": {"type": "string", "minLength": 2, "description": "Markdown is supported for formatting."},
+        "description": {
+            "type": "string",
+            "minLength": 2,
+            "contentMediaType": "text/markdown",
+            "description": "Markdown is supported for formatting.",
+        },
     },
 }
 
@@ -135,8 +140,7 @@ GLOSSARY_UI_SCHEMA = {
     "type": "VerticalLayout",
     "elements": [
         {"type": "Control", "scope": "#/properties/term", "options": {"clearable": False}},
-        # The description can't be multiline for glossary descriptions yet
-        {"type": "Control", "scope": "#/properties/description", "options": {"clearable": False}},
+        {"type": "Control", "scope": "#/properties/description", "options": {"clearable": False, "multi": True}},
     ],
 }
 

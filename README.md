@@ -270,7 +270,7 @@ configuration and the rules are checked when the server starts, so a typo stops 
 | `downloads` | The formats the built document can be downloaded in, `pdf` and `docx` |
 | `expanded_folders` | Folders the file tree shows opened when entering a workspace |
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
-| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`) |
+| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`). Formatted text declares its format with `contentMediaType`, e.g. `text/markdown` |
 | `search_filters` | Filters of the file search, answered by `matches_search_filters()` |
 | `actions` | Entries in the file menu of a folder, e.g. "Add New PFS": a generic dialog asks for the input with the action's `schema`, or the form `action_form()` derives from it, e.g. with options from the workspace; `run_action()` creates the file or folder, which is staged, and names the file the editor opens |
 | `names` | Names new and renamed files and folders must have, e.g. PFS folders named by their id |
