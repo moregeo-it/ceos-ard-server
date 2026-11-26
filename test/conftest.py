@@ -60,6 +60,7 @@ from app import dependencies  # noqa: E402
 from app.db.database import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.user import IdentityProvider, User  # noqa: E402
+from app.services import workspace_service  # noqa: E402
 from app.services.jwt_service import JWTService  # noqa: E402
 from app.utils.toolchains import ToolchainError, Toolchains  # noqa: E402
 
@@ -296,6 +297,8 @@ class FakeGitHub:
 
 @pytest.fixture
 def github(monkeypatch):
+    # Each test sees its own GitHub, not the repositories another one listed
+    monkeypatch.setattr(workspace_service, "_repository_lists", {})
     fake = FakeGitHub()
     service = dependencies.github_service
     for name in dir(service):

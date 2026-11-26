@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 from urllib.parse import quote
@@ -298,15 +299,18 @@ class GitHubService:
 
     async def get_owner_repositories(self, owner: str, token: str) -> list[dict[str, Any]]:
         """The public repositories of an organization, most recently pushed first."""
-        repositories = []
-        for page in range(1, MAX_REPOSITORY_PAGES + 1):
-            batch = await self._make_github_request(
-                "GET", f"{self.base_url}/orgs/{owner}/repos", token, params={"type": "public", "sort": "pushed", "per_page": 100, "page": page}
-            )
-            repositories += batch or []
-            if not batch or len(batch) < 100:
-                break
-        return repositories
+
+        async def page(number: int) -> list[dict[str, Any]]:
+            params = {"type": "public", "sort": "pushed", "per_page": 100, "page": number}
+            return await self._make_github_request("GET", f"{self.base_url}/orgs/{owner}/repos", token, params=params) or []
+
+        # All pages at once, counted from the organization: one after the other takes seconds for e.g. 363 repositories
+        first, organization = await asyncio.gather(page(1), self._make_github_request("GET", f"{self.base_url}/orgs/{owner}", token))
+        count = min(MAX_REPOSITORY_PAGES, max(1, -(-(organization or {}).get("public_repos", 0) // 100)))
+        pages = [first, *await asyncio.gather(*(page(number) for number in range(2, count + 1)))] if len(first) == 100 else [first]
+        # A repository pushed to meanwhile can move to another page
+        repositories = {repository["id"]: repository for batch in pages for repository in batch}
+        return sorted(repositories.values(), key=lambda repository: repository.get("pushed_at") or "", reverse=True)
 
     async def get_authenticated_user(self, token: str) -> dict[str, Any]:
         """The token's own user. Cheapest way to tell a revoked token from a missing resource."""

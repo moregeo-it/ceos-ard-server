@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import shutil
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,6 +39,10 @@ logger = logging.getLogger(__name__)
 # Short on purpose: telling the caller to retry beats holding a request open.
 FORK_READY_TIMEOUT_SECONDS = 20
 FORK_READY_POLL_SECONDS = 2
+
+# The public repositories of an owner are the same for everyone, and listing them takes GitHub a few seconds
+REPOSITORY_LIST_SECONDS = 600
+_repository_lists: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 class WorkspaceService:
@@ -710,12 +715,18 @@ class WorkspaceService:
     async def list_repositories(self, workspace_type: WorkspaceType, user: User) -> list[dict[str, Any]]:
         if not workspace_type.choose_repository:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} have a fixed repository")
+        owner = workspace_type.upstream.owner.lower()
+        cached = _repository_lists.get(owner)
+        if cached and time.monotonic() - cached[0] < REPOSITORY_LIST_SECONDS:
+            return cached[1]
         repositories = await self.github_service.get_owner_repositories(workspace_type.upstream.owner, user.access_token)
-        return [
+        result = [
             {"name": repository["name"], "description": repository.get("description"), "default_branch": repository["default_branch"]}
             for repository in repositories
             if not repository.get("archived") and not repository.get("private")
         ]
+        _repository_lists[owner] = (time.monotonic(), result)
+        return result
 
     @staticmethod
     def _check_selection(workspace_type: WorkspaceType, selection: list[str], options: list[dict[str, str]] | None = None) -> list[str]:

@@ -10,6 +10,7 @@ from app import dependencies
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
 from app.services import build_service
+from app.services.github_service import GitHubService
 from app.utils.toolchains import ToolchainError
 from app.workspace_types import get_type, ogc, ogc_sources
 from app.workspace_types.base import SelectionError
@@ -54,13 +55,38 @@ def test_ogc_type(client):
     assert item["upstream"] == {"owner": "opengeospatial", "url": "https://github.com/opengeospatial"}
 
 
-def test_list_repositories(client):
+def test_list_repositories(client, github):
     response = client.get("/types/ogc/repositories")
     assert response.status_code == 200, response.text
     assert response.json() == [{"name": "ogcapi-records", "description": "OGC API - Records", "default_branch": "main"}]
 
+    # Kept for a while: listing them takes GitHub seconds
+    assert client.get("/types/ogc/repositories").json() == response.json()
+    assert github.calls.count(("get_owner_repositories", "opengeospatial")) == 1
+
     response = client.get("/types/ceos-ard/repositories")
     assert response.status_code == 400
+
+
+def test_repository_pages_are_fetched_at_once():
+    service = GitHubService()
+    requests = []
+
+    async def request(method, url, token, params=None):
+        requests.append(params["page"] if params else "organization")
+        if not params:
+            return {"public_repos": 250}
+        # Each page repeats the last repository of the one before, as if pushed to meanwhile
+        start = 99 * (params["page"] - 1)
+        return [
+            {"id": number, "name": f"r{number}", "pushed_at": f"2026-01-01T00:00:{999 - number:03}Z"}
+            for number in range(start, min(start + 100, 250))
+        ]
+
+    service._make_github_request = request
+    repositories = asyncio.run(service.get_owner_repositories("opengeospatial", "token"))
+    assert sorted(requests, key=str) == [1, 2, 3, "organization"]
+    assert [repository["id"] for repository in repositories] == list(range(250))
 
 
 def test_create_ogc_workspace(client, github, ogc_workspace):
