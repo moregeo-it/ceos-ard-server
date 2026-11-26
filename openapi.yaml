@@ -3283,7 +3283,7 @@ components:
           readOnly: true
         pull_request_number:
           type:
-            - string
+            - integer
             - "null"
           description: Number of the GitHub pull request
           default: null

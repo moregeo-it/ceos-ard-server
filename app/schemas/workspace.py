@@ -64,7 +64,7 @@ class WorkspaceCreate(BaseModel):
 
 
 class WorkspaceUpdate(BaseModel):
-    title: str | None = Field(None, min_length=1, max_length=50, description="New workspace title")
+    title: str | None = Field(None, min_length=1, max_length=100, description="New workspace title")
     description: str | None = Field(None, max_length=1000, description="New workspace description (send null to clear)")
     pfs: list[PfsId] | None = Field(None, min_length=1, description="New PFS to preview, at least one")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
@@ -94,7 +94,7 @@ class WorkspaceResponse(BaseModel):
     fork_repo_name: str
     branch_name: str
     status: WorkspaceStatus
-    pull_request_number: str | None
+    pull_request_number: int | None
     pull_request_status: str | None
     pull_request_status_last_updated_at: datetime | None
     created_at: datetime

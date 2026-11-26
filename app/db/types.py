@@ -5,8 +5,8 @@ from sqlalchemy.types import DateTime, TypeDecorator
 
 
 def new_id() -> str:
-    """The primary key for a new record."""
-    return str(uuid.uuid4())
+    """The primary key for a new record; uuid7 sorts by creation time."""
+    return str(uuid.uuid7())
 
 
 class UTCDateTime(TypeDecorator):

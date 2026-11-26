@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
-from sqlalchemy import JSON, Column, ForeignKey, String
+from sqlalchemy import JSON, Column, ForeignKey, Integer, String
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
@@ -30,8 +30,8 @@ class GitWorkspace(Base):
     __tablename__ = "git_workspaces"
 
     id = Column(String, primary_key=True, default=new_id)
-    title = Column(String(50), nullable=False)
-    description = Column(String(500), nullable=True)
+    title = Column(String(100), nullable=False)
+    description = Column(String(1000), nullable=True)
     type = Column(String(50), nullable=False, default="ceos-ard")
     upstream_owner = Column(String(100), nullable=False)
     upstream_repo = Column(String(100), nullable=False)
@@ -42,7 +42,7 @@ class GitWorkspace(Base):
     fork_repo_name = Column(String(50), nullable=False)
     # Fixed at creation: renaming the workspace must not move its branch
     branch_name = Column(String(BRANCH_NAME_MAX_LENGTH), nullable=False, unique=True, index=True)
-    pull_request_number = Column(String, nullable=True)  # Todo: Change from String to Integer when moving to a stricter DB eg. PostgresSQL
+    pull_request_number = Column(Integer, nullable=True)
     pull_request_status_last_updated_at = Column(UTCDateTime, nullable=True)
     pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
     status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)

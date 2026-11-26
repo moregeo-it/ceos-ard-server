@@ -896,8 +896,7 @@ class WorkspaceService:
                     workspace.archived_at = None
                     workspace.status = WorkspaceStatus.ACTIVE
 
-                # String column: bind a string so this keeps working on a stricter database
-                workspace.pull_request_number = str(pr_response["number"])
+                workspace.pull_request_number = pr_response["number"]
                 archived = self._apply_pull_request_state(workspace, pr_response)
                 db.commit()
                 self._publish_status_change(workspace, user.id, reactivated=reactivated, archived=archived)
