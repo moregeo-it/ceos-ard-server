@@ -5,7 +5,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.dependencies import get_github_service, get_workspace_service
-from app.schemas.workspace import Repository, SelectionOptionsResponse
+from app.schemas.workspace import PullRequest, Repository, RepositoryName, SelectionOptionsResponse
 from app.schemas.workspace_type import WorkspaceTypeResponse
 from app.services.auth_service import get_current_user, require_github_user
 from app.services.github_service import GitHubService
@@ -98,3 +98,20 @@ async def list_type_repositories(
 ) -> list[dict]:
     with internal_errors("list repositories", logger):
         return await workspace_service.list_repositories(get_type(type_id), current_user["user"])
+
+
+@router.get(
+    "/types/{type_id}/repositories/{repository}/pull-requests",
+    summary="List the open pull requests of a repository",
+    description="The pull requests new workspaces of a type can continue, for types that choose a repository",
+    status_code=status.HTTP_200_OK,
+    response_model=list[PullRequest],
+)
+async def list_type_pull_requests(
+    type_id: str,
+    repository: RepositoryName,
+    current_user=Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> list[dict]:
+    with internal_errors("list pull requests", logger):
+        return await workspace_service.list_pull_requests(get_type(type_id), repository, current_user["user"])

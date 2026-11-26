@@ -281,7 +281,7 @@ configuration and the rules are checked when the server starts, so a typo stops 
 | `preview` | `build`: the owner builds a document from the workspace's selection with `build_command()`; `file`: the preview shows the open file, from `render_file()` |
 | `selection` | What workspaces select for the `build` preview: its `label` (e.g. "PFS"), whether `multiple` can be selected, and whether new workspaces select it (`on_create`). The options come from `selection_options()`, before creation from `upstream_selection_options()`; `output_name()` checks a selection and names its outputs |
 | `downloads` | The formats the built document can be downloaded in, `pdf` and `docx` |
-| `choose_repository` | Whether new workspaces choose one of the repositories of the upstream's owner instead, see `GET /types/{type}/repositories` |
+| `choose_repository` | Whether new workspaces choose one of the repositories of the upstream's owner instead, see `GET /types/{type}/repositories`, and start from one of its branches or open pull requests |
 | `build_timeout`, `build_memory_max` | Limits of each build instead of `BUILD_TIMEOUT` and `BUILD_MEMORY_MAX_PER_BUILD` |
 | `expanded_folders` | Folders the file tree shows opened when entering a workspace |
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |

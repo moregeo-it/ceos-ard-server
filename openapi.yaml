@@ -104,6 +104,54 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /types/{typeId}/repositories/{repository}/pull-requests:
+    get:
+      summary: List the open pull requests of a repository
+      description: |-
+        The open pull requests of one of `GET /types/{typeId}/repositories`, newest first, which new
+        workspaces can continue (`pull_request` when creating a workspace). Pull requests whose fork was
+        deleted are left out.
+      operationId: listTypePullRequests
+      tags:
+        - Workspaces
+      parameters:
+        - name: typeId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: ogc
+        - name: repository
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_.\-]{1,100}$'
+          example: geoparquet
+      responses:
+        '200':
+          description: The open pull requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PullRequest'
+        '400':
+          description: Unknown type, a type with a fixed repository, or a repository it can't choose
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid repository name
+
   /types/{typeId}/selection-options:
     get:
       summary: List what new workspaces of a type can select
@@ -483,6 +531,15 @@ paths:
                   minLength: 1
                   maxLength: 255
                   description: The branch of `repository` to start from, its default branch if omitted
+                pull_request:
+                  type: integer
+                  minimum: 1
+                  description: |-
+                    An open pull request of `repository` to continue instead of `branch`, see
+                    `GET /types/{typeId}/repositories/{repository}/pull-requests`. The workspace starts from the pull
+                    request's head and proposes its changes to the pull request's branch, also when that is in
+                    another fork of `repository`.
+                  example: 304
       responses:
         '201':
           description: Workspace created successfully
@@ -4196,6 +4253,30 @@ components:
         default_branch:
           type: string
           example: master
+
+    PullRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - title
+        - author
+        - head
+      properties:
+        number:
+          type: integer
+          example: 304
+        title:
+          type: string
+        author:
+          type:
+            - string
+            - 'null'
+          description: The GitHub login of its author
+        head:
+          type: string
+          description: Where its changes are, as `owner:branch`
+          example: jatorre:ogc-spec-alignment
 
     SelectionOptions:
       type: object

@@ -91,6 +91,51 @@ def test_fixed_repositories_cant_be_chosen(client):
     response = client.post("/workspaces", json={"title": "NRB", "selection": ["NRB"], "repository": "ogcapi-records"})
     assert response.status_code == 400, response.text
 
+    response = client.post("/workspaces", json={"title": "NRB", "selection": ["NRB"], "pull_request": 304})
+    assert response.status_code == 400, response.text
+
+
+def test_list_pull_requests(client):
+    response = client.get("/types/ogc/repositories/ogcapi-records/pull-requests")
+    assert response.status_code == 200, response.text
+    # Not the closed one, nor the one whose fork was deleted
+    assert response.json() == [{"number": 304, "title": "Describe the scope of facets", "author": "octo", "head": "octo:facets-scope"}]
+
+    assert client.get("/types/ogc/repositories/WFS_FES/pull-requests").status_code == 400
+    assert client.get("/types/ceos-ard/repositories/ceos-ard/pull-requests").status_code == 400
+
+
+def test_continue_a_pull_request(client, github):
+    response = client.post("/workspaces", json={"title": "Facets review", "type": "ogc", "repository": "ogcapi-records", "pull_request": 304})
+    assert response.status_code == 201, response.text
+    workspace = response.json()
+    # The user's own fork of the repository, while changes are proposed to the pull request's branch
+    assert ("fork", "opengeospatial", "ogcapi-records") in github.calls
+    assert (workspace["upstream_owner"], workspace["upstream_repo"], workspace["upstream_branch"]) == ("octo", "ogcapi-records", "facets-scope")
+
+    response = client.get(f"/workspaces/{workspace['id']}/files/extensions%2Ffacets%2Fsections%2Fclause_1.adoc")
+    assert response.status_code == 200, response.text
+    assert "Facets of records." in response.text
+
+    response = client.put(f"/workspaces/{workspace['id']}/proposal", json={"title": "Fix the scope", "description": "Details"})
+    assert response.status_code == 200, response.text
+    assert ("create_pull_request", "octo", "ogcapi-records", f"jdoe:{workspace['branch_name']}") in github.calls
+
+
+@pytest.mark.parametrize(
+    ("data", "detail"),
+    [
+        ({"pull_request": 999}, "opengeospatial/ogcapi-records has no pull request #999"),
+        ({"pull_request": 200}, "Pull request #200 is closed"),
+        ({"pull_request": 305}, "The repository of pull request #305 was deleted"),
+        ({"pull_request": 304, "branch": "main"}, "Start from a branch or a pull request, not both"),
+    ],
+)
+def test_continue_only_open_pull_requests(client, data, detail):
+    response = client.post("/workspaces", json={"title": "Facets", "type": "ogc", "repository": "ogcapi-records", **data})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == detail
+
 
 def test_list_documents(client, ogc_workspace):
     response = client.get(f"/workspaces/{ogc_workspace['id']}/selection-options")

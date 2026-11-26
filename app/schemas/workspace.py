@@ -62,6 +62,12 @@ class WorkspaceCreate(BaseModel):
     description: str | None = Field(None, max_length=1000, description="Workspace description")
     repository: RepositoryName | None = Field(None, description="The repository of the type's upstream owner, for types that choose one")
     branch: str | None = Field(None, min_length=1, max_length=255, description="Its branch to start from, the default branch if omitted")
+    pull_request: int | None = Field(
+        None,
+        ge=1,
+        description="An open pull request of the repository to continue instead of a branch: the workspace starts from its head "
+        "and proposes changes to its branch",
+    )
 
 
 class WorkspaceUpdate(BaseModel):
@@ -173,6 +179,14 @@ class Repository(BaseModel):
     name: str
     description: str | None
     default_branch: str
+
+
+class PullRequest(BaseModel):
+    number: int
+    title: str
+    author: str | None
+    # Where its changes are, as owner:branch
+    head: str
 
 
 class SelectionOption(BaseModel):

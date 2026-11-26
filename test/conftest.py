@@ -16,6 +16,8 @@ UPSTREAM = DATA / "upstream.git"
 FORK = DATA / "fork.git"
 OGC_UPSTREAM = DATA / "ogc-upstream.git"
 OGC_FORK = DATA / "ogc-fork.git"
+# Someone else's fork of opengeospatial/ogcapi-records, with the branch of an open pull request
+OGC_CONTRIBUTION = DATA / "ogc-contribution.git"
 TYPES = [
     {"id": "ceos-ard", "module": "ceos_ard", "upstream": {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main"}},
     {"id": "ogc", "module": "ogc", "upstream": {"owner": "opengeospatial"}},
@@ -45,6 +47,7 @@ import pygit2  # noqa: E402
 (DATA / "home" / ".gitconfig").write_text(
     f'[core]\n\tautocrlf = false\n[url "{UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/ceos-org/ceos-ard\n'
     f'[url "{OGC_UPSTREAM.as_posix()}"]\n\tinsteadOf = https://github.com/opengeospatial/ogcapi-records\n'
+    f'[url "{OGC_CONTRIBUTION.as_posix()}"]\n\tinsteadOf = https://github.com/octo/ogcapi-records\n'
 )
 pygit2.settings.search_path[pygit2.enums.ConfigLevel.GLOBAL] = str(DATA / "home")
 
@@ -139,6 +142,13 @@ OGC_REPOSITORY = {
 def repositories():
     create_repository(REPOSITORY, UPSTREAM, FORK)
     create_repository(OGC_REPOSITORY, OGC_UPSTREAM, OGC_FORK)
+    git("clone", "-q", "--bare", str(OGC_UPSTREAM), str(OGC_CONTRIBUTION))
+    contribution = Path(tempfile.mkdtemp(dir=DATA))
+    git("clone", "-q", str(OGC_CONTRIBUTION), str(contribution))
+    git("checkout", "-q", "-b", "facets-scope", cwd=contribution)
+    (contribution / "extensions/facets/sections/clause_1.adoc").write_text("== Scope\n\nFacets of records.\n", encoding="utf-8", newline="\n")
+    git("-c", "user.name=Octo", "-c", "user.email=octo@example.org", "commit", "-q", "-am", "Describe the scope", cwd=contribution)
+    git("push", "-q", "origin", "facets-scope", cwd=contribution)
 
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
@@ -228,6 +238,39 @@ class FakeGitHub:
     async def get_owner_repositories(self, owner, token):
         self.calls.append(("get_owner_repositories", owner))
         return [repository for (repository_owner, _), repository in self.repositories.items() if repository_owner == owner]
+
+    # The pull requests of opengeospatial/ogcapi-records by number
+    pull_requests = {
+        304: {
+            "number": 304,
+            "title": "Describe the scope of facets",
+            "state": "open",
+            "user": {"login": "octo"},
+            "head": {"label": "octo:facets-scope", "ref": "facets-scope", "repo": {"name": "ogcapi-records", "owner": {"login": "octo"}}},
+        },
+        305: {
+            "number": 305,
+            "title": "Gone",
+            "state": "open",
+            "user": {"login": "ghost"},
+            "head": {"label": "ghost:gone", "ref": "gone", "repo": None},
+        },
+        200: {
+            "number": 200,
+            "title": "Merged",
+            "state": "closed",
+            "user": {"login": "octo"},
+            "head": {"label": "octo:old", "ref": "old", "repo": None},
+        },
+    }
+
+    async def get_pull_request(self, owner, repo, number, access_token):
+        self.calls.append(("get_pull_request", owner, repo, number))
+        return self.pull_requests.get(number) if (owner, repo) == ("opengeospatial", "ogcapi-records") else None
+
+    async def get_repository_pull_requests(self, owner, repo, token, state="all", per_page=100):
+        self.calls.append(("get_repository_pull_requests", owner, repo, state))
+        return [pull_request for pull_request in self.pull_requests.values() if state == "all" or pull_request["state"] == state]
 
     async def get_folder_names(self, owner, repo, token, path, branch):
         self.calls.append(("get_folder_names", owner, repo, path, branch))
