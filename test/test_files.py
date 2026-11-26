@@ -254,3 +254,14 @@ def test_the_yaml_cache_holds_a_limited_size(tmp_path, monkeypatch):
         yaml_cache.load_yaml_cached(tmp_path / f"{name}.yaml", PlainStringSafeLoader)
     assert [Path(key).name for key in yaml_cache._cache] == ["b.yaml", "c.yaml"]
     assert yaml_cache._cached_bytes <= 250
+
+
+def test_new_names_the_workspace_hides_are_refused(client, workspace):
+    base = f"/workspaces/{workspace['id']}/files"
+    # CEOS-ARD hides the root folders build and templates
+    response = client.post(base, json={"path": "/", "name": "templates", "type": "folder"})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "The workspace hides templates, choose another name"
+    response = client.patch(file_url(workspace, "files", "/sections"), json={"operation": "rename", "target": "build"})
+    assert response.status_code == 400, response.text
+    assert "build" not in names(client.get(base, params={"path": "/"}))

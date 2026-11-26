@@ -223,6 +223,7 @@ class FileService:
         folder = validate_workspace_path(request_data.path, workspace.abs_path, exists=True, rules=workspace.workspace_type.paths)
         self._require_operation(workspace, folder, "create", "folder")
         target_path = folder / name
+        self._require_visible(workspace.abs_path, target_path, workspace.workspace_type.paths)
 
         async def transaction():
             if target_path.exists():
@@ -252,6 +253,12 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(e)) from e
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to read file: {str(e)}") from e
+
+    @staticmethod
+    def _require_visible(workspace_path: Path, target_path: Path, rules: PathRules) -> None:
+        # A new name the workspace hides, e.g. a root folder like build, would leave an entry nobody can open
+        if ignore_file_path(target_path, target_path.relative_to(workspace_path), rules):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The workspace hides {target_path.name}, choose another name")
 
     @staticmethod
     def _check_pfs_folder(workspace_path: Path, folder: Path) -> None:
@@ -462,6 +469,7 @@ class FileService:
             self._check_pfs_folder(workspace_path, source_path.parent / new_name)
 
         target_path = source_path.parent / new_name
+        self._require_visible(workspace_path, target_path, rules)
         if target_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A file/folder with the given name exists already")
 
