@@ -294,7 +294,7 @@ class OgcType(WorkspaceType):
             return False
         kinds = modspec_kinds(workspace_path / file_path.lstrip("/"))
         # OR within a filter, AND across filters
-        return all(kinds & {BLOCK_FILTER.get(value) for value in values} for values in filters.values())
+        return all(kinds & {BLOCK_FILTER[value] for value in values} for values in filters.values())
 
     async def selection_options(self, workspace_path: Path) -> list[dict[str, str]]:
         documents = await asyncio.to_thread(find_documents, workspace_path)
