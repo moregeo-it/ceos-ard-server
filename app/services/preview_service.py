@@ -189,7 +189,11 @@ class PreviewService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"The format must be one of {', '.join(downloads)}" if downloads else "This workspace type has no downloads",
             )
-        self.build_service.output_prefix(workspace.workspace_type, workspace.abs_path, selection)
+        if workspace.workspace_type.selection:
+            options = await workspace.workspace_type.selection_options(workspace.abs_path)
+            WorkspaceService._check_selection(workspace.workspace_type, selection, options)
+        else:
+            self.build_service.output_prefix(workspace.workspace_type, workspace.abs_path, selection)
         await self._prepare(workspace)
         build_dir = Path(tempfile.mkdtemp(prefix="ceos-ard-download-"))
         try:

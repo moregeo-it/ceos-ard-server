@@ -114,6 +114,13 @@ def test_downloads_only_offer_pdf_and_word(client, workspace, builds):
     assert builds == []
 
 
+def test_downloads_only_build_existing_pfs(client, workspace, builds):
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "selection": ["XYZ"]})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "The workspace has no PFS XYZ"
+    assert builds == []
+
+
 def test_build_results_are_only_taken_from_their_folder(tmp_path):
     output = tmp_path / "output"
     # A build can create a folder that a document's name then leads through
