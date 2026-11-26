@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, UniqueConstraint
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
@@ -19,9 +19,10 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=new_id)
     full_name = Column(String, nullable=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    username = Column(String, unique=True, index=True, nullable=False)
-    external_id = Column(String, unique=True, index=True, nullable=False)
+    # Not unique: GitHub frees renamed usernames for others, and one email can sign in with GitHub and Google
+    email = Column(String, nullable=False)
+    username = Column(String, nullable=False)
+    external_id = Column(String, nullable=False)
     identity_provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
     access_token = Column(String, nullable=True)  # Provider's access token (stored server-side)
     refresh_token = Column(String, nullable=True)  # Provider's refresh token (stored server-side)
@@ -32,6 +33,9 @@ class User(Base):
     session_version = Column(Integer, nullable=False, default=0, server_default="0")  # Bumped on logout: JWTs with another sv are refused
 
     workspaces = relationship("GitWorkspace", back_populates="user")
+
+    # A user is the account at its provider
+    __table_args__ = (UniqueConstraint("identity_provider", "external_id", name="uq_users_identity_provider_external_id"),)
 
     def __repr__(self):
         return f"<User id={self.id} username={self.username} email={self.email} provider={self.identity_provider} external_id={self.external_id}>"
