@@ -125,7 +125,7 @@ class EoGlossaryType(WorkspaceType):
             return False
         tags = term_tags(workspace_path, file_path)
         # OR within a filter, AND across filters
-        return all(tags & values for values in filters.values() if values)
+        return all(tags & values for values in filters.values())
 
     async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
         if not is_term(file_path):
