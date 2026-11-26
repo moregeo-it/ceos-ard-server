@@ -78,6 +78,7 @@ class GitService:
         upstream_owner: str,
         upstream_repo: str,
         upstream_branch: str = "main",
+        existing_branch: bool = False,
     ) -> bool:
         try:
             workspace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,14 +100,20 @@ class GitService:
             if upstream_ref is None:
                 raise Exception(f"Could not find upstream branch: {upstream_branch}")
 
-            upstream_commit = upstream_ref.peel()
+            if existing_branch:
+                # Continue the fork's branch, e.g. of the user's own pull request
+                origin_branch = repo.branches.remote.get(f"origin/{branch_name}")
+                if origin_branch is None:
+                    raise Exception(f"Could not find branch {branch_name} on the fork")
+                repo.create_branch(branch_name, origin_branch.peel()).upstream = origin_branch
+                repo.checkout(f"refs/heads/{branch_name}")
+            else:
+                # Create and checkout new branch from upstream
+                repo.create_branch(branch_name, upstream_ref.peel())
+                repo.checkout(f"refs/heads/{branch_name}")
 
-            # Create and checkout new branch from upstream
-            repo.create_branch(branch_name, upstream_commit)
-            repo.checkout(f"refs/heads/{branch_name}")
-
-            # Push to origin and set upstream tracking
-            await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
+                # Push to origin and set upstream tracking
+                await self.push(repo=repo, branch_name=branch_name, user=user, set_upstream=True)
 
             logger.info(f"Successfully cloned repository to {workspace_path}")
 

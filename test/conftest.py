@@ -18,6 +18,8 @@ OGC_UPSTREAM = DATA / "ogc-upstream.git"
 OGC_FORK = DATA / "ogc-fork.git"
 # Someone else's fork of opengeospatial/ogcapi-records, with the branch of an open pull request
 OGC_CONTRIBUTION = DATA / "ogc-contribution.git"
+# The user's own fork of opengeospatial/ogcapi-records, with the branch of their open pull request
+OGC_OWN = DATA / "ogc-own.git"
 TYPES = [
     {"id": "ceos-ard", "module": "ceos_ard", "upstream": {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main"}},
     {"id": "ogc", "module": "ogc", "upstream": {"owner": "opengeospatial"}},
@@ -150,6 +152,7 @@ def repositories():
     (contribution / "extensions/facets/sections/clause_1.adoc").write_text("== Scope\n\nFacets of records.\n", encoding="utf-8", newline="\n")
     git("-c", "user.name=Octo", "-c", "user.email=octo@example.org", "commit", "-q", "-am", "Describe the scope", cwd=contribution)
     git("push", "-q", "origin", "facets-scope", cwd=contribution)
+    git("clone", "-q", "--bare", str(OGC_CONTRIBUTION), str(OGC_OWN))
 
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
@@ -248,6 +251,23 @@ class FakeGitHub:
             "state": "open",
             "user": {"login": "octo"},
             "head": {"label": "octo:facets-scope", "ref": "facets-scope", "repo": {"name": "ogcapi-records", "owner": {"login": "octo"}}},
+            "base": {"ref": "main"},
+        },
+        306: {
+            "number": 306,
+            "html_url": "https://github.com/opengeospatial/ogcapi-records/pull/306",
+            "title": "My facets",
+            "body": "Mine",
+            "state": "open",
+            "draft": False,
+            "merged_at": None,
+            "user": {"login": "jdoe"},
+            "head": {
+                "label": "jdoe:facets-scope",
+                "ref": "facets-scope",
+                "repo": {"name": "ogcapi-records", "owner": {"login": "JDoe"}, "clone_url": str(OGC_OWN)},
+            },
+            "base": {"ref": "main"},
         },
         305: {
             "number": 305,
@@ -267,7 +287,7 @@ class FakeGitHub:
 
     async def get_pull_request(self, owner, repo, number, access_token):
         self.calls.append(("get_pull_request", owner, repo, number))
-        return self.pull_requests.get(number) if (owner, repo) == ("opengeospatial", "ogcapi-records") else None
+        return self.pull_requests.get(int(number)) if (owner, repo) == ("opengeospatial", "ogcapi-records") else None
 
     async def get_repository_pull_requests(self, owner, repo, token, state="all", per_page=100):
         self.calls.append(("get_repository_pull_requests", owner, repo, state))

@@ -2022,12 +2022,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  commits:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Commit'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Commit'
         '404':
           description: Workspace not found
           content:

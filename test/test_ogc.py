@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pygit2
 import pytest
+from conftest import OGC_OWN, file_url, git
 
 from app import dependencies
 from app.db.database import SessionLocal
@@ -125,7 +126,10 @@ def test_list_pull_requests(client):
     response = client.get("/types/ogc/repositories/ogcapi-records/pull-requests")
     assert response.status_code == 200, response.text
     # Not the closed one, nor the one whose fork was deleted
-    assert response.json() == [{"number": 304, "title": "Describe the scope of facets", "author": "octo", "head": "octo:facets-scope"}]
+    assert response.json() == [
+        {"number": 304, "title": "Describe the scope of facets", "author": "octo", "head": "octo:facets-scope"},
+        {"number": 306, "title": "My facets", "author": "jdoe", "head": "jdoe:facets-scope"},
+    ]
 
     assert client.get("/types/ogc/repositories/WFS_FES/pull-requests").status_code == 400
     assert client.get("/types/ceos-ard/repositories/ceos-ard/pull-requests").status_code == 400
@@ -146,6 +150,31 @@ def test_continue_a_pull_request(client, github):
     response = client.put(f"/workspaces/{workspace['id']}/proposal", json={"title": "Fix the scope", "description": "Details"})
     assert response.status_code == 200, response.text
     assert ("create_pull_request", "octo", "ogcapi-records", f"jdoe:{workspace['branch_name']}") in github.calls
+
+
+def test_continue_an_own_pull_request(client, github):
+    response = client.post("/workspaces", json={"title": "My facets", "type": "ogc", "repository": "ogcapi-records", "pull_request": 306})
+    assert response.status_code == 201, response.text
+    workspace = response.json()
+    # Works on the pull request's branch on the user's fork, linked to the pull request
+    assert not any(call[0] == "fork" for call in github.calls)
+    assert (workspace["upstream_owner"], workspace["upstream_repo"], workspace["upstream_branch"]) == ("opengeospatial", "ogcapi-records", "main")
+    assert (workspace["fork_repo_owner"], workspace["branch_name"]) == ("JDoe", "facets-scope")
+    assert (workspace["pull_request_number"], workspace["pull_request_status"]) == ("306", "open")
+
+    response = client.get(f"/workspaces/{workspace['id']}/commits")
+    assert response.status_code == 200, response.text
+    assert [commit["message"].strip() for commit in response.json()] == ["Describe the scope"]
+
+    response = client.put(file_url(workspace, "files", "/README.md"), content="# Changed\n")
+    assert response.status_code == 200, response.text
+    response = client.put(f"/workspaces/{workspace['id']}/diffs", json={"message": "Change README"})
+    assert response.status_code == 200, response.text
+    assert git("log", "-1", "--format=%s", "facets-scope", cwd=OGC_OWN) == "Change README"
+
+    response = client.get(f"/workspaces/{workspace['id']}/proposal")
+    assert response.status_code == 200, response.text
+    assert response.json()["number"] == 306
 
 
 @pytest.mark.parametrize(

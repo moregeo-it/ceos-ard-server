@@ -74,20 +74,25 @@ class WorkspaceService:
             selection = self._check_selection(workspace_type, workspace_data.selection)
         elif workspace_data.selection:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} select after creation")
-        upstream, forked = await self._upstream(workspace_type, workspace_data, user)
+        upstream, forked, own_pull_request = await self._upstream(workspace_type, workspace_data, user)
 
         # Bound before the try: the handler below inspects it, and if fork() raises it would
         # otherwise be unbound and mask the real failure with an UnboundLocalError.
         workspace = None
 
         try:
-            fork_repo = await self.github_service.fork(user=user, upstream_owner=forked.owner, upstream_repo=forked.repo)
+            if own_pull_request:
+                # The pull request's branch is on the user's fork: work on it directly
+                head = own_pull_request["head"]
+                fork_repo = {"owner": head["repo"]["owner"], "name": head["repo"]["name"], "clone_url": head["repo"]["clone_url"]}
+            else:
+                fork_repo = await self.github_service.fork(user=user, upstream_owner=forked.owner, upstream_repo=forked.repo)
 
             # Create workspace record in database
             workspace_id = new_id()
             workspace = GitWorkspace(
                 id=workspace_id,
-                branch_name=make_branch_name(workspace_data.title, selection, workspace_id),
+                branch_name=own_pull_request["head"]["ref"] if own_pull_request else make_branch_name(workspace_data.title, selection, workspace_id),
                 user_id=user.id,
                 type=workspace_type.id,
                 upstream_owner=upstream.owner,
@@ -100,6 +105,9 @@ class WorkspaceService:
                 fork_repo_name=fork_repo["name"],
                 status=WorkspaceStatus.ACTIVE,
             )
+            if own_pull_request:
+                workspace.pull_request_number = str(own_pull_request["number"])
+                self._apply_pull_request_state(workspace, own_pull_request)
             # Committing before the clone is deliberate: a write transaction held across a
             # multi-second clone would block every other SQLite writer.
             db.add(workspace)
@@ -116,6 +124,7 @@ class WorkspaceService:
                     upstream_repo=upstream.repo,
                     upstream_owner=upstream.owner,
                     upstream_branch=upstream.branch,
+                    existing_branch=own_pull_request is not None,
                 )
 
                 if success:
@@ -649,15 +658,18 @@ class WorkspaceService:
         workspace = self.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
         return self.git_service.get_commits(workspace.abs_path, upstream_branch=workspace.upstream_branch)
 
-    async def _upstream(self, workspace_type: WorkspaceType, workspace_data: WorkspaceCreate, user: User) -> tuple[Upstream, Upstream]:
+    async def _upstream(
+        self, workspace_type: WorkspaceType, workspace_data: WorkspaceCreate, user: User
+    ) -> tuple[Upstream, Upstream, dict[str, Any] | None]:
         """
         Where the workspace starts and proposes to, and the repository the user's fork is of: the type's upstream, a
         branch of the chosen repository of the type's upstream owner, or the branch of an open pull request to it.
+        The pull request comes last if its branch is on the user's own fork, which the workspace then works on.
         """
         if not workspace_type.choose_repository:
             if workspace_data.repository or workspace_data.branch or workspace_data.pull_request:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Workspaces of type {workspace_type.id} have a fixed repository")
-            return workspace_type.upstream, workspace_type.upstream
+            return workspace_type.upstream, workspace_type.upstream, None
         if not workspace_data.repository:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A repository is required")
         if workspace_data.branch and workspace_data.pull_request:
@@ -674,13 +686,20 @@ class WorkspaceService:
             if head_repo_missing(pull_request):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The repository of pull request #{number} was deleted")
             head = pull_request["head"]
+            base = Upstream(owner, name, pull_request["base"]["ref"])
+            if head["repo"]["owner"]["login"].lower() == user.username.lower():
+                return base, base, pull_request
             # The user's fork is of the repository itself: one fork for all of its workspaces
-            return Upstream(head["repo"]["owner"]["login"], head["repo"]["name"], head["ref"]), Upstream(owner, name, repository["default_branch"])
+            return (
+                Upstream(head["repo"]["owner"]["login"], head["repo"]["name"], head["ref"]),
+                Upstream(owner, name, repository["default_branch"]),
+                None,
+            )
         branch = workspace_data.branch or repository["default_branch"]
         if not await self.github_service.branch_exists(owner, name, branch, user.access_token):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{repository['full_name']} has no branch {branch}")
         upstream = Upstream(owner, name, branch)
-        return upstream, upstream
+        return upstream, upstream, None
 
     async def _repository(self, workspace_type: WorkspaceType, name: str, user: User) -> dict[str, Any]:
         """A public repository of the type's upstream owner that isn't archived, for types that choose one."""
