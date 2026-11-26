@@ -18,9 +18,9 @@ if [ "$(date +%u)" = "1" ]; then
     echo "workspaces -> $DEST/workspaces-$STAMP.tar.gz"
 fi
 
-# Retention
-ls -1t "$DEST"/db-*.dump 2>/dev/null | tail -n +{{ app_backup_db_keep + 1 }} | xargs -r rm --
-ls -1t "$DEST"/workspaces-*.tar.gz 2>/dev/null | tail -n +{{ app_backup_workspaces_keep + 1 }} | xargs -r rm --
+# Retention; `|| true`, because ls fails while no file matches (pipefail)
+{ ls -1t "$DEST"/db-*.dump 2>/dev/null || true; } | tail -n +{{ app_backup_db_keep + 1 }} | xargs -r rm --
+{ ls -1t "$DEST"/workspaces-*.tar.gz 2>/dev/null || true; } | tail -n +{{ app_backup_workspaces_keep + 1 }} | xargs -r rm --
 
 # NOTE: these copies live on the same disk as the originals. Pulling them off
 # the host is a separate, still-manual step. See .deploy/README.md.

@@ -1,0 +1,8 @@
+# Managed by Ansible ({{ app_name }} role). Local edits are overwritten.
+# See workspace-types.example.yaml in the repository.
+types:
+  - id: ceos-ard
+    module: ceos_ard
+    upstream:
+      owner: {{ app_ceos_ard_org }}
+      repo: {{ app_ceos_ard_repo }}

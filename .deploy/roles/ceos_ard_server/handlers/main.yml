@@ -9,7 +9,7 @@
   ansible.builtin.systemd_service:
     name: "{{ app_name }}"
     state: restarted
-  when: app_service_started
+  when: app_service_started | bool
 
 - name: Reload apparmor
   become: true

@@ -27,6 +27,7 @@
         mode: "0600"
       loop:
         - env.j2
+        - workspace-types.yaml.j2
         - app.service.j2
         - backup.sh.j2
         - backup.service.j2

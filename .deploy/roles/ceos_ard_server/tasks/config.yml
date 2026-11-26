@@ -23,3 +23,13 @@
   # The file holds the secrets, which --diff would print
   diff: false
   notify: Restart app
+
+- name: Write the workspace types
+  become: true
+  ansible.builtin.template:
+    src: workspace-types.yaml.j2
+    dest: "{{ app_dir }}/workspace-types.yaml"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0644"
+  notify: Restart app

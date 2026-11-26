@@ -22,14 +22,21 @@
     dest: /etc/apt/keyrings/caddy-stable.asc
     mode: "0644"
 
+# A deb822 file: apt_repository needs apt-key or gpg, which Debian 13 lacks,
+# and deb822_repository needs python3-debian
 - name: Add the Caddy repository
   become: true
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [signed-by=/etc/apt/keyrings/caddy-stable.asc]
-      https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
-    filename: caddy-stable
-    state: present
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/caddy-stable.sources
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Types: deb
+      URIs: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+      Suites: any-version
+      Components: main
+      Signed-By: /etc/apt/keyrings/caddy-stable.asc
 
 - name: Install Caddy
   become: true
@@ -46,6 +53,18 @@
     owner: caddy
     group: caddy
     mode: "0750"
+
+# Otherwise the root-run `caddy validate` below creates it owned by root
+- name: Create the access log
+  become: true
+  ansible.builtin.file:
+    path: /var/log/caddy/access.log
+    state: touch
+    owner: caddy
+    group: caddy
+    mode: "0640"
+    access_time: preserve
+    modification_time: preserve
 
 - name: Write the Caddyfile
   become: true

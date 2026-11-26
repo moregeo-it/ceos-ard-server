@@ -17,7 +17,8 @@ app_workspaces_root: "{{ app_data_dir }}/workspaces"
 # The host's PostgreSQL, over the local socket with peer authentication: the
 # service user connects as the PostgreSQL role of the same name, without a password
 app_database_name: ceos_ard_server
-app_database_url: postgresql+psycopg:///{{ app_database_name }}
+# host= names Debian's socket folder: pixi's libpq looks in /tmp by default
+app_database_url: postgresql+psycopg:///{{ app_database_name }}?host=/var/run/postgresql
 # The server needs 16 or newer
 postgresql_min_version: 16
 
