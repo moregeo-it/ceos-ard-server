@@ -80,6 +80,12 @@ def test_search_finds_names_and_contents(client, workspace):
     assert [(result["path"], result["type"]) for result in response.json()] == [("/glossary/accuracy.yaml", "filename")]
 
 
+def test_search_refuses_filters_the_type_does_not_have(client, workspace):
+    response = client.get(f"/workspaces/{workspace['id']}/search", params={"filter": ["unknown:Requirement"]})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Unknown search filter: unknown"
+
+
 def test_search_skips_other_file_types(client, workspace):
     response = client.get(f"/workspaces/{workspace['id']}/search", params={"query": "<svg>"})
     assert response.status_code == 200, response.text

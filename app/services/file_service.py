@@ -539,6 +539,14 @@ class FileService:
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
         workspace_type = workspace.workspace_type
+        known = {search_filter.id: search_filter.values for search_filter in workspace_type.search_filters}
+        for key, values in filters.items():
+            if key not in known:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown search filter: {key}")
+            if unknown := sorted(values - set(known[key])):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown values of the search filter {key}: {', '.join(unknown)}"
+                )
 
         def search(files: list[dict]) -> list[dict]:
             if filters:

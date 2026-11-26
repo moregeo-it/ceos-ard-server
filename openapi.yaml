@@ -1140,7 +1140,7 @@ paths:
                           type: string
                           description: Text excerpt around the match
         '400':
-          description: Invalid search query
+          description: Invalid search query, or a filter or value the workspace type doesn't have
           content:
             application/json:
               schema:
