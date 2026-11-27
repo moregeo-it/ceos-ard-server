@@ -160,7 +160,7 @@ def test_continue_an_own_pull_request(client, github):
     assert not any(call[0] == "fork" for call in github.calls)
     assert (workspace["upstream_owner"], workspace["upstream_repo"], workspace["upstream_branch"]) == ("opengeospatial", "ogcapi-records", "main")
     assert (workspace["fork_repo_owner"], workspace["branch_name"]) == ("JDoe", "facets-scope")
-    assert (workspace["pull_request_number"], workspace["pull_request_status"]) == ("306", "open")
+    assert (workspace["pull_request_number"], workspace["pull_request_status"]) == (306, "open")
 
     response = client.get(f"/workspaces/{workspace['id']}/commits")
     assert response.status_code == 200, response.text

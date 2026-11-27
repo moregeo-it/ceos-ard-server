@@ -106,7 +106,7 @@ class WorkspaceService:
                 status=WorkspaceStatus.ACTIVE,
             )
             if own_pull_request:
-                workspace.pull_request_number = str(own_pull_request["number"])
+                workspace.pull_request_number = own_pull_request["number"]
                 self._apply_pull_request_state(workspace, own_pull_request)
             # Committing before the clone is deliberate: a write transaction held across a
             # multi-second clone would block every other SQLite writer.
