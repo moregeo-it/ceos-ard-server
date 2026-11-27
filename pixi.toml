@@ -25,12 +25,14 @@ alembic = ">=1.20.0,<2"
 filelock = ">=3.17.0,<4"
 packaging = ">=25.0,<26"
 python = ">=3.14"
+psycopg = ">=3.3.4,<4"
 
 [feature.dev.dependencies]
 ruff = ">=0.15.8,<0.16.0"
 pytest = ">=9.0.2,<10.0.0"
 pre-commit = ">=4.0.0,<5.0.0"
 openapi-core = ">=0.23.1,<0.24"
+postgresql = ">=16"
 
 [feature.dev.tasks]
 pre-commit = "pre-commit run --all-files"

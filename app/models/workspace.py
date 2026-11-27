@@ -3,12 +3,11 @@ from enum import Enum
 from pathlib import Path
 
 from sqlalchemy import JSON, Column, ForeignKey, Integer, String
-from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.config import settings
 from app.db.database import Base
-from app.db.types import UTCDateTime, new_id
+from app.db.types import UTCDateTime, enum_type, new_id
 from app.utils.branch_name import BRANCH_NAME_MAX_LENGTH
 from app.workspace_types import Upstream, WorkspaceType, get_type
 
@@ -45,8 +44,8 @@ class GitWorkspace(Base):
     branch_name = Column(String(BRANCH_NAME_MAX_LENGTH), nullable=False, unique=True, index=True)
     pull_request_number = Column(Integer, nullable=True)
     pull_request_status_last_updated_at = Column(UTCDateTime, nullable=True)
-    pull_request_status = Column(SQLAlchemyEnum(PullRequestStatus), nullable=True)
-    status = Column(SQLAlchemyEnum(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)
+    pull_request_status = Column(enum_type(PullRequestStatus), nullable=True)
+    status = Column(enum_type(WorkspaceStatus), default=WorkspaceStatus.ACTIVE, nullable=False)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     archived_at = Column(UTCDateTime, nullable=True)

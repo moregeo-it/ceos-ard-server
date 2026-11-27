@@ -3,12 +3,11 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from sqlalchemy import Column, ForeignKey, String, UniqueConstraint
-from sqlalchemy import Enum as SqlAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from app.config import settings
 from app.db.database import Base
-from app.db.types import UTCDateTime, new_id
+from app.db.types import UTCDateTime, enum_type, new_id
 
 
 class AccessMode(str, Enum):
@@ -34,8 +33,8 @@ class WorkspaceCollaborator(Base):
     invitee_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     invited_by_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
 
-    mode = Column(SqlAlchemyEnum(AccessMode), nullable=False)
-    status = Column(SqlAlchemyEnum(CollaboratorStatus), nullable=False, default=CollaboratorStatus.PENDING)
+    mode = Column(enum_type(AccessMode), nullable=False)
+    status = Column(enum_type(CollaboratorStatus), nullable=False, default=CollaboratorStatus.PENDING)
 
     created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
     updated_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
@@ -67,7 +66,7 @@ class WorkspaceShare(Base):
     # Random rather than signed, so rotating SECRET_KEY doesn't break every share ever sent
     token = Column(String, nullable=False, unique=True, index=True, default=lambda: secrets.token_urlsafe(32))
 
-    mode = Column(SqlAlchemyEnum(AccessMode), nullable=False)
+    mode = Column(enum_type(AccessMode), nullable=False)
     expires_at = Column(UTCDateTime, nullable=True)
 
     created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))

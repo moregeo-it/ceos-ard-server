@@ -45,7 +45,7 @@ def move_threads(db: Session, workspace_id: str, old_path: str, new_path: str) -
     if old_path == new_path:
         return
 
-    # Compared in Python: LIKE ignores case in SQLite, while file paths don't
+    # Compared in Python: in LIKE, a _ or % in a path would be a wildcard
     def new_path_of(path: str) -> str | None:
         return new_path + path[len(old_path) :] if path == old_path or path.startswith(f"{old_path}/") else None
 

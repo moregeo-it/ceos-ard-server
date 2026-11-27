@@ -25,9 +25,8 @@
 # Adjust if pixi is installed elsewhere (check with: which pixi)
 #
 # Coexistence with the running server:
-# - The database runs in WAL mode with a 5s busy timeout, so these scripts and the server can
-#   write concurrently. WAL leaves ceos_ard_server.db-wal/-shm sidecar files next to the
-#   database; back up with `sqlite3 ceos_ard_server.db ".backup <dest>"`, never a bare cp.
+# - These scripts and the server write to the same PostgreSQL database concurrently; back it up
+#   with `pg_dump -Fc ceos_ard_server > <dest>`.
 # - The cleanup script takes the server's per-workspace file lock (workspaces/.locks/<id>.lock,
 #   flock) before deleting a workspace, waiting up to 60s and skipping the workspace until the
 #   next run if the server is mid-operation on it. Don't delete the .locks directory while the

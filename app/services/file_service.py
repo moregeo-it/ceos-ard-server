@@ -697,7 +697,7 @@ class FileService:
             )
 
         # Don't hold the read transaction open while waiting on the lock and pushing:
-        # an open transaction blocks every SQLite writer for the duration.
+        # an open transaction keeps a pooled connection for the duration.
         db.commit()
 
         # One transaction under the workspace lock, from the commit through the push, the

@@ -1,8 +1,10 @@
 """API tests against local git repositories: bare repositories stand in for ceos-org/ceos-ard and the user's fork on GitHub."""
 
+import atexit
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import urllib.parse
@@ -20,10 +22,47 @@ TYPES = [
 TYPES_CONFIG = DATA / "workspace-types.yaml"
 # JSON is YAML too
 TYPES_CONFIG.write_text(json.dumps({"types": TYPES}), encoding="utf-8")
+# Not in DATA: mkdtemp() restricts it to the owner on Windows, which can be the Administrators group
+# that initdb and pg_ctl drop from their token
+POSTGRES = DATA.with_name(f"{DATA.name}-postgres")
 
+
+def postgres_tool(*args: str):
+    """Output to a file, not a pipe: on Windows the server started by pg_ctl would keep a pipe open."""
+    output = POSTGRES / "output.log"
+    with output.open("a") as file:
+        failed = subprocess.run(args, stdout=file, stderr=subprocess.STDOUT).returncode
+    if failed:
+        server = POSTGRES / "server.log"
+        raise RuntimeError(f"{args[0]} failed:\n{output.read_text()}{server.read_text() if server.exists() else ''}")
+
+
+def start_postgres() -> str:
+    """A throwaway PostgreSQL from the dev environment; returns its URL."""
+    with socket.socket() as sock:
+        sock.bind(("localhost", 0))
+        port = sock.getsockname()[1]
+    POSTGRES.mkdir()
+    data = str(POSTGRES / "data")
+    postgres_tool("initdb", "-D", data, "-U", "postgres", "--auth=trust", "-E", "UTF8", "--no-locale")
+    # TCP only, the same on every OS; durability isn't needed for tests
+    options = f"-p {port} -c listen_addresses=localhost -c unix_socket_directories= -c fsync=off -c synchronous_commit=off -c full_page_writes=off"
+    postgres_tool("pg_ctl", "-D", data, "-o", options, "-l", str(POSTGRES / "server.log"), "-w", "start")
+    atexit.register(stop_postgres)
+    postgres_tool("createdb", "-h", "localhost", "-p", str(port), "-U", "postgres", "ceos_ard_server")
+    return f"postgresql+psycopg://postgres@localhost:{port}/ceos_ard_server"
+
+
+def stop_postgres():
+    if (POSTGRES / "data" / "postmaster.pid").exists():
+        postgres_tool("pg_ctl", "-D", str(POSTGRES / "data"), "-m", "fast", "-w", "stop")
+
+
+# libpq checks for Kerberos credentials otherwise, which on Windows leaves krb5's ccapiserver.exe running
+os.environ["PGGSSENCMODE"] = "disable"
 os.environ.update(
     {
-        "DATABASE_URL": f"sqlite:///{(DATA / 'test.db').as_posix()}",
+        "DATABASE_URL": start_postgres(),
         "WORKSPACES_ROOT": str(DATA / "workspaces"),
         # At least 32 bytes, as PyJWT recommends for HS256
         "SECRET_KEY": "test-secret-long-enough-for-hs256",
@@ -123,8 +162,10 @@ def repositories():
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
     engine.dispose()
+    stop_postgres()
     # pygit2 may still hold pack files open on Windows
     shutil.rmtree(DATA, ignore_errors=True)
+    shutil.rmtree(POSTGRES, ignore_errors=True)
 
 
 def pytest_configure(config):
