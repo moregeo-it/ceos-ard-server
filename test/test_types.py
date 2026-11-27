@@ -66,6 +66,10 @@ def test_name_rules():
     assert workspace_type.name_error("pfs/NRB", "folder") is None
     assert workspace_type.name_error("pfs/notes.md", "file") is None
     assert workspace_type.name_error("requirements/bad-id", "folder") is None
+    message = "References are BibTeX files with the extension .bib in lowercase, e.g. Bell2023.bib"
+    assert workspace_type.name_error("references/Bell2023.BIB", "file") == message
+    assert workspace_type.name_error("references/Bell2023.bib", "file") is None
+    assert workspace_type.name_error("glossary/Bell2023.BIB", "file") is None
     with pytest.raises(ValidationError):
         NameRule.model_validate({"match": "a/*", "pattern": "(", "message": "x"})
 

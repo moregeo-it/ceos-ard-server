@@ -288,3 +288,17 @@ def test_new_names_the_workspace_hides_are_refused(client, workspace):
     response = client.patch(file_url(workspace, "files", "/sections"), json={"operation": "rename", "target": "build"})
     assert response.status_code == 400, response.text
     assert "build" not in names(client.get(base, params={"path": "/"}))
+
+
+def test_references_need_a_lowercase_bib_extension(client, workspace):
+    message = "References are BibTeX files with the extension .bib in lowercase, e.g. Bell2023.bib"
+    response = client.put(file_url(workspace, "files", "/references/Bell2023.BIB"), content="@article{Bell2023, title = {T}}")
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == message
+
+    response = client.patch(file_url(workspace, "files", "/references/small2011.bib"), json={"operation": "rename", "target": "small2011.BIB"})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == message
+
+    response = client.put(file_url(workspace, "files", "/references/Bell2023.bib"), content="@article{Bell2023, title = {T}}")
+    assert response.status_code in (200, 201), response.text

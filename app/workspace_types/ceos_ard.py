@@ -51,6 +51,9 @@ PFS_FOLDER = "pfs"
 PFS_ID_PATTERN = r"^[A-Z0-9]{2,10}$"
 PFS_ID_MESSAGE = "A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB"
 CREATE_PFS = "create-pfs"
+# The CLI finds a reference as references/<id>.bib, case-sensitively on Linux
+REFERENCE_NAME_PATTERN = r".+\.bib"
+REFERENCE_NAME_MESSAGE = "References are BibTeX files with the extension .bib in lowercase, e.g. Bell2023.bib"
 
 
 class Settings(BaseModel):
@@ -448,7 +451,10 @@ def create(type_id: str, type_settings: Settings) -> CeosArdType:
             )
         ],
         # A PFS folder name is its id, which the preview and the CLI only accept in this form
-        names=[NameRule(match=f"{PFS_FOLDER}/*", kind="folder", pattern=PFS_ID_PATTERN, message=PFS_ID_MESSAGE)],
+        names=[
+            NameRule(match=f"{PFS_FOLDER}/*", kind="folder", pattern=PFS_ID_PATTERN, message=PFS_ID_MESSAGE),
+            NameRule(match="references/*", kind="file", pattern=REFERENCE_NAME_PATTERN, message=REFERENCE_NAME_MESSAGE),
+        ],
         file_menu=[
             FileMenuRule(match="pfs", kind="folder", ops=[]),
             FileMenuRule(match="pfs/*", kind="folder", ops=[], ops_if_new=["rename", "delete"]),
