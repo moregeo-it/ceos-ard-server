@@ -318,7 +318,9 @@ def _page(title: str, content: str) -> str:
 
 
 def _term_list(terms: list[TermInfo]) -> str:
-    items = "".join(f'<li><a class="term" href="{t.path}" data-open-file="{t.path}">{html.escape(t.title)}</a></li>' for t in terms)
+    items = "".join(
+        f'<li><a class="term" href="{html.escape(t.path)}" data-open-file="{html.escape(t.path)}">{html.escape(t.title)}</a></li>' for t in terms
+    )
     return f"<ul>{items}</ul>"
 
 

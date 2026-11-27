@@ -142,8 +142,8 @@ class EoGlossaryType(WorkspaceType):
         if action != "new-term":
             raise ValueError(f"Unknown action: {action}")
         title = re.sub(r"\s+", " ", str(data.get("title") or "")).strip()
-        if len(title) < 3:
-            raise ValueError("The term needs at least 3 characters")
+        if not 3 <= len(title) <= 100:
+            raise ValueError("The term needs 3 to 100 characters")
         slug = slugify(title)
         if not re.match(r"^\w[\w.-]*\w$", slug):
             raise ValueError("The term may only contain letters, digits, spaces, dots and hyphens")

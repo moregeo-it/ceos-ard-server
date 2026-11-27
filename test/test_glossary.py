@@ -126,6 +126,9 @@ def test_new_term(client, glossary_workspace):
     response = client.post(action, json={"title": "Accuracy"})
     assert response.status_code == 409, response.text
 
+    response = client.post(action, json={"title": "a" * 300})
+    assert response.status_code == 400, response.text
+
 
 def test_terms_can_be_deleted_but_not_renamed(client, glossary_workspace):
     base = f"/workspaces/{glossary_workspace['id']}/files"
