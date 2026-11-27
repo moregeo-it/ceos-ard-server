@@ -1,0 +1,11 @@
+---
+# Only on a new host, where .env needs a checkout to go into. An existing
+# checkout stays at its version: only deploy.yml moves it.
+- name: Clone the repository if the host has none
+  become: true
+  become_user: "{{ app_user }}"
+  ansible.builtin.git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_dir }}"
+    version: "{{ app_version }}"
+    update: false

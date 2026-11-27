@@ -1,0 +1,12 @@
+---
+# One host for now. Add further servers under `hosts:` with their own host_vars.
+all:
+  children:
+    ceos_ard_servers:
+      hosts:
+        api.ceos-ard.moregeo.it:
+          ansible_user: server
+          # The new server's address, until the domain points at it
+          # ansible_host: <IP address>
+        api.staging.ceos-ard.moregeo.it:
+          ansible_user: server

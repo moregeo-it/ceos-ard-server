@@ -1,0 +1,14 @@
+# Managed by Ansible ({{ app_name }} role).
+[Unit]
+Description={{ item.description }}
+
+[Timer]
+OnCalendar={{ item.calendar }}
+# The cleanup job takes per-workspace flocks the server also uses; jitter keeps
+# it from starting at the exact second anything else does.
+RandomizedDelaySec=300
+# Run a job that was missed while the host was down.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

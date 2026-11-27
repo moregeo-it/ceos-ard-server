@@ -1,0 +1,54 @@
+---
+# Non-secret configuration for the production host. Secrets live in vault.yml.
+
+# --- Code version -----------------------------------------------------------
+# The exact commit deployed. setup.yml only clones it on a new host; deploy.yml
+# moves the code, and only to this ref. Bump deliberately. Unset until the first
+# deploy, which needs a commit with PostgreSQL (#156) or later.
+app_version: ""
+
+# --- Public identity --------------------------------------------------------
+app_server_url: https://api.ceos-ard.moregeo.it
+app_client_url: https://editor.ceos-ard.moregeo.it
+app_cors_origins: https://editor.ceos-ard.moregeo.it
+app_environment: production
+
+# --- Upstream repository the app forks from ---------------------------------
+app_ceos_ard_org: ceos-org
+app_ceos_ard_repo: ceos-ard
+
+# --- Alerting ---------------------------------------------------------------
+app_alert_email_to: m.mohr@moregeo.it
+app_alert_email_from: no-reply@ceos-ard.moregeo.it
+app_smtp_host: w02124e6.kasserver.com
+app_smtp_port: 465
+app_smtp_mode: ssl
+app_smtp_user: no-reply@ceos-ard.moregeo.it
+
+# --- TLS (Caddy issues and renews certificates itself) -----------------------
+caddy_acme_email: m.mohr@moregeo.it
+
+# --- Maintenance jobs -------------------------------------------------------
+# Only the scripts that exist at app_version.
+app_timers:
+  - name: pr-status
+    script: scripts/check_pr_status.py
+    calendar: "*-*-* 00:00:00"
+    description: Check pull request status
+  - name: workspace-cleanup
+    script: scripts/cleanup_archived_workspaces.py
+    calendar: "*-*-* 02:00:00"
+    description: Delete archived workspaces
+  - name: token-expiry
+    script: scripts/check_token_expiry.py
+    calendar: "Mon *-*-* 09:00:00"
+    description: Warn before the GitHub service token expires
+  - name: idle-tokens
+    script: scripts/revoke_idle_tokens.py
+    calendar: "*-*-* 03:00:00"
+    description: Revoke the tokens of idle users
+
+# --- Host-level overrides ---------------------------------------------------
+# Off for now, to enable later: enabling a firewall remotely is the one step
+# that could lock us out of the host.
+manage_firewall: false

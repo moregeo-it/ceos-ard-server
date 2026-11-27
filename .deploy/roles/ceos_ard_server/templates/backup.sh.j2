@@ -1,0 +1,26 @@
+#!/bin/bash
+# Managed by Ansible ({{ app_name }} role).
+# Daily: a dump of the database, consistent even while the server writes to it.
+# Weekly (Mondays): an archive of the workspaces, the only writable copy of
+# users' work.
+set -euo pipefail
+
+WORKSPACES="{{ app_workspaces_root }}"
+DEST="{{ app_backup_dir }}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+# Restore with: pg_restore --clean --if-exists -d {{ app_database_name }} <dump>
+pg_dump -Fc -f "$DEST/db-$STAMP.dump" "{{ app_database_name }}"
+echo "database -> $DEST/db-$STAMP.dump"
+
+if [ "$(date +%u)" = "1" ]; then
+    tar czf "$DEST/workspaces-$STAMP.tar.gz" -C "$(dirname "$WORKSPACES")" "$(basename "$WORKSPACES")"
+    echo "workspaces -> $DEST/workspaces-$STAMP.tar.gz"
+fi
+
+# Retention; `|| true`, because ls fails while no file matches (pipefail)
+{ ls -1t "$DEST"/db-*.dump 2>/dev/null || true; } | tail -n +{{ app_backup_db_keep + 1 }} | xargs -r rm --
+{ ls -1t "$DEST"/workspaces-*.tar.gz 2>/dev/null || true; } | tail -n +{{ app_backup_workspaces_keep + 1 }} | xargs -r rm --
+
+# NOTE: these copies live on the same disk as the originals. Pulling them off
+# the host is a separate, still-manual step. See .deploy/README.md.
