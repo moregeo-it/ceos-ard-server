@@ -25,7 +25,7 @@ def names(response):
 
 def test_root_hides_build_files_and_templates(client, workspace):
     response = client.get(f"/workspaces/{workspace['id']}/files", params={"path": "/"})
-    assert names(response) == ["glossary", "images", "pfs", "requirements", "sections", "README.md"]
+    assert names(response) == ["glossary", "images", "pfs", "references", "requirements", "sections", "README.md"]
 
 
 def test_search_skips_hidden_folders(client, workspace):
@@ -84,6 +84,23 @@ def test_search_refuses_filters_the_type_does_not_have(client, workspace):
     response = client.get(f"/workspaces/{workspace['id']}/search", params={"filter": ["unknown:Requirement"]})
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == "Unknown search filter: unknown"
+
+
+def test_search_filters_by_file_type(client, workspace):
+    def paths(**params):
+        response = client.get(f"/workspaces/{workspace['id']}/search", params=params)
+        assert response.status_code == 200, response.text
+        return [result["path"] for result in response.json()]
+
+    assert paths(filter=["type:Requirement"]) == ["/requirements/general/metadata-machine-readable.yaml", "/requirements/general/unused.yaml"]
+    assert paths(filter=["type:Glossary term", "type:PFS"]) == ["/glossary/accuracy.yaml", "/pfs/NRB/document.yaml", "/pfs/SR/document.yaml"]
+    assert paths(query="general", filter=["type:Section"]) == ["/sections/requirement-categories/general.yaml"]
+    # References are found by their BibTeX text
+    assert paths(query="flattening", filter=["type:Reference"]) == ["/references/small2011.bib"]
+
+    response = client.get(f"/workspaces/{workspace['id']}/search", params={"filter": ["type:Image"]})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Unknown values of the search filter type: Image"
 
 
 def test_search_skips_other_file_types(client, workspace):
