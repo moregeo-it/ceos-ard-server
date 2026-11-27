@@ -18,9 +18,9 @@ def builds(monkeypatch):
     """Replaces the ceos-ard CLI with a build that writes a small document."""
     calls = []
 
-    async def build(workspace_path, workspace_id, workspace_type, pfs, include_format=None, build_dir=None):
-        calls.append({"pfs": pfs, "include_format": include_format})
-        prefix = Path(dependencies.build_service.output_prefix(workspace_path, pfs, build_dir))
+    async def build(workspace_path, workspace_id, workspace_type, selection, include_format=None, build_dir=None):
+        calls.append({"selection": selection, "include_format": include_format})
+        prefix = Path(dependencies.build_service.output_prefix(workspace_type, workspace_path, selection, build_dir))
         prefix.parent.mkdir(parents=True, exist_ok=True)
         prefix.with_suffix(".html").write_text(
             "<h1>Preview</h1><!-- edit: pfs/NRB/document.yaml --><p>Text</p><h2><!-- edit:pfs/NRB/document.yaml#/background -->Background</h2>",
@@ -37,7 +37,7 @@ def builds(monkeypatch):
 def test_preview_builds_the_selected_pfs(client, workspace, builds):
     response = client.post(f"/workspaces/{workspace['id']}/previews")
     assert response.status_code == 200, response.text
-    assert builds == [{"pfs": ["NRB"], "include_format": None}]
+    assert builds == [{"selection": ["NRB"], "include_format": None}]
     assert '<button class="edit" value="/pfs/NRB/document.yaml">Edit</button>' in response.text
     assert '<a name="/pfs/NRB/document.yaml"></a><button class="edit" value="/pfs/NRB/document.yaml#/background">Edit</button>' in response.text
     assert "<!--" not in response.text
@@ -49,7 +49,7 @@ def test_preview_builds_the_selected_pfs(client, workspace, builds):
 
 def test_preview_requires_a_pfs(client, workspace, builds):
     with SessionLocal() as db:
-        db.get(GitWorkspace, workspace["id"]).pfs = []
+        db.get(GitWorkspace, workspace["id"]).selection = []
         db.commit()
 
     response = client.post(f"/workspaces/{workspace['id']}/previews")
@@ -59,10 +59,10 @@ def test_preview_requires_a_pfs(client, workspace, builds):
 
 @pytest.mark.parametrize(("format", "media_type"), [("pdf", "application/pdf"), ("docx", "application/vnd.openxmlformats")])
 def test_download_document(client, workspace, builds, format, media_type):
-    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": format, "pfs": ["NRB"]})
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": format, "selection": ["NRB"]})
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith(media_type)
-    assert builds[0]["pfs"] == ["NRB"]
+    assert builds[0]["selection"] == ["NRB"]
 
 
 def test_each_user_runs_one_build_at_a_time():
@@ -109,8 +109,15 @@ def test_preview_assets_are_not_read_through_symlinks(client, workspace, builds,
 
 
 def test_downloads_only_offer_pdf_and_word(client, workspace, builds):
-    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "escape/../../../etc/hostname", "pfs": ["NRB"]})
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "escape/../../../etc/hostname", "selection": ["NRB"]})
     assert response.status_code == 400, response.text
+    assert builds == []
+
+
+def test_downloads_only_build_existing_pfs(client, workspace, builds):
+    response = client.get(f"/workspaces/{workspace['id']}/download", params={"format": "pdf", "selection": ["XYZ"]})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "The workspace has no PFS XYZ"
     assert builds == []
 
 

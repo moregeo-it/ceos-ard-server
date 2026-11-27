@@ -1,5 +1,6 @@
 """API tests against local git repositories: bare repositories stand in for ceos-org/ceos-ard and the user's fork on GitHub."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -13,6 +14,12 @@ import pytest
 DATA = Path(tempfile.mkdtemp(prefix="ceos-ard-server-test-"))
 UPSTREAM = DATA / "upstream.git"
 FORK = DATA / "fork.git"
+TYPES = [
+    {"id": "ceos-ard", "module": "ceos_ard", "upstream": {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main"}},
+]
+TYPES_CONFIG = DATA / "workspace-types.yaml"
+# JSON is YAML too
+TYPES_CONFIG.write_text(json.dumps({"types": TYPES}), encoding="utf-8")
 
 os.environ.update(
     {
@@ -22,9 +29,7 @@ os.environ.update(
         "SECRET_KEY": "test-secret-long-enough-for-hs256",
         "SESSION_COOKIE_SECURE": "false",
         "ENVIRONMENT": "development",
-        "CEOS_ARD_ORG": "ceos-org",
-        "CEOS_ARD_REPO": "ceos-ard",
-        "CEOS_ARD_BRANCH": "main",
+        "WORKSPACE_TYPES_CONFIG": str(TYPES_CONFIG),
     }
 )
 os.environ.setdefault("TOOLCHAINS_ROOT", str(DATA / "toolchains"))
@@ -97,17 +102,22 @@ def commit_upstream(files: dict[str, str], message: str):
     git("push", "-q", "origin", "main", cwd=clone)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def repositories():
-    source = DATA / "source"
-    for path, content in REPOSITORY.items():
+def create_repository(files: dict[str, str], upstream: Path, fork: Path):
+    """A bare upstream repository with `files`, and a bare clone of it as the user's fork."""
+    source = Path(tempfile.mkdtemp(dir=DATA))
+    for path, content in files.items():
         (source / path).parent.mkdir(parents=True, exist_ok=True)
         (source / path).write_text(content, encoding="utf-8", newline="\n")
     git("init", "-q", "-b", "main", cwd=source)
     git("add", "-A", cwd=source)
     git("-c", "user.name=Upstream", "-c", "user.email=upstream@example.org", "commit", "-q", "-m", "Initial", cwd=source)
-    git("clone", "-q", "--bare", str(source), str(UPSTREAM))
-    git("clone", "-q", "--bare", str(UPSTREAM), str(FORK))
+    git("clone", "-q", "--bare", str(source), str(upstream))
+    git("clone", "-q", "--bare", str(upstream), str(fork))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def repositories():
+    create_repository(REPOSITORY, UPSTREAM, FORK)
 
     command.upgrade(Config(str(Path(__file__).parent.parent / "alembic.ini")), "head")
     yield
@@ -159,12 +169,15 @@ class FakeGitHub:
         # GitHub accounts by login, for invitations
         self.users = {}
 
+    # The local bare repository that stands in for the user's fork of an upstream repository
+    forks = {"ceos-ard": FORK}
+
     async def fork(self, user, upstream_owner, upstream_repo):
         self.calls.append(("fork", upstream_owner, upstream_repo))
-        return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(FORK)}
+        return {"owner": {"login": user.username}, "name": upstream_repo, "clone_url": str(self.forks[upstream_repo])}
 
-    async def get_pfs_types(self, owner, repo, token, branch):
-        self.calls.append(("get_pfs_types", owner, repo, branch))
+    async def get_folder_names(self, owner, repo, token, path, branch):
+        self.calls.append(("get_folder_names", owner, repo, path, branch))
         return ["NRB", "SR"]
 
     async def get_github_user(self, username, access_token):
@@ -213,6 +226,6 @@ def client(user, github):
 
 @pytest.fixture
 def workspace(client):
-    response = client.post("/workspaces", json={"title": "NRB review", "pfs": ["NRB"]})
+    response = client.post("/workspaces", json={"title": "NRB review", "selection": ["NRB"]})
     assert response.status_code == 201, response.text
     return response.json()

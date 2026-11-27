@@ -4,13 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
-from app.config import settings
-
-# PFS ids become folder and file names and arguments of the ceos-ard CLI
-# Capital letters and digits only, like every official PFS id: "-" joins ids in build output names
-# (build_service.output_prefix). Widen it if CEOS ever needs other characters.
-PFS_ID_PATTERN = r"^[A-Z0-9]{2,10}$"
-PfsId = Annotated[str, StringConstraints(pattern=PFS_ID_PATTERN)]
+# Checked by the workspace type, see WorkspaceType.output_name()
+SelectionItem = Annotated[str, StringConstraints(min_length=1, max_length=500)]
 
 
 class WorkspaceError(BaseModel):
@@ -59,17 +54,19 @@ class SyncResult(BaseModel):
 class WorkspaceCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Workspace title")
     type: str | None = Field(None, description="Workspace type, the configured default if omitted")
-    pfs: list[PfsId] | None = Field(None, min_length=1, description="PFS to preview, at least one for workspace types with PFS")
+    selection: list[SelectionItem] | None = Field(
+        None, min_length=1, max_length=50, description="What the preview builds, for workspace types that select it on creation"
+    )
     description: str | None = Field(None, max_length=1000, description="Workspace description")
 
 
 class WorkspaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=100, description="New workspace title")
     description: str | None = Field(None, max_length=1000, description="New workspace description (send null to clear)")
-    pfs: list[PfsId] | None = Field(None, min_length=1, description="New PFS to preview, at least one")
+    selection: list[SelectionItem] | None = Field(None, min_length=1, max_length=50, description="What the preview builds")
     status: WorkspaceStatus | None = Field(None, description="New workspace status")
 
-    @field_validator("title", "pfs", "status")
+    @field_validator("title", "selection", "status")
     @classmethod
     def not_null(cls, value):
         """Omitting a field keeps it; only the description can be cleared with null."""
@@ -88,7 +85,7 @@ class WorkspaceResponse(BaseModel):
     upstream_repo: str
     upstream_branch: str
     user_id: str
-    pfs: list[str] | None
+    selection: list[str] | None
     description: str | None
     fork_repo_owner: str
     fork_repo_name: str
@@ -168,26 +165,14 @@ class RequirementCategory(BaseModel):
     requirements: list[str]
 
 
-class CreatePFSRequest(BaseModel):
-    id: PfsId = Field(..., description="PFS ID")
-    title: str = Field(..., min_length=1, max_length=100, description="PFS title")
-    version: str = Field(default=settings.PFS_DEFAULT_VERSION, description="PFS version")
-    applies_to: str | None = Field(None, description="Description of the PFS")
-    base: PfsId | None = Field(None, description="Base PFS ID")
-    type: str | None = Field(None, description="PFS type")
-    introduction: list[str] | None = Field(default=settings.PFS_DEFAULT_INTRODUCTION.copy(), description="PFS introduction")
-
-    class ConfigDict:
-        use_enum_values = True
-
-
-class PfsType(BaseModel):
+class SelectionOption(BaseModel):
     id: str
-    title: str | None = None
+    title: str
+    path: str | None = Field(None, description="The file or folder of the workspace that defines the option")
 
 
-class PFSTypesResponse(BaseModel):
-    pfs_types: list[PfsType]
+class SelectionOptionsResponse(BaseModel):
+    options: list[SelectionOption]
 
 
 class FileResponse(BaseModel):
@@ -195,6 +180,10 @@ class FileResponse(BaseModel):
     name: str
     is_directory: bool
     path: str
+
+
+class ActionResponse(FileResponse):
+    open: str | None = Field(None, description="The file the editor opens, if any")
 
 
 class FileUsage(BaseModel):

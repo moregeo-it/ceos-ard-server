@@ -1,7 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from app.workspace_types.base import Action, EditorRule, FileMenuRule, match_glob
+from app.workspace_types import get_type
+from app.workspace_types.base import Action, EditorRule, FileMenuRule, NameRule, match_glob
 
 
 @pytest.mark.parametrize(
@@ -31,7 +32,9 @@ def test_list_types(client):
     ceos_ard = types[0]
     assert ceos_ard["title"] == "CEOS-ARD"
     assert ceos_ard["available"] is True
-    assert ceos_ard["pfs"] is True
+    assert ceos_ard["preview"] == "build"
+    assert ceos_ard["selection"] == {"label": "PFS", "multiple": True, "on_create": True}
+    assert ceos_ard["downloads"] == ["pdf", "docx"]
     assert ceos_ard["upstream"] == {"owner": "ceos-org", "repo": "ceos-ard", "branch": "main", "url": "https://github.com/ceos-org/ceos-ard"}
     assert [action["id"] for action in ceos_ard["actions"]] == ["create-pfs"]
     assert [editor["match"] for editor in ceos_ard["editors"]] == ["glossary/*.yaml"]
@@ -52,9 +55,19 @@ def test_file_menu_rules_are_checked(rule):
         FileMenuRule.model_validate(rule)
 
 
-def test_actions_only_use_dialogs_of_the_editor():
+def test_actions_need_a_schema():
     with pytest.raises(ValidationError):
         Action.model_validate({"id": "a", "title": "A", "folder": "/pfs", "dialog": "CreateFileDialog"})
+
+
+def test_name_rules():
+    workspace_type = get_type("ceos-ard")
+    assert workspace_type.name_error("pfs/bad-id", "folder") == "A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB"
+    assert workspace_type.name_error("pfs/NRB", "folder") is None
+    assert workspace_type.name_error("pfs/notes.md", "file") is None
+    assert workspace_type.name_error("requirements/bad-id", "folder") is None
+    with pytest.raises(ValidationError):
+        NameRule.model_validate({"match": "a/*", "pattern": "(", "message": "x"})
 
 
 def test_editor_rules_are_checked():
@@ -68,5 +81,5 @@ def test_workspaces_store_their_type_and_upstream(workspace):
 
 
 def test_unknown_types_are_refused(client):
-    response = client.post("/workspaces", json={"title": "Unknown", "type": "unknown", "pfs": ["NRB"]})
+    response = client.post("/workspaces", json={"title": "Unknown", "type": "unknown", "selection": ["NRB"]})
     assert response.status_code == 400, response.text

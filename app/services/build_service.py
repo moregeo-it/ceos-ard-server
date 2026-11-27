@@ -1,7 +1,5 @@
 import asyncio
-import hashlib
 import logging
-import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -11,31 +9,24 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.workspace import GitWorkspace, WorkspaceStatus
-from app.schemas.workspace import PFS_ID_PATTERN
 from app.utils import limits
 from app.utils.process import OutputTooLarge
 from app.utils.sandbox import BuildOutOfMemory, BuildOutputTooLarge, run_build
 from app.utils.toolchains import Toolchain, ToolchainError, toolchains
 from app.workspace_types import WorkspaceType
+from app.workspace_types.base import SelectionError
 
 logger = logging.getLogger(__name__)
 
 
 class BuildService:
     @staticmethod
-    def output_prefix(workspace_path: Path, pfs: list[str] | None, build_dir: Path | None = None) -> str:
-        """Where a selection's outputs go (`<prefix>.html`, `.pdf`, `.docx`): `build_dir`, else the workspace's `build/`.
-
-        Every build and read goes through here, so the ids are checked here too, stored ones included:
-        `../` in an id would reach another workspace, a leading `-` would be a CLI option.
-        """
-        if not pfs:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one PFS for the preview")
-        if not all(re.fullmatch(PFS_ID_PATTERN, pfs_id) for pfs_id in pfs):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PFS id")
-        name = "-".join(pfs)
-        if len(name) > 200:  # a file name holds at most 255 bytes
-            name = hashlib.sha256(name.encode()).hexdigest()
+    def output_prefix(workspace_type: WorkspaceType, workspace_path: Path, selection: list[str] | None, build_dir: Path | None = None) -> str:
+        """Where a selection's outputs go (`<prefix>.html`, `.pdf`, `.docx`): `build_dir`, else the workspace's `build/`."""
+        try:
+            name = workspace_type.output_name(selection or [])
+        except SelectionError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
         return str((build_dir or workspace_path / "build") / name)
 
     @staticmethod
@@ -96,7 +87,7 @@ class BuildService:
         workspace_path: Path,
         workspace_id: str,
         workspace_type: WorkspaceType,
-        pfs: list[str],
+        selection: list[str],
         include_format: str | None = None,
         build_dir: Path | None = None,
     ) -> dict[str, Any]:
@@ -106,7 +97,7 @@ class BuildService:
         if not workspace_path.exists():
             raise FileNotFoundError(f"Workspace path {workspace_path} does not exist")
 
-        output_file = self.output_prefix(workspace_path, pfs, build_dir)
+        output_file = self.output_prefix(workspace_type, workspace_path, selection, build_dir)
 
         def error(message: str) -> dict[str, Any]:
             return {"status": "error", "message": message, "output_file": output_file}
@@ -120,8 +111,8 @@ class BuildService:
         except ToolchainError as e:
             return error(str(e))
 
-        logger.info(f"Building workspace {workspace_id} with PFS {' '.join(pfs)} and the toolchain {toolchain.name}")
-        command = workspace_type.build_command(workspace_path, pfs, output_file, include_format)
+        logger.info(f"Building workspace {workspace_id} with {' '.join(selection)} and the toolchain {toolchain.name}")
+        command = workspace_type.build_command(workspace_path, selection, output_file, include_format)
         output_dir = Path(output_file).parent
         # The build may write there, so not through a symlink, e.g. a committed `build` link
         if output_dir.is_symlink() or not output_dir.resolve().is_relative_to((build_dir or workspace_path).resolve()):

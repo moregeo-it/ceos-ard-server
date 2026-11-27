@@ -31,14 +31,14 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
 
 
-def make_branch_name(title: str, pfs: list[str] | None, workspace_id: str) -> str:
+def make_branch_name(title: str, selection: list[str] | None, workspace_id: str) -> str:
     """ws-<slug>-<last 8 characters of the id>, at most 46 characters.
 
-    The slug comes from the title, or from the PFS selection when the title leaves fewer than 3 characters.
+    The slug comes from the title, or from the selection when the title leaves fewer than 3 characters.
     """
     suffix = f"-{workspace_id[-8:]}"
     slug = _slugify(title)
     if len(slug.replace("-", "")) < 3:
-        slug = _slugify(" ".join(pfs or []))
+        slug = _slugify(" ".join(selection or []))
     slug = slug[: BRANCH_NAME_MAX_LENGTH - len("ws-") - len(suffix)].rstrip("-")
     return f"ws-{slug}{suffix}" if slug else f"ws{suffix}"

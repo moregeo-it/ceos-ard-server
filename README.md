@@ -246,23 +246,34 @@ docs pages of its own.
 A workspace type defines which repository workspaces are created from and how the editor works with its
 files. The server is the only place they are defined; the editor reads them from `GET /types`.
 
-- `WORKSPACE_TYPES` lists the types offered for new workspaces, separated by commas; the first one is the
-  default. Workspaces of a type that isn't listed anymore keep working.
-- Each type has its own settings for the upstream repository, e.g. `CEOS_ARD_ORG`, `CEOS_ARD_REPO` and
-  `CEOS_ARD_BRANCH` for `ceos-ard`. Every workspace stores the upstream it was created from.
+The types of a deployment are configured in `workspace-types.yaml`, see
+[`workspace-types.example.yaml`](workspace-types.example.yaml), or in the file `WORKSPACE_TYPES_CONFIG` points
+to. Without the file, the server offers CEOS-ARD with its defaults.
 
-Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a `create()` function,
-registered in `_FACTORIES` in [`__init__.py`](app/workspace_types/__init__.py). The rules are checked when
-the server starts, so a typo stops it instead of being ignored.
+- Each entry has an `id`, which every workspace stores, and the `module` that implements it. The first offered type
+  is the default.
+- `title`, `description`, `color` and `upstream` replace the module's defaults; `settings` are the module's own,
+  checked by its `Settings` model. Every workspace stores the upstream it was created from.
+- With `offered: false`, no new workspaces can be created; existing ones keep working. Removing a type from the file
+  breaks its workspaces.
+
+Each type is a Python module in [`app/workspace_types/`](app/workspace_types/) with a function
+`create(type_id, settings)` that returns the type with its defaults, and optionally a Pydantic model `Settings`. The
+configuration and the rules are checked when the server starts, so a typo stops it instead of being ignored.
 
 | Setting | Meaning |
 |---|---|
 | `upstream` | The repository new workspaces fork and propose changes to |
-| `paths` | Root folders the file tree doesn't show and the API refuses, e.g. `build` |
-| `pfs` | Whether workspaces select PFS, for the preview built with the ceos-ard CLI |
+| `paths` | Root folders the file tree doesn't show and the API refuses, e.g. `build`, or the only ones it shows, e.g. `docs` |
+| `preview` | `build`: the owner builds a document from the workspace's selection with `build_command()`; `file`: the preview shows the open file, from `render_file()` |
+| `selection` | What workspaces select for the `build` preview: its `label` (e.g. "PFS"), whether `multiple` can be selected, and whether new workspaces select it (`on_create`). The options come from `selection_options()`, before creation from `upstream_selection_options()`; `output_name()` checks a selection and names its outputs |
+| `downloads` | The formats the built document can be downloaded in, `pdf` and `docx` |
+| `expanded_folders` | Folders the file tree shows opened when entering a workspace |
 | `labels` | Texts the editor shows instead of its defaults, e.g. `usage` for "Used in" |
-| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema |
-| `actions` | Entries in the file menu of a folder that open an editor dialog, e.g. "Add New PFS" |
+| `editors` | Form editors: the first rule whose glob matches a file opens it in a form with its JSON Schema; the `codec` turns the file into the form data and back (`yaml`, `glossary-term`). Formatted text declares its format with `contentMediaType`, e.g. `text/markdown` |
+| `search_filters` | Filters of the file search, answered by `matches_search_filters()` |
+| `actions` | Entries in the file menu of a folder, e.g. "Add New PFS": a generic dialog asks for the input with the action's `schema`, or the form `action_form()` derives from it, e.g. with options from the workspace; `run_action()` creates the file or folder, which is staged, and names the file the editor opens |
+| `names` | Names new and renamed files and folders must have, e.g. PFS folders named by their id |
 | `file_menu` | Which operations the file menu offers, see below |
 | `file_usage()` | Which files use a file, for "Used in" and the delete dialog |
 
@@ -283,9 +294,8 @@ file_menu=[
 ]
 ```
 
-To add a type: write the module, register it, add its upstream settings to [`app/config.py`](app/config.py)
-and [`.env.example`](.env.example), and add it to `WORKSPACE_TYPES`. The editor needs no change unless the
-type uses a dialog it doesn't have yet. For the editor's tests, export the type with
+To add a type: write the module and add it to the configuration. The editor needs no change unless the
+type uses a dialog or codec it doesn't have yet. For the editor's tests, export the type with
 `pixi run python scripts/export_types.py <type id>`.
 
 ## 🧪 Development
@@ -466,8 +476,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/USER/.pi
 
 #### Workspace (`git_workspaces`)
 
-- A clone of the owner's fork, on the branch `ws-<title slug, or the PFS selection>-<last 8 characters of the id>`, fixed at creation (workspaces created before it keep `workspace/<id>`)
-- The PFS selection (JSON list), which the preview builds
+- A clone of the owner's fork, on the branch `ws-<title slug, or the selection>-<last 8 characters of the id>`, fixed at creation (workspaces created before it keep `workspace/<id>`)
+- The selection (JSON list), e.g. PFS ids, which the preview builds
 - Pull Request number and status
 - `ACTIVE` or `ARCHIVED`; an archived workspace is deleted a month after `archived_at`
 

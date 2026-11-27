@@ -1,6 +1,6 @@
 """mtime-keyed YAML parse cache for the hot read paths.
 
-PFS documents are parsed on the event loop on every /pfs and /context request but change
+PFS documents are parsed on the event loop on every /selection-options and /context request but change
 only on save. Keyed on (mtime_ns, size) — size breaks the tie for rewrites within the
 filesystem's mtime resolution.
 """

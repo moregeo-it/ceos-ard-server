@@ -32,7 +32,7 @@ def as_user(user: User) -> dict[str, str]:
 
 def test_the_user_stream_tells_the_owner_about_new_workspaces(client):
     with client.websocket_connect("/events") as events:
-        response = client.post("/workspaces", json={"title": "SR review", "pfs": ["SR"]})
+        response = client.post("/workspaces", json={"title": "SR review", "selection": ["SR"]})
         assert response.status_code == 201, response.text
         event = events.receive_json()
 

@@ -1,19 +1,18 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies import get_workspace_service
 from app.schemas.workspace import (
+    ActionResponse,
     Commit,
-    CreatePFSRequest,
-    FileResponse,
-    PFSTypesResponse,
     Proposal,
     ProposalRequest,
+    SelectionOptionsResponse,
     SyncResult,
     WorkspaceCreate,
     WorkspaceResponse,
@@ -205,35 +204,52 @@ async def sync_workspace_repository(
 
 
 @router.get(
-    "/{workspace_id}/pfs", response_model=PFSTypesResponse, summary="List PFS types", description="List PFS types of a workspace", tags=["PFS"]
+    "/{workspace_id}/selection-options",
+    response_model=SelectionOptionsResponse,
+    summary="List what the workspace can select",
+    description="The options of the workspace's selection for the preview, e.g. its PFS or documents",
 )
-async def list_workspace_pfs_types(
+async def list_selection_options(
     workspace_id: str,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
-) -> PFSTypesResponse:
-    with internal_errors("list PFS types", logger):
-        pfs_types = await workspace_service.get_workspace_pfs_types(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
-        return {"pfs_types": pfs_types}
+) -> dict:
+    with internal_errors("list selection options", logger):
+        options = await workspace_service.list_selection_options(db=db, workspace_id=workspace_id, user_id=current_user["user"].id)
+        return {"options": options}
+
+
+@router.get(
+    "/{workspace_id}/actions/{action}",
+    summary="Get the form of an action",
+    description="The JSON Schema and UI schema of an action's input, e.g. with options from the workspace. Owner only.",
+)
+async def get_workspace_action_form(
+    workspace_id: str,
+    action: str,
+    db: Session = Depends(get_db),
+    current_user: dict[str, Any] = Depends(require_github_user),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> dict[str, Any]:
+    with internal_errors("get action form", logger):
+        return await workspace_service.get_action_form(db=db, workspace_id=workspace_id, user_id=current_user["user"].id, action=action)
 
 
 @router.post(
-    "/{workspace_id}/pfs",
-    summary="Create a PFS",
-    description="Create a PFS of a workspace",
-    tags=["PFS"],
-    response_model=FileResponse,
+    "/{workspace_id}/actions/{action}",
+    summary="Run an action of the workspace type",
+    description="Run an action that the workspace type offers, e.g. creating a new glossary term. Returns the created file.",
+    response_model=ActionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_workspace_pfs(
+async def run_workspace_action(
     workspace_id: str,
-    create_pfs_request: CreatePFSRequest,
+    action: str,
+    data: dict[str, Any] = Body(default_factory=dict),
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(require_github_user),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ):
-    with internal_errors("create PFS", logger):
-        return await workspace_service.create_workspace_pfs(
-            db=db, workspace_id=workspace_id, user=current_user["user"], request_data=create_pfs_request
-        )
+    with internal_errors("run action", logger):
+        return await workspace_service.run_action(db=db, workspace_id=workspace_id, user=current_user["user"], action=action, data=data)

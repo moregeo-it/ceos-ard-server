@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse as StarletteFileResponse
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
@@ -164,13 +164,20 @@ async def patch_file(
 )
 async def search_files(
     workspace_id: str,
-    query: str = Query(description="Search terms to look for in files and folders"),
+    query: str | None = Query(None, description="Search terms to look for in files and folders"),
+    filter: list[str] = Query([], description="Search filters of the workspace type as `filter:value`, e.g. `status:approved`"),
     db: Session = Depends(get_db),
     file_service: FileService = Depends(get_file_service),
     current_user: dict[str, Any] = Depends(require_github_user),
 ):
+    filters: dict[str, set[str]] = {}
+    for item in filter:
+        key, separator, value = item.partition(":")
+        if not separator or not value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid filter: {item}")
+        filters.setdefault(key, set()).add(value)
     with internal_errors("search files", logger):
-        return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=query, user_id=current_user["user"].id)
+        return await file_service.search_files(db=db, workspace_id=workspace_id, search_query=query, user_id=current_user["user"].id, filters=filters)
 
 
 @router.get(

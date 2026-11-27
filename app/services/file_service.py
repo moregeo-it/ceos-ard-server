@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -12,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.workspace import PullRequestStatus, WorkspaceStatus
 from app.schemas.events import EventType
-from app.schemas.workspace import PFS_ID_PATTERN, FilePatchRequest, SyncStatus
+from app.schemas.workspace import FilePatchRequest, SyncStatus
 from app.services.build_service import BuildService
 from app.services.comment_service import follow_renames, move_threads
 from app.services.events_service import EventBroker, event_broker
@@ -22,7 +21,7 @@ from app.utils.extraction import get_excerpt, get_file_media_type
 from app.utils.file_utils import create_file, create_folder
 from app.utils.git_utils import format_commit, get_file_info, get_file_status, get_repo, get_repo_changes
 from app.utils.limits import FileTooLarge, check_read_size
-from app.utils.locks import run_exclusive
+from app.utils.locks import run_exclusive, user_build_locks
 from app.utils.validation import (
     ignore_file_path,
     normalize_workspace_path,
@@ -31,7 +30,7 @@ from app.utils.validation import (
     validate_pathname,
     validate_workspace_path,
 )
-from app.workspace_types import PathRules
+from app.workspace_types import PathRules, WorkspaceType
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +223,7 @@ class FileService:
         self._require_operation(workspace, folder, "create", "folder")
         target_path = folder / name
         self._require_visible(workspace.abs_path, target_path, workspace.workspace_type.paths)
+        self._check_name(workspace.workspace_type, workspace.abs_path, target_path, request_data.type)
 
         async def transaction():
             if target_path.exists():
@@ -260,12 +260,6 @@ class FileService:
         if ignore_file_path(target_path, target_path.relative_to(workspace_path), rules):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"The workspace hides {target_path.name}, choose another name")
 
-    @staticmethod
-    def _check_pfs_folder(workspace_path: Path, folder: Path) -> None:
-        # A PFS folder name is its id, which the preview and the CLI only accept in this form
-        if folder.parent == workspace_path / "pfs" and not re.fullmatch(PFS_ID_PATTERN, folder.name):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A PFS id consists of 2 to 10 capital letters or digits, e.g. NRB")
-
     async def store_file_content(self, db: Session, workspace_id: str, file_path: str, read_content: Callable[[], Awaitable[bytes]], user_id: str):
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id, min_role="owner")
 
@@ -286,11 +280,12 @@ class FileService:
                     self._require_operation(workspace, target_path.parent, "create", "folder")
                 validate_new_file_name(Path(file_path).name)  # as sent, before the path check trims it
                 validate_new_file_name(target_path.name)  # as written, after resolving symlinks
+                self._check_name(workspace.workspace_type, workspace.abs_path, target_path, "file")
                 # And the folders it creates
                 folder = target_path.parent
                 while not folder.exists():
                     validate_new_name(folder.name)
-                    self._check_pfs_folder(workspace.abs_path, folder)
+                    self._check_name(workspace.workspace_type, workspace.abs_path, folder, "folder")
                     folder = folder.parent
             try:
                 # Recreate the parent directory if it was removed (e.g. its folder was deleted while
@@ -428,7 +423,7 @@ class FileService:
                 self._require_operation(workspace, source_path, "rename", "folder" if source_path.is_dir() else "file")
                 old_path = normalize_workspace_path(source_path, workspace.abs_path)
                 result = await self._update_file_name(
-                    workspace.abs_path, file_path, new_name=operation_request.target, rules=workspace.workspace_type.paths
+                    workspace.abs_path, file_path, new_name=operation_request.target, workspace_type=workspace.workspace_type
                 )
                 # Comment threads follow the file; clients move them on file.renamed as well
                 move_threads(db, workspace_id, old_path, result["path"])
@@ -460,16 +455,19 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported operation specified")
         return await run_exclusive(workspace_id, transaction)
 
-    async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str, rules: PathRules):
-        source_path = validate_workspace_path(file_path, workspace_path, exists=True, rules=rules)
+    @staticmethod
+    def _check_name(workspace_type: WorkspaceType, workspace_path: Path, target_path: Path, kind: str) -> None:
+        if message := workspace_type.name_error(normalize_workspace_path(target_path, workspace_path, absolute=False), kind):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+    async def _update_file_name(self, workspace_path: Path, file_path: str, new_name: str, workspace_type: WorkspaceType):
+        source_path = validate_workspace_path(file_path, workspace_path, exists=True, rules=workspace_type.paths)
         new_name = validate_new_file_name(new_name) if source_path.is_file() else validate_pathname(new_name)
         repo = get_repo(workspace_path)
 
-        if source_path.is_dir():
-            self._check_pfs_folder(workspace_path, source_path.parent / new_name)
-
         target_path = source_path.parent / new_name
-        self._require_visible(workspace_path, target_path, rules)
+        self._require_visible(workspace_path, target_path, workspace_type.paths)
+        self._check_name(workspace_type, workspace_path, target_path, "folder" if source_path.is_dir() else "file")
         if target_path.exists():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A file/folder with the given name exists already")
 
@@ -531,22 +529,44 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to revert file changes: {str(e)}") from e
 
-    async def search_files(self, db: Session, workspace_id: str, search_query: str, user_id: str):
-        if not search_query:
+    async def search_files(self, db: Session, workspace_id: str, search_query: str | None, user_id: str, filters: dict[str, set[str]] | None = None):
+        query = (search_query or "").strip()
+        filters = {key: values for key, values in (filters or {}).items() if values}
+        if not query and not filters:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query is required")
-        if len(search_query.strip()) < 3:
+        if query and len(query) < 3:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query must be at least 3 characters long")
 
         workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        workspace_type = workspace.workspace_type
+        known = {search_filter.id: search_filter.values for search_filter in workspace_type.search_filters}
+        for key, values in filters.items():
+            if key not in known:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown search filter: {key}")
+            if unknown := sorted(values - set(known[key])):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown values of the search filter {key}: {', '.join(unknown)}"
+                )
+
+        def search(files: list[dict]) -> list[dict]:
+            if filters:
+                files = [
+                    file
+                    for file in files
+                    if not file["is_directory"]
+                    and file["status"] != "deleted"
+                    and workspace_type.matches_search_filters(workspace.abs_path, file["path"], filters)
+                ]
+                if not query:
+                    return [{**file, "type": "filter"} for file in sorted(files, key=lambda file: file["path"])]
+            return self._search_file_contents(files, workspace.abs_path, query.lower(), workspace_type.searchable_extensions)
 
         try:
             files = await self.get_workspace_files("/", db, workspace_id, user_id, recurse=True)
 
             # In a thread: reads every searchable file. Deliberately lock-free — a racing save
             # yields at worst a stale hit, and the per-file error handling covers deletions.
-            return await asyncio.to_thread(
-                self._search_file_contents, files, workspace.abs_path, search_query.lower(), workspace.workspace_type.searchable_extensions
-            )
+            return await asyncio.to_thread(search, files)
         except HTTPException:
             raise
         except Exception as e:
@@ -789,8 +809,13 @@ class FileService:
         rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
         repo = get_repo(workspace.abs_path)
 
+        workspace_type = workspace.workspace_type
         try:
-            usage = await workspace.workspace_type.file_usage(workspace.abs_path, rel_file_path)
+            if workspace_type.usage_in_sandbox:
+                async with user_build_locks(user_id):
+                    usage = await workspace_type.file_usage(workspace.abs_path, rel_file_path)
+            else:
+                usage = await workspace_type.file_usage(workspace.abs_path, rel_file_path)
         except Exception as e:
             # The file still opens, just without its usage
             logger.warning(f"Usage of {rel_file_path} in workspace {workspace_id} failed: {e}")

@@ -233,23 +233,16 @@ class GitHubService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} or path '{path}' not found") from e
             raise
 
-    async def get_pfs_types(self, owner: str, repo: str, token: str, branch: str) -> list[str]:
+    async def get_folder_names(self, owner: str, repo: str, token: str, path: str, branch: str) -> list[str]:
+        """The names of the folders in `path` of the repository, without hidden ones, sorted."""
         try:
-            if not token:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing GitHub access token")
-
-            contents = await self.get_repository_contents(owner, repo, token, "pfs", branch)
-
-            pfs_folders = [item["name"] for item in contents if item["type"] == "dir" and not item["name"].startswith(".")]
-
-            logger.info(f"Found {len(pfs_folders)} PFS folders in {owner}/{repo}")
-
-            return sorted(pfs_folders)
+            contents = await self.get_repository_contents(owner, repo, token, path, branch)
+            return sorted(item["name"] for item in contents if item["type"] == "dir" and not item["name"].startswith("."))
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Failed to retrieve PFS information: {e}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve PFS information") from e
+            logger.error(f"Failed to list the folders of {owner}/{repo}/{path}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list the folders of {path}") from e
 
     async def fork(self, user: User, upstream_owner: str, upstream_repo: str) -> dict[str, Any]:
         url = f"{self.base_url}/repos/{upstream_owner}/{upstream_repo}/forks"

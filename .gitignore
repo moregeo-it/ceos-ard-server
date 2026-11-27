@@ -224,3 +224,6 @@ __marimo__/
 # Toolchains of the builds and their browsers
 toolchains/
 playwright-browsers/
+
+# The workspace types of the deployment, see workspace-types.example.yaml
+/workspace-types.yaml

@@ -81,12 +81,13 @@ workspace_locks = KeyedLocks()
 # all of a user's workspaces share it and recreating it is a per-user operation.
 fork_locks = KeyedLocks()
 
-# One lock per build output prefix (workspace id + pfs selection): serializes preview builds
+# One lock per build output prefix (workspace id + selection): serializes preview builds
 # that would clobber each other's output, without blocking file edits behind a 60s build.
 build_locks = KeyedLocks()
 
-# One lock per user around builds: a user waits for their own previous build instead of taking
-# another of the BUILD_CONCURRENCY slots, so one user can't keep everyone else's builds waiting.
+# One lock per user around builds and what else runs in the build sandbox, e.g. rendering a file:
+# a user waits for their own previous one instead of taking another of the BUILD_CONCURRENCY slots,
+# so one user can't keep everyone else's builds waiting.
 user_build_locks = KeyedLocks()
 
 # One lock per user, serializing provider token refreshes: GitHub's refresh token is single-use,

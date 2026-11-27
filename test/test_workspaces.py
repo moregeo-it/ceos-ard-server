@@ -8,7 +8,7 @@ def test_create_workspace_forks_ceos_ard(client, github, workspace):
     assert ("fork", "ceos-org", "ceos-ard") in github.calls
     assert workspace["fork_repo_owner"] == "jdoe"
     assert workspace["fork_repo_name"] == "ceos-ard"
-    assert workspace["pfs"] == ["NRB"]
+    assert workspace["selection"] == ["NRB"]
     branch = workspace["branch_name"]
     assert branch == f"ws-nrb-review-{workspace['id'][-8:]}"
     assert git("branch", "--list", branch, cwd=FORK).strip(" *") == branch
@@ -38,7 +38,7 @@ def test_branch_name_keeps_base_letters():
     assert make_branch_name("Ærø Łódź Þór Café", None, ID) == "ws-aero-lodz-thor-cafe-1a2b3c4d"
 
 
-def test_branch_name_falls_back_to_the_pfs():
+def test_branch_name_falls_back_to_the_selection():
     assert make_branch_name("合成孔径雷达", ["NRB", "SAR"], ID) == "ws-nrb-sar-1a2b3c4d"
     assert make_branch_name("A1", ["NRB"], ID) == "ws-nrb-1a2b3c4d"
     assert make_branch_name("合成孔径雷达", None, ID) == "ws-1a2b3c4d"
@@ -46,15 +46,33 @@ def test_branch_name_falls_back_to_the_pfs():
 
 
 def test_create_workspace_requires_pfs(client):
-    response = client.post("/workspaces", json={"title": "No PFS", "pfs": []})
+    response = client.post("/workspaces", json={"title": "No PFS", "selection": []})
     assert response.status_code == 422
+    response = client.post("/workspaces", json={"title": "No PFS"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "At least one PFS is required"
+    response = client.post("/workspaces", json={"title": "Bad PFS", "selection": ["../x"]})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid PFS id"
 
 
 def test_list_pfs_of_ceos_ard(client, github):
-    response = client.get("/pfs")
+    response = client.get("/types/ceos-ard/selection-options")
     assert response.status_code == 200
-    assert response.json() == {"pfs_types": [{"id": "NRB", "title": None}, {"id": "SR", "title": None}]}
-    assert ("get_pfs_types", "ceos-org", "ceos-ard", "main") in github.calls
+    assert response.json() == {"options": [{"id": "NRB", "title": "NRB", "path": None}, {"id": "SR", "title": "SR", "path": None}]}
+    assert ("get_folder_names", "ceos-org", "ceos-ard", "pfs", "main") in github.calls
+
+
+def test_select_pfs(client, workspace):
+    url = f"/workspaces/{workspace['id']}"
+    response = client.patch(url, json={"selection": ["NRB", "SR"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["selection"] == ["NRB", "SR"]
+    invalid = [(["XYZ"], "The workspace has no PFS XYZ"), (["NRB", "NRB"], "A PFS is selected more than once"), (["-x"], "Invalid PFS id")]
+    for selection, detail in invalid:
+        response = client.patch(url, json={"selection": selection})
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == detail
 
 
 def test_sync_reports_upstream_behind(client, workspace):
