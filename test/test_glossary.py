@@ -7,7 +7,8 @@ from conftest import GLOSSARY_FORK, file_url, git
 
 from app.db.database import SessionLocal
 from app.models.workspace import GitWorkspace
-from app.workspace_types import eo_glossary_render, get_type
+from app.utils.sandbox import run_python
+from app.workspace_types import eo_glossary, eo_glossary_render, get_type
 
 TERMS = "/docs/terms"
 
@@ -40,7 +41,35 @@ def test_only_docs_are_shown(client, glossary_workspace):
 def test_terms_list_the_terms_linking_to_them(client, glossary_workspace):
     response = client.get(file_url(glossary_workspace, "context", f"{TERMS}/accuracy.md"))
     assert response.status_code == 200, response.text
-    assert response.json()["usage"] == [{"label": "Precision", "path": f"{TERMS}/precision.md"}]
+    assert response.json()["tracks_usage"] is True
+    response = client.get(file_url(glossary_workspace, "usage", f"{TERMS}/accuracy.md"))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"usage": [{"label": "Precision", "path": f"{TERMS}/precision.md"}]}
+
+    response = client.get(file_url(glossary_workspace, "context", "/docs/intro.md"))
+    assert response.json()["tracks_usage"] is False
+    response = client.get(file_url(glossary_workspace, "usage", "/docs/intro.md"))
+    assert response.status_code == 404, response.text
+
+
+def test_preview_and_usage_are_rendered_once_until_the_workspace_changes(client, glossary_workspace, monkeypatch):
+    runs = []
+
+    async def counted(*args, **kwargs):
+        runs.append(args)
+        return await run_python(*args, **kwargs)
+
+    monkeypatch.setattr(eo_glossary, "run_python", counted)
+    path = f"{TERMS}/accuracy.md"
+    assert client.get(file_url(glossary_workspace, "render", path)).status_code == 200
+    assert client.get(file_url(glossary_workspace, "usage", path)).json()["usage"] == [{"label": "Precision", "path": f"{TERMS}/precision.md"}]
+    assert client.get(file_url(glossary_workspace, "render", path)).status_code == 200
+    assert len(runs) == 1
+
+    response = client.put(file_url(glossary_workspace, "files", f"{TERMS}/precision.md"), content="---\ntitle: Precision\n---\n\n# Precision\n")
+    assert response.status_code == 200, response.text
+    assert client.get(file_url(glossary_workspace, "usage", path)).json()["usage"] == []
+    assert len(runs) == 2
 
 
 def test_render_a_term(client, glossary_workspace):
@@ -87,7 +116,7 @@ def test_symlinks_out_of_the_workspace_are_not_read(client, glossary_workspace, 
     response = client.get(file_url(glossary_workspace, "render", f"{TERMS}/precision.md"))
     assert response.status_code == 200, response.text
     assert "Leaked" not in response.text
-    response = client.get(file_url(glossary_workspace, "context", f"{TERMS}/precision.md"))
+    response = client.get(file_url(glossary_workspace, "usage", f"{TERMS}/precision.md"))
     assert response.status_code == 200, response.text
     assert "Leaked" not in response.text
     response = client.get(f"/workspaces/{glossary_workspace['id']}/search", params={"filter": ["status:approved"]})

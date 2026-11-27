@@ -2,7 +2,7 @@
 Renders and links the terms of the CEOS EO Glossary.
 
 Workspace content is untrusted, so the server runs this file as a script in the build sandbox
-(`render` and `usage`), and imports it only for what reads few files and parses no Markdown.
+(the preview and usage of a file), and imports it only for what reads few files and parses no Markdown.
 It needs nothing but the standard library, PyYAML and markdown-it.
 """
 
@@ -74,20 +74,26 @@ def read_file(root: Path, path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def build_term_map(root: Path) -> dict[str, TermInfo]:
-    """Port of buildTermMap in the glossary's plugins/remark-glossary-links.mjs."""
-    term_map: dict[str, TermInfo] = {}
+def read_terms(root: Path) -> list[tuple[Path, str]]:
+    """The term files and their content, without those that can't be read."""
     terms_dir = root / TERMS_DIR
     if not terms_dir.is_dir():
-        return term_map
-
+        return []
+    terms = []
     for file in sorted(terms_dir.iterdir()):
         if file.suffix != ".md":
             continue
         try:
-            content = read_file(root, file)
+            terms.append((file, read_file(root, file)))
         except OSError:
             continue
+    return terms
+
+
+def build_term_map(root: Path, terms: list[tuple[Path, str]] | None = None) -> dict[str, TermInfo]:
+    """Port of buildTermMap in the glossary's plugins/remark-glossary-links.mjs."""
+    term_map: dict[str, TermInfo] = {}
+    for file, content in read_terms(root) if terms is None else terms:
         slug = file.stem
         path = f"/{TERMS_DIR}/{file.name}"
 
@@ -110,9 +116,15 @@ def build_term_map(root: Path) -> dict[str, TermInfo]:
 class TermLinker:
     """Longest match first, case-insensitive, optional plural, never a self link."""
 
-    def __init__(self, term_map: dict[str, TermInfo], self_slugs: set[str]):
+    def __init__(self, term_map: dict[str, TermInfo], self_slugs: set[str], text: str | None = None):
+        """With `text`, only for the terms it contains, which keeps the pattern small."""
         self.term_map = term_map
-        keys = sorted((key for key, info in term_map.items() if info.slug not in self_slugs), key=len, reverse=True)
+        lower = text.lower() if text is not None else None
+        keys = sorted(
+            (key for key, info in term_map.items() if info.slug not in self_slugs and (lower is None or key in lower)),
+            key=len,
+            reverse=True,
+        )
         self.pattern = None
         if keys:
             alternatives = "|".join(re.escape(key) for key in keys)
@@ -336,10 +348,8 @@ def tags(root: Path, file_path: str) -> set[str]:
         return set()
 
 
-def backlinks(root: Path, file_path: str, term_map: dict[str, TermInfo] | None = None) -> list[TermInfo]:
-    terms_dir = root / TERMS_DIR
+def backlinks(root: Path, file_path: str, term_map: dict[str, TermInfo], terms: list[tuple[Path, str]]) -> list[TermInfo]:
     target = Path(file_path).stem
-    term_map = term_map if term_map is not None else build_term_map(root)
     keys = [key for key, info in term_map.items() if info.slug == target]
     if not keys:
         return []
@@ -352,18 +362,16 @@ def backlinks(root: Path, file_path: str, term_map: dict[str, TermInfo] | None =
         re.IGNORECASE | re.ASCII,
     )
     result = []
-    for file in sorted(terms_dir.glob("*.md")):
+    for file, content in terms:
         if file.stem == target:
             continue
-        try:
-            _, body = split_front_matter(read_file(root, file))
-        except Exception:
-            continue
+        # Only the body is needed, so the front matter isn't parsed
+        body = FRONT_MATTER.sub("", content, count=1)
         text = linkable_text(body)
         if not quick.search(text):
             continue
         # Only counts if no longer term takes the phrase, like on the site
-        linker = TermLinker(term_map, self_slugs_for(file, body, term_map))
+        linker = TermLinker(term_map, self_slugs_for(file, body, term_map), text)
         matches = linker.find(text)
         cursor = -1
         for start, end, info in sorted(matches, key=lambda m: (m[0], -m[1])):
@@ -376,14 +384,15 @@ def backlinks(root: Path, file_path: str, term_map: dict[str, TermInfo] | None =
     return result
 
 
-def render(root: Path, file_path: str) -> str | None:
+def render(root: Path, file_path: str) -> tuple[str | None, list[TermInfo] | None]:
+    """The preview of a file, if it has one, and for terms the terms linking to it."""
     file = root / file_path.lstrip("/")
     if file.suffix not in (".md", ".mdx"):
-        return None
+        return None, None
     try:
         text = read_file(root, file)
     except OSError:
-        return None
+        return None, None
 
     if not is_term(file_path):
         try:
@@ -391,14 +400,15 @@ def render(root: Path, file_path: str) -> str | None:
         except Exception:
             front_matter, body = {}, text
         content, _ = render_markdown(body, None)
-        return _page(str(front_matter.get("title") or file.stem), content)
+        return _page(str(front_matter.get("title") or file.stem), content), None
 
     issues = check_term(file, text)
     try:
         front_matter, body = split_front_matter(text)
     except Exception:
         front_matter, body = {}, FRONT_MATTER.sub("", text, count=1)
-    term_map = build_term_map(root)
+    terms = read_terms(root)
+    term_map = build_term_map(root, terms)
     linker = TermLinker(term_map, self_slugs_for(file, body, term_map))
     content, linked = render_markdown(body, linker)
 
@@ -426,7 +436,7 @@ def render(root: Path, file_path: str) -> str | None:
         header = f'<p class="summary">{html.escape(str(front_matter["description"]))}</p>' + header
 
     unique_links = list({info.slug: info for info in linked}.values())
-    linked_from = backlinks(root, file_path, term_map)
+    linked_from = backlinks(root, file_path, term_map, terms)
     relations = ""
     if unique_links:
         relations += f"<h3>Links to {len(unique_links)} terms</h3>{_term_list(sorted(unique_links, key=lambda t: t.title.lower()))}"
@@ -441,23 +451,12 @@ def render(root: Path, file_path: str) -> str | None:
         content = f"<h1>{html.escape(title)}</h1>{header}{checks}{content}"
     if relations:
         content += f'<div class="relations">{relations}</div>'
-    return _page(title, content)
+    return _page(title, content), linked_from
 
 
-# Exit code for files without a preview
-NO_PREVIEW = 3
-
-
-def main(command: str, root: str, file_path: str) -> int:
-    if command == "render":
-        page = render(Path(root), file_path)
-        if page is None:
-            return NO_PREVIEW
-        sys.stdout.write(page)
-    elif command == "usage":
-        json.dump([asdict(info) for info in backlinks(Path(root), file_path)], sys.stdout)
-    else:
-        raise ValueError(f"Unknown command: {command}")
+def main(root: str, file_path: str) -> int:
+    page, usage = render(Path(root), file_path)
+    json.dump({"html": page, "usage": None if usage is None else [asdict(info) for info in usage]}, sys.stdout)
     return 0
 
 

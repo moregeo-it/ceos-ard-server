@@ -1,12 +1,12 @@
 import json
 import logging
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
 from app.utils.sandbox import run_python
+from app.utils.workspace_cache import WorkspaceCache
 from app.workspace_types import eo_glossary_render
 from app.workspace_types.base import (
     DEFAULT_HIDDEN_PATHS,
@@ -20,7 +20,6 @@ from app.workspace_types.base import (
     WorkspaceType,
 )
 from app.workspace_types.eo_glossary_render import (
-    NO_PREVIEW,
     TERM_CLASSES,
     TERM_GROUPS,
     TERM_STATUSES,
@@ -66,18 +65,25 @@ TERM_SCHEMA = {
 
 RENDERER = Path(eo_glossary_render.__file__)
 
+# The preview and the usage of a file come from one run, whichever of them is requested first
+_rendered = WorkspaceCache()
+
 
 class RenderError(Exception):
     pass
 
 
-async def _run_renderer(command: str, workspace_path: Path, file_path: str) -> subprocess.CompletedProcess:
-    """Rendering parses every term, all of them workspace content: isolated like a build."""
-    result = await run_python(RENDERER, command, str(workspace_path), file_path, workspace=workspace_path, timeout=settings.BUILD_TIMEOUT)
-    if result.returncode not in (0, NO_PREVIEW):
-        logger.error(f"Rendering {file_path} failed: {result.stderr.decode(errors='replace')[-2000:]}")
-        raise RenderError(f"{file_path} could not be rendered")
-    return result
+async def _render(workspace_path: Path, file_path: str) -> dict[str, Any]:
+    """The preview (`html`) and usage of a file. Rendering parses every term, all of them workspace content: isolated like a build."""
+
+    async def run() -> dict[str, Any]:
+        result = await run_python(RENDERER, str(workspace_path), file_path, workspace=workspace_path, timeout=settings.BUILD_TIMEOUT)
+        if result.returncode != 0:
+            logger.error(f"Rendering {file_path} failed: {result.stderr.decode(errors='replace')[-2000:]}")
+            raise RenderError(f"{file_path} could not be rendered")
+        return json.loads(result.stdout)
+
+    return await _rendered.get(workspace_path.name, file_path, run)
 
 
 _MULTI = {"multi": True}
@@ -128,15 +134,15 @@ class EoGlossaryType(WorkspaceType):
         # OR within a filter, AND across filters
         return all(tags & values for values in filters.values())
 
-    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
-        if not is_term(file_path):
-            return None
-        result = await _run_renderer("usage", workspace_path, file_path)
-        return [{"label": info["title"], "path": info["path"]} for info in json.loads(result.stdout)]
+    def tracks_usage(self, file_path: str) -> bool:
+        return is_term(file_path)
+
+    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]]:
+        usage = (await _render(workspace_path, file_path))["usage"] or []
+        return [{"label": info["title"], "path": info["path"]} for info in usage]
 
     async def render_file(self, workspace_path: Path, file_path: str) -> str | None:
-        result = await _run_renderer("render", workspace_path, file_path)
-        return None if result.returncode == NO_PREVIEW else result.stdout.decode()
+        return (await _render(workspace_path, file_path))["html"]
 
     async def run_action(self, workspace_path: Path, action: str, data: dict[str, Any], author: str) -> ActionResult:
         if action != "new-term":

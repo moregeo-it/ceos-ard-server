@@ -136,12 +136,21 @@ async def run_exclusive(workspace_id: str, fn: Callable[[], Awaitable[T]]) -> T:
         raise
 
 
+_generations: dict[str, int] = {}
+
+
+def workspace_generation(workspace_id: str) -> int:
+    """Changes after every transaction of the workspace, so results read from it before are outdated."""
+    return _generations.get(workspace_id, 0)
+
+
 async def _run_locked(workspace_id: str, fn: Callable[[], Awaitable[T]]) -> T:
     async with workspace_locks(workspace_id):
         lock = await _acquire_workspace_file_lock(workspace_id)
         try:
             return await fn()
         finally:
+            _generations[workspace_id] = workspace_generation(workspace_id) + 1
             lock.release()
 
 
