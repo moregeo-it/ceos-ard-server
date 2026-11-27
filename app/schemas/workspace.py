@@ -192,7 +192,11 @@ class FileUsage(BaseModel):
 
 
 class FileContextResponse(FileResponse):
-    usage: list[FileUsage] | None
+    tracks_usage: bool = Field(description="Whether GET .../usage knows the files that use this file")
+
+
+class FileUsageResponse(BaseModel):
+    usage: list[FileUsage]
 
 
 class FileSearchResponse(BaseModel):

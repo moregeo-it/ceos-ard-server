@@ -1,3 +1,4 @@
+import shutil
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -121,12 +122,34 @@ def test_search_skips_other_file_types(client, workspace):
         ("/README.md", None),
     ],
 )
-def test_context_lists_the_pfs_using_a_requirement(client, workspace, path, usage):
+def test_usage_lists_the_pfs_using_a_requirement(client, workspace, path, usage):
     response = client.get(file_url(workspace, "context", path))
     assert response.status_code == 200, response.text
     context = response.json()
     assert context["path"] == path
-    assert (sorted(context["usage"], key=lambda item: item["label"]) if context["usage"] is not None else None) == usage
+    assert context["tracks_usage"] == (usage is not None)
+
+    response = client.get(file_url(workspace, "usage", path))
+    if usage is None:
+        assert response.status_code == 404, response.text
+    else:
+        assert response.status_code == 200, response.text
+        assert sorted(response.json()["usage"], key=lambda item: item["label"]) == usage
+
+
+def test_folders_do_not_track_usage(client, workspace):
+    response = client.get(file_url(workspace, "context", "/requirements/general"))
+    assert response.status_code == 200, response.text
+    assert response.json()["tracks_usage"] is False
+
+
+def test_requirements_are_unused_without_pfs(client, workspace):
+    with SessionLocal() as db:
+        root = db.get(GitWorkspace, workspace["id"]).abs_path
+    shutil.rmtree(root / "pfs")
+    response = client.get(file_url(workspace, "usage", "/requirements/general/metadata-machine-readable.yaml"))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"usage": []}
 
 
 def test_files_open_even_if_their_usage_fails(client, workspace, monkeypatch):
@@ -134,9 +157,12 @@ def test_files_open_even_if_their_usage_fails(client, workspace, monkeypatch):
         raise ValueError("A PFS document that can't be parsed")
 
     monkeypatch.setattr(CeosArdType, "_requirement_usage", fail)
-    response = client.get(file_url(workspace, "context", "/requirements/general/unused.yaml"))
+    path = "/requirements/general/unused.yaml"
+    response = client.get(file_url(workspace, "context", path))
     assert response.status_code == 200, response.text
-    assert response.json()["usage"] is None
+    assert response.json()["tracks_usage"] is True
+    response = client.get(file_url(workspace, "usage", path))
+    assert response.status_code == 500, response.text
 
 
 def test_create_rename_and_delete_files(client, workspace):
@@ -241,7 +267,7 @@ def test_files_too_large_to_hold_in_memory_are_not_read(client, workspace, monke
     assert response.status_code == 413, response.text
     assert names(client.get(f"/workspaces/{workspace['id']}/search", params={"query": "needle"})) == []
     # The PFS whose document can't be read is left out
-    response = client.get(file_url(workspace, "context", "/requirements/general/metadata-machine-readable.yaml"))
+    response = client.get(file_url(workspace, "usage", "/requirements/general/metadata-machine-readable.yaml"))
     assert response.json()["usage"] == [{"label": "NRB", "path": "/pfs/NRB/document.yaml"}]
 
 

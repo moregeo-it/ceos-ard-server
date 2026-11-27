@@ -169,6 +169,7 @@ REQUIREMENTS_FILE = "requirements.txt"
 # The first version ceos-org/ceos-ard pinned in requirements.txt
 MIN_CLI_VERSION = Version("0.4.0")
 MAX_REQUIREMENTS_SIZE = 4096
+REQUIREMENT_PATH = re.compile(r"^[\\/]?requirements[\\/](.+)\.ya?ml$")
 
 
 def cli_version(workspace_path: Path, installed: Iterable[str] = ()) -> str:
@@ -379,20 +380,19 @@ class CeosArdType(WorkspaceType):
         file_type = FILE_TYPES.get(file_path.lstrip("/").split("/")[0])
         return all(file_type in values for values in filters.values())
 
-    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
+    def tracks_usage(self, file_path: str) -> bool:
+        # TODO: implement for glossary, sections, references as well
+        return REQUIREMENT_PATH.match(file_path) is not None
+
+    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]]:
         return await asyncio.to_thread(self._requirement_usage, workspace_path, file_path)
 
-    def _requirement_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
-        match = re.match(r"^[\\/]?requirements[\\/](.+)\.ya?ml$", file_path)
-        if not match:
-            # TODO: implement for glossary, sections, references as well
-            return None
-
-        requirement_name = match.group(1)
+    def _requirement_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]]:
+        requirement_name = REQUIREMENT_PATH.match(file_path).group(1)
 
         pfs_dir = workspace_path / "pfs"
         if not pfs_dir.exists() or not pfs_dir.is_dir():
-            return None
+            return []
 
         usage = []
         for pfs_folder in pfs_dir.iterdir():
@@ -404,7 +404,7 @@ class CeosArdType(WorkspaceType):
                 continue
 
             try:
-                # Cached (read-only use): parsed on the loop on every /context request
+                # Cached (read-only use): parsed on every /usage request
                 document = load_yaml_cached(document_file, PlainStringSafeLoader)
                 categories = document.get("requirements", [])
             except Exception as e:
