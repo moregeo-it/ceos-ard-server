@@ -1400,7 +1400,8 @@ paths:
     get:
       summary: Get the files that use a file
       description: |-
-        Lists the files that use the specified file, e.g. the PFS that include a requirement.
+        Lists the files that use the specified file, e.g. the PFS that include a requirement or
+        the glossary terms that link to a term.
 
         Only for files whose context (`GET /workspaces/{workspaceId}/context/{filePath}`) has
         `tracks_usage`. This can take a while for some workspace types.

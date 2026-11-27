@@ -24,3 +24,11 @@ types:
       pfs_types: [SAR, Optical]
       # The version of new PFS
       default_version: 1.0.0
+
+  # The CEOS EO Glossary, e.g. a demo copy for demonstrations
+  # - id: eo-glossary
+  #   module: eo_glossary
+  #   upstream:
+  #     owner: ceos-org
+  #     repo: eo-glossary
+  #     branch: main
