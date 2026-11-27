@@ -17,6 +17,7 @@ from app.schemas.workspace import (
     FilePatchRequest,
     FileResponse,
     FileSearchResponse,
+    FileUsageResponse,
     ListDiffsResponse,
 )
 from app.services.auth_service import require_github_user
@@ -258,3 +259,21 @@ async def get_file_context(
 ):
     with internal_errors("get file context", logger):
         return await file_service.get_file_context(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)
+
+
+@router.get(
+    "/{workspace_id}/usage/{file_path:path}",
+    summary="Get the files that use a file",
+    description="The files that use a file whose context has `tracks_usage`",
+    response_model=FileUsageResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_file_usage(
+    file_path: str,
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    file_service: FileService = Depends(get_file_service),
+    current_user: dict[str, Any] = Depends(require_github_user),
+):
+    with internal_errors("get file usage", logger):
+        return await file_service.get_file_usage(db=db, file_path=file_path, workspace_id=workspace_id, user_id=current_user["user"].id)

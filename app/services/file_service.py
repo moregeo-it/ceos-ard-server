@@ -808,24 +808,28 @@ class FileService:
         target_path = validate_workspace_path(file_path, workspace.abs_path, rules=workspace.workspace_type.paths)
         rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
         repo = get_repo(workspace.abs_path)
-
-        workspace_type = workspace.workspace_type
-        try:
-            if workspace_type.usage_in_sandbox:
-                async with user_build_locks(user_id):
-                    usage = await workspace_type.file_usage(workspace.abs_path, rel_file_path)
-            else:
-                usage = await workspace_type.file_usage(workspace.abs_path, rel_file_path)
-        except Exception as e:
-            # The file still opens, just without its usage
-            logger.warning(f"Usage of {rel_file_path} in workspace {workspace_id} failed: {e}")
-            usage = None
         file_status = get_file_status(repo, target_path)
+        is_directory = target_path.exists() and target_path.is_dir()
 
         return {
             "name": target_path.name,
-            "is_directory": target_path.exists() and target_path.is_dir(),
+            "is_directory": is_directory,
             "status": file_status,
             "path": rel_file_path,
-            "usage": usage,
+            "tracks_usage": not is_directory and workspace.workspace_type.tracks_usage(rel_file_path),
         }
+
+    async def get_file_usage(self, db: Session, file_path: str, workspace_id: str, user_id: str):
+        workspace = self.workspace_service.get_workspace_by_id(db, workspace_id, user_id)
+        target_path = validate_workspace_path(file_path, workspace.abs_path, exists=True, type="file", rules=workspace.workspace_type.paths)
+        rel_file_path = normalize_workspace_path(target_path, workspace.abs_path)
+
+        workspace_type = workspace.workspace_type
+        if not workspace_type.tracks_usage(rel_file_path):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The usage of this file is not tracked")
+        if workspace_type.usage_in_sandbox:
+            async with user_build_locks(user_id):
+                usage = await workspace_type.file_usage(workspace.abs_path, rel_file_path)
+        else:
+            usage = await workspace_type.file_usage(workspace.abs_path, rel_file_path)
+        return {"usage": usage}

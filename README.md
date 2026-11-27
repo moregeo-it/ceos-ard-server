@@ -275,7 +275,7 @@ configuration and the rules are checked when the server starts, so a typo stops 
 | `actions` | Entries in the file menu of a folder, e.g. "Add New PFS": a generic dialog asks for the input with the action's `schema`, or the form `action_form()` derives from it, e.g. with options from the workspace; `run_action()` creates the file or folder, which is staged, and names the file the editor opens |
 | `names` | Names new and renamed files and folders must have, e.g. PFS folders named by their id |
 | `file_menu` | Which operations the file menu offers, see below |
-| `file_usage()` | Which files use a file, for "Used in" and the delete dialog |
+| `tracks_usage()`, `file_usage()` | Which files use a file, for "Used in" and the delete dialog: `tracks_usage()` decides from the path whether `file_usage()` knows it |
 
 Globs match workspace paths without a leading slash: `*` matches within a folder, `**` across folders,
 and a `**/` prefix matches any folder or none (`**/a.md` matches `a.md` and `x/a.md`, not `xa.md`).

@@ -190,8 +190,13 @@ class WorkspaceType:
             operations |= set(rule.ops_if_new)
         return operations
 
-    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]] | None:
-        return None
+    def tracks_usage(self, file_path: str) -> bool:
+        """Whether file_usage() knows the files that use this file, from its path alone, so that it is cheap."""
+        return False
+
+    async def file_usage(self, workspace_path: Path, file_path: str) -> list[dict[str, str]]:
+        """The files that use a file that tracks_usage() accepts."""
+        raise NotImplementedError
 
     # Whether file_usage() runs in the build sandbox, and so waits for the user's running builds
     usage_in_sandbox: ClassVar[bool] = False

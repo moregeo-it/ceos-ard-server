@@ -122,7 +122,7 @@ def test_usage_of_pfs_does_not_wait_for_builds(client, workspace, monkeypatch):
         raise AssertionError("CEOS-ARD reads its usage without the build lock")
 
     monkeypatch.setattr(file_service, "user_build_locks", locked)
-    response = client.get(file_url(workspace, "context", "/requirements/general/metadata-machine-readable.yaml"))
+    response = client.get(file_url(workspace, "usage", "/requirements/general/metadata-machine-readable.yaml"))
     assert response.status_code == 200, response.text
     assert [item["label"] for item in response.json()["usage"]] == ["NRB", "SR"]
 

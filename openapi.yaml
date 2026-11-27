@@ -1354,8 +1354,8 @@ paths:
       description: |-
         Retrieves the context for a specific file, if available.
 
-        This is currently a list of files that use the specified file, e.g. the PFS that include a
-        requirement.
+        This is currently whether the server knows the files that use the specified file,
+        which `GET /workspaces/{workspaceId}/usage/{filePath}` then lists.
 
         The endoint shall only return files that are made available through
         `GET /workspaces/{workspaceId}/files`. Other files, e.g. withing `.git`
@@ -1376,31 +1376,73 @@ paths:
                   - $ref: '#/components/schemas/FileItem'
                   - type: object
                     required:
-                      - usage
+                      - tracks_usage
                     properties:
-                      usage:
+                      tracks_usage:
+                        type: boolean
                         description: |-
-                          List of files that use the specified file.
-
-                          Returns an empty array if the file is not used.
-                          Returns `null` if the information is not available / unknown.
-                        type:
-                          - array
-                          - 'null'
-                        items:
-                          type: object
-                          required:
-                            - label
-                            - path
-                          properties:
-                            label:
-                              type: string
-                              description: Name of the file that uses the specified file, e.g. a PFS ID
-                            path:
-                              type: string
-                              description: Path of the file that uses the specified file
+                          Whether the server knows the files that use the specified file, e.g. the PFS
+                          that include a requirement. Decided from the path alone: the file may still be unused.
         '404':
           description: Workspace or file not found, or no diff available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspaceId}/usage/{filePath}:
+    get:
+      summary: Get the files that use a file
+      description: |-
+        Lists the files that use the specified file, e.g. the PFS that include a requirement.
+
+        Only for files whose context (`GET /workspaces/{workspaceId}/context/{filePath}`) has
+        `tracks_usage`. This can take a while for some workspace types.
+      operationId: getFileUsage
+      tags:
+        - Files
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '200':
+          description: The files that use the specified file
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - usage
+                properties:
+                  usage:
+                    type: array
+                    description: The files that use the specified file, empty if it is not used
+                    items:
+                      type: object
+                      required:
+                        - label
+                        - path
+                      properties:
+                        label:
+                          type: string
+                          description: Name of the file that uses the specified file, e.g. a PFS ID
+                        path:
+                          type: string
+                          description: Path of the file that uses the specified file
+        '404':
+          description: Workspace or file not found, or the usage of the file is not tracked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The usage could not be determined, e.g. a file that uses it can't be parsed
           content:
             application/json:
               schema:
